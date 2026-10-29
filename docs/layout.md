@@ -25,8 +25,8 @@ typesafe_computer_use/
   report.py       logging, annotated screenshots, payload dump
   timing.py       phase stopwatches, the timing line, run summary
   cli.py          `clicker` and `clicker-inspect`
-  osworld/        jev as an OSWorld agent (see [OSWorld](osworld.md))
-    agent.py      `JevAgent`: OSWorld's reset() and predict(), jev's loop on a worker thread
+  osworld/        the agent in OSWorld (see [OSWorld](osworld.md))
+    agent.py      `JevAgent`: OSWorld's reset() and predict(), the step loop on a worker thread
     desktop.py    the adapter over OSWorld's observation: screenshots in, pyautogui code out
     a11y.py       the Ubuntu accessibility tree OSWorld returns, in AX terms
     ocr.py        the OCR backends a run names

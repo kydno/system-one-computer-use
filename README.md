@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="typesafe-computer-use" width="100%">
+  <img src="docs/banner.svg" alt="system-one-computer-use" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/awlevin/typesafe-computer-use/actions/workflows/ci.yaml"><img alt="CI" src="https://github.com/awlevin/typesafe-computer-use/actions/workflows/ci.yaml/badge.svg"></a>
+  <a href="https://github.com/kydno/system-one-computer-use/actions/workflows/ci.yaml"><img alt="CI" src="https://github.com/kydno/system-one-computer-use/actions/workflows/ci.yaml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white">
   <img alt="macOS, Windows experimental" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20(experimental)-000000">
@@ -11,10 +11,14 @@
   <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
 </p>
 
-**typesafe-computer-use** (jev for short) drives a Mac toward a goal you type in plain English,
-for about a fiftieth of a cent per step. It reads the screen deterministically, asks a small
-classifier which action comes next, and only calls a writing model when a text field genuinely
-needs free text or the classifier has stopped and the screen needs reading.
+**System One Computer Use** drives a Mac toward a goal you type in plain English, for about a
+fiftieth of a cent per step. It reads the screen deterministically, asks a small classifier which
+action comes next, and only calls a writing model when a text field genuinely needs free text or
+the classifier has stopped and the screen needs reading.
+
+The classifier is **Jev**, TypeSafe's decision model, the first of its System One models. Jev is
+the model, not this project: this project is the loop around it, which reads the screen, builds the
+options Jev chooses between, and carries out what it picks.
 
 One idea runs through it: the classifier picks, code decides facts, and the writer only writes
 free text. Anything a model would have to work out (a date, whether a field is focused, whether
@@ -26,7 +30,8 @@ clicker "go to techcrunch and take me to the checkout page for the cheapest tick
 ```
 
 > **Beta.** This is under heavy development. Expect rough edges, and expect settings and
-> behavior to change between 0.x [releases](https://github.com/awlevin/typesafe-computer-use/releases).
+> behavior to change between 0.x [releases](https://github.com/awlevin/typesafe-computer-use/releases)
+> of the upstream project, `typesafe-computer-use`.
 > It drives your real mouse and keyboard, so start with a dry run.
 
 ## Why a classifier
@@ -35,14 +40,14 @@ Frontier-model computer use is capable and expensive: every step ships a screens
 waits several seconds for a plan. Most steps do not need a plan. They need one choice
 from a short list, made quickly and cheaply, with a confidence number you can gate on.
 
-[TypeSafe](https://docs.typesafe.ai) sells exactly that: a decision model that answers
+[TypeSafe](https://docs.typesafe.ai) sells exactly that: Jev, a decision model that answers
 a `Choice` over up to 255 options with a full probability distribution and a calibrated
 confidence, in a few hundred milliseconds, with free output tokens. This project is a
 computer-use loop built around it.
 
 Measured on the same screenshot and goal, one decision each:
 
-| | typesafe (jev) | Claude Opus 5, bare screenshot | multiplier |
+| | System One Computer Use (Jev) | Claude Opus 5, bare screenshot | multiplier |
 |---|---|---|---|
 | input tokens | 4,882 | 4,785 | same |
 | cost per decision | $0.0002 | $0.032 | 155x cheaper |
@@ -62,8 +67,8 @@ macOS 14 or newer, Python 3.12 or newer, [uv](https://docs.astral.sh/uv/). Windo
 are experimental; see [Windows](docs/windows.md).
 
 ```
-git clone https://github.com/awlevin/typesafe-computer-use
-cd typesafe-computer-use
+git clone https://github.com/kydno/system-one-computer-use
+cd system-one-computer-use
 uv sync
 cp .env.example .env     # fill in the keys
 ```
@@ -109,7 +114,8 @@ and the writer then reads the screen and prints the answer. Every run writes
    labelled controls from the accessibility tree, which sees the icons OCR cannot.
 2. Code adds the facts: the date on any block and how far off it is, the row of a repeated
    label, the focused field, the app and URL, and the actions already tried on this screen.
-3. One decision request (OpenRouter or TypeSafe) answers three `Choice`s: which kind of action, which item, which site.
+3. One request to the decision model (Jev by default, through OpenRouter or TypeSafe) answers
+   three `Choice`s: which kind of action, which item, which site.
 4. The action runs deterministically, the loop waits, and the next capture is the only witness
    of what it did.
 5. When the classifier stops, the writer reads the screen and answers, or hands the run back
@@ -120,9 +126,9 @@ The full walk, with the OCR cost, the tree walk, the action space, and the stop 
 
 ## Benchmark
 
-jev runs as an agent in [OSWorld](https://github.com/xlang-ai/OSWorld-V2), a benchmark of real
+The agent runs in [OSWorld](https://github.com/xlang-ai/OSWorld-V2), a benchmark of real
 desktop tasks, beside OSWorld's own GPT agent on the same task. `scripts/osworld setup` fetches
-OSWorld and installs jev beside it; `scripts/osworld run-jev chrome/<task id> --ocr rapidocr`
+OSWorld and installs this project beside it; `scripts/osworld run-jev chrome/<task id> --ocr rapidocr`
 runs one task. It needs a Linux host with KVM; see [OSWorld](docs/osworld.md) for that and for
 a one-command machine in Google Cloud.
 

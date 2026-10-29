@@ -1,7 +1,9 @@
 # How a step works
 
-A step reads the screen, adds the facts code can decide, asks the decision model one question in three
-parts, and acts. This page follows it from the capture to the stop that ends a run.
+A step reads the screen, adds the facts code can decide, asks the decision model one question in
+three parts, and acts. This page follows it from the capture to the stop that ends a run. "The
+classifier" below always means the decision model: Jev, TypeSafe's, by default, or another one
+from [decision models](decision-models.md). The writer is a separate text model.
 
 ```
 screencapture ─► Vision OCR ─► merge lines into blocks ─► drop lines echoing the goal
