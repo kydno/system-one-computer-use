@@ -20,7 +20,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ..decisions import DecisionClient
+from ..decisions import DecisionClient, DecisionError
 from ..writer import Writer, compose_browser_text, compose_url, looks_credential
 from . import act
 from .decide import Decision, available_actions, decide, field_context, verify_typed
@@ -179,15 +179,22 @@ def run_goal(
         element_criteria_map = {str(e.index): e.label() for e in page.items}
 
         t0 = time.perf_counter()
-        decision: Decision = decide(
-            client,
-            goal,
-            page,
-            history,
-            allow_type=allow_type,
-            can_write=can_write,
-            model=model,
-        )
+        try:
+            decision: Decision = decide(
+                client,
+                goal,
+                page,
+                history,
+                allow_type=allow_type,
+                can_write=can_write,
+                model=model,
+            )
+        except DecisionError as e:
+            # A refusal or an outage is not a guess to act on: the run ends without one.
+            if verbose:
+                print(f"step {n}: no decision ({e})", flush=True)
+            result.outcome = "no_decision"
+            break
         decide_ms = (time.perf_counter() - t0) * 1000
 
         if runfolder is not None:
@@ -236,13 +243,17 @@ def run_goal(
             else:
                 act.type_text(session, int(target.index), text)
                 value_now = act.field_value(session, int(target.index))
-                ok = verify_typed(client, goal, target.label(), text, value_now, model=model)
-                if ok < 0.5:
-                    act.clear_field(session, int(target.index))
-                    detail = f"type {text!r} -> verify {ok:.2f}, cleared"
-                    noops += 1
+                try:
+                    ok = verify_typed(client, goal, target.label(), text, value_now, model=model)
+                except DecisionError as e:
+                    detail = f"type {text!r} -> not verified ({e})"
                 else:
-                    detail = f"type {text!r} -> verify {ok:.2f}"
+                    if ok < 0.5:
+                        act.clear_field(session, int(target.index))
+                        detail = f"type {text!r} -> verify {ok:.2f}, cleared"
+                        noops += 1
+                    else:
+                        detail = f"type {text!r} -> verify {ok:.2f}"
         elif kind == "press_enter":
             detail = act.press(session, "enter")
         elif kind == "press_escape":

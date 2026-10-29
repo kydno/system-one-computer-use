@@ -1,7 +1,20 @@
 # Agent rules
 
-Read [VISION.md](VISION.md) first: what jev is for, in a dozen lines. Weigh every design choice
-against it.
+Read [VISION.md](VISION.md) first: what System One Computer Use is for, in a dozen lines. Weigh every
+design choice against it.
+
+## Names
+
+- **Jev** is TypeSafe's decision model, the first of its System One models. It is the classifier
+  that picks each action by default, reached through `client.system_one` in `decide.py`. It is not
+  this project, and nothing in this repo decides which option fits the goal: Jev does, or another
+  decision model on OpenRouter standing in for it (see `docs/decision-models.md`).
+- **System One Computer Use** is this project: the loop around Jev. It reads the screen, builds the
+  options Jev chooses between, carries out the choice, and hands off to the writer model.
+- Some names predate this split and still say jev or typesafe for the project: the package
+  `typesafe_computer_use`, `JevAgent`, `run-jev`, the `jev/` run folder in OSWorld results, and the
+  `JEV_OSWORLD_*` variables. They name the agent, not the model. Do not call the project jev in new
+  prose.
 
 This tool drives a real computer. When you work on it, you are almost always on the
 maintainer's own Mac, often while they are using it.
@@ -36,7 +49,7 @@ resources, or spend money, still get a yes first.
 
 ## OSWorld
 
-`scripts/osworld setup` fetches OSWorld and installs it and jev into `.osworld/`, and
+`scripts/osworld setup` fetches OSWorld and installs it and this project into `.osworld/`, and
 `scripts/osworld results` reads result files. Neither needs approval. `scripts/osworld run-jev`,
 `run-luna`, and anything else that starts an OSWorld VM, here or in the cloud, need approval for
 each command.

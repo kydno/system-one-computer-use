@@ -18,7 +18,7 @@ from typesafe_computer_use.browser.decide import base_state, decide, element_cri
 from typesafe_computer_use.browser.perceive import INTERACTIVE_JS, perceive, to_json
 from typesafe_computer_use.browser.report import RunFolder, load_step
 from typesafe_computer_use.browser.runner import run_goal, typing_target
-from typesafe_computer_use.decisions import Choice, ChoiceAnswer, Noul, NoulAnswer
+from typesafe_computer_use.decisions import Choice, ChoiceAnswer, DecisionError, Noul, NoulAnswer
 
 SECRET = "hunter2-do-not-leak"
 
@@ -291,6 +291,38 @@ def test_the_writer_types_into_an_ordinary_field_and_the_step_says_so(tmp_path):
     assert result.steps[0].text_source == "writer"
     assert "text=writer" in result.steps[0].line()
     assert load_step(folder.root, 1)["can_write"] is True
+
+
+class Refusing(FakeTypeSafe):
+    """The classifier, refusing the questions named in `refuse`."""
+
+    def __init__(self, *steps, refuse: set[str]):
+        super().__init__(*steps)
+        self.refuse = refuse
+
+    def system_one(self, *, state, questions, model=None):
+        if self.refuse & set(questions):
+            self.requests.append({"state": state, "questions": questions})
+            raise DecisionError("the model refused")
+        return super().system_one(state=state, questions=questions, model=model)
+
+
+def test_a_step_without_a_decision_ends_the_run_and_acts_on_nothing(tmp_path):
+    browser = FakeBrowser(login_page())
+    result, _ = run(browser, Refusing(("click", "0"), refuse={"kind"}), tmp_path)
+
+    assert result.outcome == "no_decision"
+    assert result.steps == []
+    assert browser.typed == []
+
+
+def test_typed_text_that_cannot_be_checked_stays_and_says_so(tmp_path):
+    browser = FakeBrowser(login_page(), values={0: "alice"})
+    writer = FakeWriter({"fill": True, "text": "alice", "reason": "the goal"})
+    result, _ = run(browser, Refusing(("type_text", "0"), refuse={"ok"}), tmp_path, writer=writer, steps=1)
+
+    assert browser.typed == ["alice"]
+    assert "not verified" in result.steps[0].detail
 
 
 def test_navigate_opens_only_the_writers_https_address(tmp_path):
