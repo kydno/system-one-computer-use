@@ -12,3 +12,5 @@ infra/gcp/.terraform/
 infra/gcp/terraform.tfvars
 infra/gcp/*.tfstate*
 results/
+menubar/.build/
+menubar/SystemOne.app/

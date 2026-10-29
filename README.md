@@ -103,6 +103,13 @@ the screen. The loop also stops itself on `done`, low confidence, a stall, or th
 and the writer then reads the screen and prints the answer. Every run writes
 `runs/<timestamp>/`, so a stall can be [replayed offline](docs/run-folder.md).
 
+## From the menu bar
+
+`menubar/` is a menu bar app for the same runs: click its icon, type a goal, and it works in the
+app you were in, with no terminal on screen to clear. A question or the answer comes back in the
+panel. It needs macOS 26; `menubar/Scripts/run.sh` builds and opens it. See
+[menu bar app](docs/menu-bar.md).
+
 ## How a step works
 
 1. The screen is read deterministically: Vision OCR on a crop of the frontmost window, plus the
@@ -133,6 +140,7 @@ a one-command machine in Google Cloud.
 - [Browser backend](docs/browser-backend.md): DOM perception over Chrome DevTools, no OCR, no screen permission
 - [Decision models](docs/decision-models.md): OpenRouter or TypeSafe, and the models that answer
 - [Writer endpoints](docs/writer-endpoints.md): every writer variable, and other models over the Anthropic or OpenAI API
+- [Menu bar app](docs/menu-bar.md): runs from the menu bar, and `clicker --events` for any front end
 - [Windows](docs/windows.md): the experimental adapter and how it differs from macOS
 - [OSWorld](docs/osworld.md): setup, the two run commands, results, and the Google Cloud machine
 - [Layout](docs/layout.md): every module and what it owns

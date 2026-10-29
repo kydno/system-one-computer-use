@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config
 from .actions import Context
 from .decisions import Endpoint, endpoint
+from .events import Events
 from .perception import capture, perceive
 from .platform_adapter import desktop
 from .report import annotate, ax_count, render_payload
@@ -60,23 +61,33 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--image", type=Path, help="replay a saved capture instead of the live screen (never acts)")
     parser.add_argument("--app", help="frontmost app to report during replay")
     parser.add_argument("--url", help="browser URL to report during replay")
+    parser.add_argument(
+        "--events",
+        action="store_true",
+        help="report as JSON lines on stdout and read replies to questions from stdin, for a front end such as the menu bar app",
+    )
     args = parser.parse_args(argv)
+    events = Events() if args.events else None
+    say = print if events is None else events.line
 
-    print(f"classifier: {_prepare().describe()}")
+    say(f"classifier: {_prepare().describe()}")
     if args.act and not desktop.accessibility_trusted():
-        sys.exit("this terminal lacks Accessibility permission; grant it in System Settings > Privacy & Security")
+        sys.exit(
+            "this terminal, or the app that started clicker, lacks Accessibility permission; "
+            "grant it in System Settings > Privacy & Security"
+        )
     try:
         writer = make_writer()
         config.writer_vision()  # a bad value stops the run here, not at its first stop
     except ValueError as e:
         sys.exit(str(e))
     if writer is None:
-        print(
+        say(
             "writer disabled: no OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL; "
             "type_text, writer-proposed URLs and the final answer need one"
         )
     else:
-        print(f"writer: {provider(writer)}")
+        say(f"writer: {provider(writer)}")
 
     cfg = RunConfig(
         goal=args.goal,
@@ -91,6 +102,9 @@ def main(argv: list[str] | None = None) -> None:
         url=args.url,
     )
 
+    # A front end can always answer; a terminal only when someone is at it.
+    ask = events.ask if events is not None else ask_user if sys.stdin.isatty() else None
+
     def ctx_factory(typesafe, history):
         return Context(
             goal=args.goal,
@@ -99,10 +113,10 @@ def main(argv: list[str] | None = None) -> None:
             typesafe=typesafe,
             writer=writer,
             history=history,
-            ask=ask_user if sys.stdin.isatty() else None,
+            ask=ask,
         )
 
-    state = run(cfg, ctx_factory)
+    state = run(cfg, ctx_factory, events)
     if state.outcome.startswith("aborted"):
         sys.exit(130)
 

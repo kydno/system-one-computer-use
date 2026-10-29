@@ -16,6 +16,14 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest -q
 
+  # The menu bar app compiles. It needs the macOS 26 SDK for Liquid Glass; nothing runs it here.
+  menubar:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: swift build --package-path menubar
+      - run: for script in menubar/Scripts/*.sh; do bash -n "$script"; done
+
   # The test suite is pure logic, so it runs anywhere; tests/conftest.py stands in for the
   # macOS-only modules (Quartz, ApplicationServices, ocrmac) that cannot be installed here.
   # The lock marks every platform-only package, so this installs exactly the locked versions

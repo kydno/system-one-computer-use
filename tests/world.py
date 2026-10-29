@@ -24,6 +24,7 @@ from PIL import Image
 from typesafe_computer_use import actions, runner
 from typesafe_computer_use.actions import Context
 from typesafe_computer_use.decisions import Noul
+from typesafe_computer_use.events import Events
 from typesafe_computer_use.models import AxNode, Field, Item, Popup, Screen
 from typesafe_computer_use.platform_adapter import desktop
 from typesafe_computer_use.runner import RunConfig, RunState, run
@@ -510,17 +511,20 @@ def drive(
     noul: float = 0.95,
     replies: list[str] | None = None,
     handoffs: int | None = None,
+    events: Events | None = None,
+    act: bool = True,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
     `replies` are what the user types when the writer asks, in order; with none, nobody is at the
     terminal and the writer is told so. `world.asked` collects the questions that were put.
+    With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
     fake = FakeTypeSafe(policy, noul)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
-    cfg = RunConfig(goal=goal, out=tmp_path / "run", act=True, steps=steps, delay=0)
+    cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)
     if handoffs is not None:
         cfg.handoffs = handoffs
     client = writer or FakeWriter()
@@ -528,7 +532,7 @@ def drive(
 
     def ask(question: str) -> str:
         world.asked.append(question)
-        return left.pop(0) if left else ""
+        return events.ask(question) if events is not None else left.pop(0) if left else ""
 
     return run(
         cfg,
@@ -539,6 +543,7 @@ def drive(
             typesafe=typesafe,
             writer=client,
             history=history,
-            ask=ask if replies is not None else None,
+            ask=ask if replies is not None or events is not None else None,
         ),
+        events,
     )

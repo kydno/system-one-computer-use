@@ -25,6 +25,7 @@ typesafe_computer_use/
   report.py       logging, annotated screenshots, payload dump
   timing.py       phase stopwatches, the timing line, run summary
   cli.py          `clicker` and `clicker-inspect`
+  events.py       `clicker --events`: the run as JSON lines, replies on stdin
   osworld/        jev as an OSWorld agent (see [OSWorld](osworld.md))
     agent.py      `JevAgent`: OSWorld's reset() and predict(), jev's loop on a worker thread
     desktop.py    the adapter over OSWorld's observation: screenshots in, pyautogui code out
@@ -50,6 +51,7 @@ tests/            pure logic: dates, merging, reading order, echo filter, config
 osworld_overlay/  what `scripts/osworld setup` copies into OSWorld: the agent module and
                   the runner that builds it
 scripts/          `sandbox` and `osworld`
+menubar/          SystemOne.app, the menu bar front end, in Swift (see [menu bar app](menu-bar.md))
 ```
 
 A Linux port adds a third adapter over xdotool, AT-SPI, and PaddleOCR or RapidOCR, and one line

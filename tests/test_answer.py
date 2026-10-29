@@ -34,9 +34,20 @@ def context(writer=None) -> Context:
     return Context(goal=GOAL, browser="Google Chrome", email=None, typesafe=None, writer=writer, history=[])
 
 
+class Recorded(runner.Log):
+    """A log that keeps its lines instead of printing them."""
+
+    def __init__(self):
+        super().__init__()
+        self.lines: list[str] = []
+
+    def __call__(self, msg: str = "", echo: bool = True) -> None:
+        self.lines.append(msg)
+
+
 def logged() -> tuple[list[str], runner.Log]:
-    lines: list[str] = []
-    return lines, lambda msg="", echo=True: lines.append(msg)
+    log = Recorded()
+    return log.lines, log
 
 
 def test_the_answer_request_carries_the_capture_and_the_run(screen, make_item, monkeypatch):
@@ -206,7 +217,14 @@ def test_a_writer_that_fails_costs_the_answer_and_not_the_run(tmp_path, screen):
 
 
 def decision(kind: str, confidence: float = 0.9) -> SimpleNamespace:
-    return SimpleNamespace(kind=SimpleNamespace(choice=kind), stops=kind in ("done", "none"), confidence=confidence, chosen=kind)
+    return SimpleNamespace(
+        kind=SimpleNamespace(choice=kind),
+        stops=kind in ("done", "none"),
+        confidence=confidence,
+        chosen=kind,
+        clicking=False,
+        pressing_offscreen=False,
+    )
 
 
 @pytest.mark.parametrize(

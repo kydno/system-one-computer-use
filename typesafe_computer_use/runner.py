@@ -12,6 +12,7 @@ from .calls import Calls, MeteredClassifier, MeteredWriter
 from .config import DEFAULT_DELAY, DEFAULT_HANDOFFS, DEFAULT_MIN_CONFIDENCE, DEFAULT_STEPS, MAX_OPTIONS
 from .decide import Decision, decide, offscreen_records
 from .decisions import DecisionClient, DecisionError
+from .events import Events
 from .models import Abort, Guidance, Item, Screen, Signature, same_screen, signature
 from .perception import OcrCache, capture, perceive
 from .platform_adapter import desktop
@@ -96,11 +97,15 @@ class RunState:
     calls: Calls = field(default_factory=Calls)  # requests to each model, over the whole run
 
 
-def run(cfg: RunConfig, ctx_factory) -> RunState:
-    """Drive the loop. ctx_factory(typesafe, history) builds the action Context."""
+def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
+    """Drive the loop. ctx_factory(typesafe, history) builds the action Context.
+
+    With `events`, the run reports to a front end as it goes instead of printing (see events.py).
+    """
     cfg.out.mkdir(parents=True, exist_ok=True)
-    log = Log(cfg.out / "run.log")
+    log = Log(cfg.out / "run.log", events)
     log(f"run folder: {cfg.out}")
+    log.event("run", folder=str(cfg.out), act=cfg.act)
     if cfg.act:
         log(f"driving the machine. abort: {desktop.abort_hint()}.")
 
@@ -142,6 +147,7 @@ def run(cfg: RunConfig, ctx_factory) -> RunState:
         (cfg.out / "run.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         log(f"{state.calls.line()}  handoffs {len(state.handoffs)}  questions {len(state.guidance.exchanges)}")
         log(f"run folder: {cfg.out}")
+        log.event("end", folder=str(cfg.out), why=STOPPED.get(state.outcome), **summary)
     return state
 
 
@@ -175,6 +181,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         return False
     if state.handoffs and state.handoffs[-1].actions == len(state.history) and state.answer is not None:
         log(f"\nanswer ({verdict(state.answer)}; the focus led to no action, so the last answer stands):\n  {state.answer.text}")
+        log.event("answer", text=state.answer.text, achieved=state.answer.achieved)
         return False
 
     may_resume = step < cfg.steps and len(state.handoffs) < cfg.handoffs and state.outcome != "stuck"
@@ -209,12 +216,14 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 log(
                     f"\nreview ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}\n  back to the classifier, focus: {answer.focus}"
                 )
+                log.event("focus", text=answer.text, focus=answer.focus)
                 record["handed_back"] = True
                 state.handoffs.append(Handoff(step, state.outcome, answer.focus, len(state.history)))
                 state.guidance = state.guidance.focused(answer.focus)
                 state.idle = state.repeats = 0  # the stall was under the old focus; the new one starts clean
                 return True
             log(f"\nanswer ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}")
+            log.event("answer", text=answer.text, achieved=answer.achieved)
             return False
         finally:
             (cfg.out / f"step-{step:03d}-review.json").write_text(json.dumps(reviews, indent=2), encoding="utf-8")
@@ -283,6 +292,7 @@ def earlier_screens(state: RunState, final: Signature, budget: int = EARLIER_LIN
 
 def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log) -> bool:
     desktop.check_abort()
+    log.event("step", step=step)
     timing: dict[str, float] = {}
     started = time.perf_counter()
     cache = None if cfg.replay else state.ocr_cache
@@ -364,6 +374,7 @@ def resolve(
         return False
     if not cfg.act or cfg.replay:
         log(f"  would do: {decision.chosen}. dry run (pass --act without --image to drive the machine)")
+        log.event("would", text=intended(decision, screen, items))
         state.outcome = "dry run"
         return False
 
@@ -372,7 +383,18 @@ def resolve(
     state.view = None
     state.history.append(what)
     log(f"  did: {what}")
+    log.event("action", text=what, actions=len(state.history))
     return not repeating(state, what, decision.kind.choice == "wait", log)
+
+
+def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
+    """What a dry run would have done, in words: a click names the text it would land on, not its index."""
+    if decision.clicking:
+        item = next((it for it in items if str(it.index) == decision.item.choice), None)
+        return f"click {item.text!r}" if item is not None else decision.chosen
+    if decision.pressing_offscreen:
+        return f"press {screen.offscreen[int(decision.offscreen.choice)].label!r}"
+    return decision.kind.choice.replace("_", " ")
 
 
 def screen_moved(state: RunState, screen: Screen, items: list[Item], log: Log) -> bool:

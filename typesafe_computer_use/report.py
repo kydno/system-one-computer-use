@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import ImageDraw, ImageFont
 
 from .decide import base_state, item_criteria, kind_criteria, offscreen_criteria, site_criteria
+from .events import Events
 from .models import Guidance, Item, Screen
 
 FONT_PATH = "/System/Library/Fonts/Helvetica.ttc"
@@ -15,17 +16,29 @@ RULE = "=" * 78
 
 
 class Log:
-    """Print and append to a file."""
+    """Print and append to a file.
 
-    def __init__(self, path: Path | None = None):
+    With `events` (see events.py), each printed line goes out as a `log` event instead, and
+    `event` sends the run's milestones to the front end. Without it, `event` does nothing.
+    """
+
+    def __init__(self, path: Path | None = None, events: Events | None = None):
         self.path = path
+        self.events = events
 
     def __call__(self, msg: str = "", echo: bool = True) -> None:
         if echo:
-            print(msg)
+            if self.events is None:
+                print(msg)
+            else:
+                self.events.line(msg)
         if self.path is not None:
             with self.path.open("a", encoding="utf-8") as f:
                 f.write(msg + "\n")
+
+    def event(self, event: str, **fields: object) -> None:
+        if self.events is not None:
+            self.events(event, **fields)
 
 
 def top(answer, n: int = 5) -> list[tuple[str, float]]:

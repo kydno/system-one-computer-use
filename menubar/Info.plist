@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>SystemOne</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.kydno.SystemOne</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>System One</string>
+	<key>CFBundleDisplayName</key>
+	<string>System One</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- No Dock tile, no app switcher entry, no menu bar menus of its own.
+	     Together with never calling NSApp.activate, this keeps the app you
+	     were in frontmost, which is the app the run then works in. -->
+	<key>LSUIElement</key>
+	<true/>
+	<!-- `clicker` runs as this app's child, so macOS asks on the app's behalf. -->
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>System One reads the screen to decide each step of the task you give it.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>System One asks your browser for its current page and opens the sites a task needs.</string>
+	<!-- SystemOneProjectRoot is added by Scripts/build.sh: the checkout the app was built from. -->
+</dict>
+</plist>

@@ -13,6 +13,8 @@ every time, before anything that would use or take them over:
 
 - running the project on this machine: `clicker`, `clicker-inspect`, or any script that imports
   the platform adapter and calls it
+- starting the menu bar app: `menubar/Scripts/run.sh`, `menubar/Scripts/install-login-item.sh`,
+  or opening `SystemOne.app`, since its runs drive this machine
 - anything that moves the mouse, presses keys, clicks, scrolls, or types
 - AppleScript or `osascript`, `open`, or any command that launches, activates, or quits an app
   or opens a URL or file
@@ -23,6 +25,9 @@ every time, before anything that would use or take them over:
 
 Propose the exact command and wait. Approval covers that command once, not the kind of command
 from then on. If you run subagents, give them this rule word for word.
+
+`menubar/Scripts/build.sh` creates a signing identity in the login keychain the first time it
+runs, so ask before that first build; `swift build` in `menubar/` needs no approval.
 
 Everything else needs no approval: `git`, `uv`, ruff, the offline tests, `scripts/sandbox` (its
 own computer, which never touches this machine's screen, input, or apps), and ordinary CLI
