@@ -76,7 +76,7 @@ def jev(monkeypatch, tmp_path):
 
     def make(policy, *, lines=(), **kwargs) -> JevAgent:
         fake = FakeTypeSafe(policy)
-        monkeypatch.setattr(runner, "TypeSafeClient", lambda: fake)
+        monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
         monkeypatch.setitem(ocr.BACKENDS, "fake", lambda: lambda image: list(lines))
         kwargs.setdefault("writer", None)
         agent = JevAgent("fake", out_root=tmp_path, step_seconds=STEP_SECONDS, **kwargs)

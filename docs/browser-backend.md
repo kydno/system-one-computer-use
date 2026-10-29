@@ -5,7 +5,7 @@ never looks at pixels: it reads the DOM over the Chrome DevTools Protocol, so it
 Screen Recording permission and cannot fight you for the cursor. It is opt-in: `clicker`
 never uses it. `clicker-bench` starts its own Chrome on a fresh, temporary profile (never
 yours), whose debugging socket listens on the loopback address and accepts one origin, and
-removes the profile when it closes. It reads `TYPESAFE_API_KEY` and the writer's settings
+removes the profile when it closes. It reads `OPENROUTER_API_KEY` or `TYPESAFE_API_KEY` and the writer's settings
 the way `clicker` does, from the environment or `./.env`.
 
 ```
@@ -14,7 +14,7 @@ uv run clicker-bench perception --url https://news.ycombinator.com
 uv run clicker-bench replay --run runs/<ts> --step 2    # re-decide a saved step offline
 ```
 
-Perception, same page, same machine, same moment, one decision each. The TypeSafe call is
+Perception, same page, same machine, same moment, one decision each. The decision call is
 identical in both paths, so the difference is purely how the screen is read:
 
 | page | DOM (browser backend) | screencapture + Vision OCR | ratio |
@@ -31,13 +31,13 @@ blocks is choosing between garbled strings; a classifier choosing between DOM el
 choosing between the page's actual labels.
 
 End-to-end loop, p50: **302-380 ms per step** (2.6-3.5 steps/sec), of which ~280-350 ms is
-the TypeSafe decision. Perception is now ~0% of a step.
+the decision. Perception is now ~0% of a step.
 
 ```
 Runtime.evaluate ─► ordered element list (text, role, click point, on-screen, covered)
                    + visible page text (prices, dates, errors; evidence only)
                      │
-        ONE TypeSafe request, two Choices
+        ONE decision request, two Choices
         kind    : click | type_text | navigate | press_enter | scroll_down | ... | done
         element : which on-screen element (used only when kind is click)
                      │

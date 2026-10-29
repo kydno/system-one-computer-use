@@ -7,7 +7,7 @@
 `perception` is the headline: the same page, the same machine, the same moment.
 One path reads the DOM over CDP. The other does what the original does —
 `Page.captureScreenshot` -> Apple Vision OCR -> merge blocks -> reading order.
-The TypeSafe decision that follows is identical in both, so the difference is
+The decision that follows is identical in both, so the difference is
 purely perception.
 
 `loop` runs the full end-to-end step loop and reports per-stage latency.
@@ -19,15 +19,13 @@ import argparse
 import base64
 import io
 import json
-import os
 import statistics
 import sys
 import time
 from pathlib import Path
 
-from typesafe_sdk import TypeSafeClient
-
 from .. import config
+from ..decisions import DecisionClient, Endpoint, endpoint
 from ..writer import make_writer, provider
 from . import act
 from .cdp import Chrome
@@ -175,13 +173,15 @@ def benchmark_loop(args: argparse.Namespace) -> int:
     url = FIXTURE.as_uri() if args.fixture else args.url
     goal = args.goal or TASK
 
-    _require_key()
+    print(f"classifier: {_require_key().describe()}")
     try:
         writer = make_writer()
     except ValueError as e:
         sys.exit(str(e))
     if writer is None:
-        print("writer disabled: no ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL; type_text and navigate need one")
+        print(
+            "writer disabled: no OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL; type_text and navigate need one"
+        )
     else:
         print(f"writer: {provider(writer)}")
 
@@ -189,7 +189,7 @@ def benchmark_loop(args: argparse.Namespace) -> int:
     if runfolder is not None:
         print(f"run folder: {runfolder.root}")
 
-    with Chrome(headed=args.headed) as chrome, chrome.attach() as session, TypeSafeClient() as client:
+    with Chrome(headed=args.headed) as chrome, chrome.attach() as session, DecisionClient() as client:
         print(f"goal: {goal}\nurl:  {url}\n")
         print(f"{'#':>3}  {'action':<12} {'detail':<40} {'conf':<9} {'perceive':>8}  {'decide':>8}  {'act':>8}  {'total':>9}")
         print("-" * 118)
@@ -241,7 +241,7 @@ def cmd_replay(args: argparse.Namespace) -> int:
     print(f"      {len(page.items)} elements, scroll_y={page.scroll_y}, {page.below_fold} below the fold")
     print(f"      history: {len(step['history'])} prior action(s)\n")
 
-    with TypeSafeClient() as client:
+    with DecisionClient() as client:
         # Mirror the runner exactly: the history is part of the state that was sent, and
         # whether a writer was there decides the action set offered.
         decision = decide(
@@ -271,10 +271,12 @@ def cmd_replay(args: argparse.Namespace) -> int:
 DOTENV = Path.cwd() / ".env"
 
 
-def _require_key() -> None:
-    """The TypeSafe key, resolved the way `clicker` resolves it: the environment, then ./.env."""
-    if not os.environ.get("TYPESAFE_API_KEY"):
-        sys.exit("TYPESAFE_API_KEY is not set (export it or put it in .env)")
+def _require_key() -> Endpoint:
+    """The decision endpoint, resolved the way `clicker` resolves it: the environment, then ./.env."""
+    try:
+        return endpoint()
+    except ValueError as e:
+        sys.exit(str(e))
 
 
 def main(argv: list[str] | None = None) -> int:

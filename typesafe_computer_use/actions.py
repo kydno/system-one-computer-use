@@ -6,10 +6,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from typesafe_sdk import TypeSafeClient
-
 from .config import SITES
 from .decide import OFFSCREEN_PREFIX, Decision, row_mates, verify_typed
+from .decisions import DecisionClient, DecisionError
 from .models import Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
 from .writer import Writer, WriterError, compose_text, compose_url
@@ -24,7 +23,7 @@ class Context:
     goal: str
     browser: str
     email: str | None
-    typesafe: TypeSafeClient
+    typesafe: DecisionClient  # the classifier, on OpenRouter or TypeSafe
     writer: Writer | None
     history: list[str]
     ask: Callable[[str], str] | None = None  # puts the writer's question to the user; None when nobody is there to answer
@@ -192,7 +191,10 @@ def _type_text(decision, screen: Screen, items, ctx: Context) -> str:
         desktop.press("return")
         return f"typed {text!r} into {screen.field.label!r} {how} and pressed Return"
     time.sleep(0.3)
-    p = verify_typed(ctx.typesafe, ctx.goal, screen.field, text, desktop.focused_field())
+    try:
+        p = verify_typed(ctx.typesafe, ctx.goal, screen.field, text, desktop.focused_field())
+    except DecisionError as e:
+        return f"typed {text!r} into {screen.field.label!r} {how} (not verified: {e})"
     if p < VERIFY_THRESHOLD:
         recovery = "restored previous value" if restore_field(screen.field, text) else "could not safely restore previous value"
         return f"typed {text!r} into {screen.field.label!r} {how} but verification failed ({p:.2f}); {recovery}"

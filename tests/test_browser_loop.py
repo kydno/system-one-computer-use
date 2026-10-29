@@ -14,12 +14,11 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
-from typesafe_sdk import Choice, ChoiceAnswer, Noul, NoulAnswer
-
 from typesafe_computer_use.browser.decide import base_state, decide, element_criteria
 from typesafe_computer_use.browser.perceive import INTERACTIVE_JS, perceive, to_json
 from typesafe_computer_use.browser.report import RunFolder, load_step
 from typesafe_computer_use.browser.runner import run_goal, typing_target
+from typesafe_computer_use.decisions import Choice, ChoiceAnswer, Noul, NoulAnswer
 
 SECRET = "hunter2-do-not-leak"
 

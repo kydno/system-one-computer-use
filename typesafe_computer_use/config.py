@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 MIN_OCR_CONFIDENCE = 0.3
-MAX_OPTIONS = 255  # TypeSafe Choice ceiling
+MAX_OPTIONS = 255  # the Choice ceiling of TypeSafe's Jev and of Mercury Decide
 ABORT_CORNER_PX = 4
 DEFAULT_MIN_CONFIDENCE = 0.4
 DEFAULT_STEPS = 100
@@ -18,6 +18,19 @@ DEFAULT_ANSWER_MODEL = "claude-sonnet-5"  # runs only when the classifier stops,
 DEFAULT_BROWSER = "Google Chrome"
 ANTHROPIC_HOST = "api.anthropic.com"
 WRITER_APIS = ("anthropic", "openai")
+
+# Decisions. OpenRouter's Decisions API serves every decision model under one URL; TypeSafe's own
+# API serves Jev. Both take the same request, so the provider is only a URL, a key, and a model id.
+DECISION_PROVIDERS = ("openrouter", "typesafe")  # in this order when both keys are set
+OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
+DEFAULT_OPENROUTER_DECISION_MODEL = "~typesafe/jev-latest"  # or inception/mercury-decide, openai/gpt-6-luna-decisions
+TYPESAFE_BASE_URL = "https://api.typesafe.ai"
+DEFAULT_TYPESAFE_DECISION_MODEL = "jev-latest"
+
+# The writer on OpenRouter, when OPENROUTER_API_KEY is set and no other writer endpoint is named.
+OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_WRITER_MODEL = "anthropic/claude-haiku-4.5"
+DEFAULT_OPENROUTER_ANSWER_MODEL = "anthropic/claude-sonnet-5"
 
 # Sites the classifier can pick by name. Anything else goes through the writer.
 SITES: dict[str, str] = {
@@ -48,20 +61,37 @@ def browser() -> str:
     return os.environ.get("CLICKER_BROWSER", DEFAULT_BROWSER)
 
 
+def openrouter_writer() -> bool:
+    """Whether the writer goes to OpenRouter: its key is set, and no other writer endpoint is named.
+
+    CLICKER_WRITER_BASE_URL names one; so does ANTHROPIC_BASE_URL, which the Anthropic SDK reads
+    with the Anthropic key it belongs to, and CLICKER_WRITER_API=anthropic asks for Anthropic's own.
+    """
+    if not os.environ.get("OPENROUTER_API_KEY", "").strip():
+        return False
+    if os.environ.get("CLICKER_WRITER_API", "").strip().lower() == "anthropic":
+        return False
+    return not (os.environ.get("CLICKER_WRITER_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL"))
+
+
 def writer_model() -> str:
-    return os.environ.get("CLICKER_WRITER_MODEL", DEFAULT_WRITER_MODEL)
+    default = DEFAULT_OPENROUTER_WRITER_MODEL if openrouter_writer() else DEFAULT_WRITER_MODEL
+    return os.environ.get("CLICKER_WRITER_MODEL") or default
 
 
 def writer_api() -> str:
-    """The API the writer's endpoint speaks: `anthropic` (Messages) or `openai` (Chat Completions)."""
-    api = os.environ.get("CLICKER_WRITER_API", "").strip().lower() or "anthropic"
+    """The API the writer's endpoint speaks: `anthropic` (Messages) or `openai` (Chat Completions).
+
+    OpenRouter speaks the OpenAI one, so that is the default there."""
+    api = os.environ.get("CLICKER_WRITER_API", "").strip().lower() or ("openai" if openrouter_writer() else "anthropic")
     if api not in WRITER_APIS:
         raise ValueError(f"CLICKER_WRITER_API must be one of {', '.join(WRITER_APIS)}, not {api!r}")
     return api
 
 
 def writer_base_url() -> str | None:
-    """The endpoint in CLICKER_WRITER_BASE_URL, or None to leave it to the Anthropic SDK.
+    """The endpoint in CLICKER_WRITER_BASE_URL, OpenRouter's (see `openrouter_writer`), or None to
+    leave it to the Anthropic SDK.
 
     The SDK appends the rest of the path, so the full request URL works too: `.../v1/messages`
     comes off for the Anthropic API, `.../chat/completions` for the OpenAI one, which keeps its `/v1`.
@@ -70,7 +100,7 @@ def writer_base_url() -> str | None:
     """
     raw = os.environ.get("CLICKER_WRITER_BASE_URL")
     if not raw:
-        return None
+        return OPENROUTER_CHAT_URL if openrouter_writer() else None
     base = raw.strip().rstrip("/")
     suffixes = ("/chat/completions",) if writer_api() == "openai" else ("/v1/messages", "/messages", "/v1")
     for suffix in suffixes:
@@ -97,7 +127,8 @@ def writer_vision() -> bool:
 
 
 def answer_model() -> str:
-    return os.environ.get("CLICKER_ANSWER_MODEL", DEFAULT_ANSWER_MODEL)
+    default = DEFAULT_OPENROUTER_ANSWER_MODEL if openrouter_writer() else DEFAULT_ANSWER_MODEL
+    return os.environ.get("CLICKER_ANSWER_MODEL") or default
 
 
 def writer_reasoning() -> str | None:

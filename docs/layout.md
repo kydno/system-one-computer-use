@@ -14,6 +14,7 @@ typesafe_computer_use/
                   source, and the merge of the two
   dates.py        date parsing and "in N days" hints
   decide.py       state, criteria, the three-Choice request, the Noul check
+  decisions.py    the decision client: OpenRouter's Decisions API or TypeSafe's, one request schema
   writer.py       the writer model, structured replies, URL validation, the answer
                   with its focus or question
   openai_writer.py the writer's requests on an OpenAI-compatible endpoint

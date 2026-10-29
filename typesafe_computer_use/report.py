@@ -46,7 +46,7 @@ def render_payload(
     tried: list[str] | None = None,
     guidance: Guidance | None = None,
 ) -> str:
-    """Exactly what goes to TypeSafe for this screen, plus a table of every item."""
+    """Exactly what goes to the classifier for this screen, plus a table of every item."""
     parts = [
         RULE,
         "STATE  (sent as `state`)",

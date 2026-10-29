@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
 
 from . import config
 from .actions import Context
+from .decisions import Endpoint, endpoint
 from .perception import capture, perceive
 from .platform_adapter import desktop
 from .report import annotate, ax_count, render_payload
@@ -20,10 +20,13 @@ from .writer import make_writer, provider
 DOTENV = Path.cwd() / ".env"
 
 
-def _prepare() -> None:
+def _prepare() -> Endpoint:
+    """The decision endpoint the environment and ./.env configure; the run stops here without one."""
     config.load_dotenv(DOTENV)
-    if not os.environ.get("TYPESAFE_API_KEY"):
-        sys.exit("TYPESAFE_API_KEY is not set (export it or put it in .env)")
+    try:
+        return endpoint()
+    except ValueError as e:
+        sys.exit(str(e))
 
 
 def ask_user(question: str) -> str:
@@ -40,7 +43,7 @@ def ask_user(question: str) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="clicker",
-        description="Drive this computer toward a goal: screen OCR, a TypeSafe classifier, deterministic actions.",
+        description="Drive this computer toward a goal: screen OCR, a decision-model classifier, deterministic actions.",
     )
     parser.add_argument("goal", help="what you want done on this computer")
     parser.add_argument("--act", action="store_true", help="actually click and type (default: dry run, one step)")
@@ -59,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--url", help="browser URL to report during replay")
     args = parser.parse_args(argv)
 
-    _prepare()
+    print(f"classifier: {_prepare().describe()}")
     if args.act and not desktop.accessibility_trusted():
         sys.exit("this terminal lacks Accessibility permission; grant it in System Settings > Privacy & Security")
     try:
@@ -69,7 +72,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(str(e))
     if writer is None:
         print(
-            "writer disabled: no ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL; type_text, writer-proposed URLs and the final answer need one"
+            "writer disabled: no OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL; "
+            "type_text, writer-proposed URLs and the final answer need one"
         )
     else:
         print(f"writer: {provider(writer)}")
@@ -106,7 +110,7 @@ def main(argv: list[str] | None = None) -> None:
 def inspect(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="clicker-inspect",
-        description="Count down, capture the screen, and show exactly what the clicker would send to TypeSafe.",
+        description="Count down, capture the screen, and show exactly what the clicker would send to the classifier.",
     )
     parser.add_argument("goal", nargs="?", default="(no goal given)")
     parser.add_argument("--countdown", type=int, default=3)

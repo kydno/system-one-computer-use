@@ -17,6 +17,7 @@ from .config import (
     answer_model,
     answer_reasoning,
     custom_writer_endpoint,
+    openrouter_writer,
     writer_api,
     writer_base_url,
     writer_model,
@@ -44,10 +45,14 @@ def make_writer() -> Writer | None:
     A key only ever goes to the endpoint it belongs to. CLICKER_WRITER_BASE_URL (see
     config.writer_base_url) is paired with CLICKER_WRITER_API_KEY, or with a placeholder when that
     is unset, since an endpoint you host yourself checks no key. Otherwise the SDK reads the
-    ANTHROPIC_* key, token, and base URL as it always does. An endpoint that speaks OpenAI's API
-    (CLICKER_WRITER_API=openai) has no default to fall back on, so it must be named.
+    ANTHROPIC_* key, token, and base URL as it always does. With OPENROUTER_API_KEY set and neither
+    base URL, the writer goes to OpenRouter's OpenAI-compatible API with that key instead (see
+    config.openrouter_writer). Any other endpoint that speaks OpenAI's API (CLICKER_WRITER_API=openai)
+    has no default to fall back on, so it must be named.
     """
     base_url = writer_base_url()
+    if openrouter_writer():
+        return OpenAIWriter(base_url, os.environ["OPENROUTER_API_KEY"].strip())
     key = os.environ.get("CLICKER_WRITER_API_KEY") or PLACEHOLDER_KEY
     if writer_api() == "openai":
         if not base_url:

@@ -1,14 +1,13 @@
-"""The TypeSafe side: state, criteria, and the one multi-Choice request."""
+"""The classifier side: state, criteria, and the one multi-Choice request."""
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
 
-from typesafe_sdk import Choice, ChoiceAnswer, Noul, TypeSafeClient
-
 from .config import SITES
 from .dates import date_hints, now_context
+from .decisions import Choice, ChoiceAnswer, DecisionClient, Noul
 from .models import AxNode, Field, Guidance, Item, Screen
 
 STOP_KINDS = ("done", "none")
@@ -203,7 +202,7 @@ class Decision:
 
 
 def decide(
-    client: TypeSafeClient,
+    client: DecisionClient,
     goal: str,
     screen: Screen,
     items: list[Item],
@@ -256,7 +255,7 @@ def decide(
     return Decision(kind=answers["kind"], item=answers.get("item"), site=answers["site"], offscreen=answers.get("offscreen"))
 
 
-def verify_typed(client: TypeSafeClient, goal: str, field_before: Field, typed: str, field_after: Field | None) -> float:
+def verify_typed(client: DecisionClient, goal: str, field_before: Field, typed: str, field_after: Field | None) -> float:
     """Probability that the field now holds a sensible value for its purpose."""
     state = {
         "goal": goal,

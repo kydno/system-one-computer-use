@@ -1,19 +1,35 @@
 # Writer endpoints
 
 The writer types text, proposes URLs, and reads the screen whenever the classifier stops. By
-default it is Claude on `api.anthropic.com`. These variables change the model or send it to
-another endpoint.
+default it is Claude on `api.anthropic.com`, or on OpenRouter when `OPENROUTER_API_KEY` is set
+and no other endpoint is named. These variables change the model or send it to another endpoint.
 
 | variable | required | purpose |
 |---|---|---|
 | `CLICKER_WRITER_BASE_URL` | no | send the writer to another endpoint; unset means `api.anthropic.com` |
 | `CLICKER_WRITER_API_KEY` | no | the key for `CLICKER_WRITER_BASE_URL`, if it checks one |
 | `CLICKER_WRITER_API` | no | what that endpoint speaks: `anthropic` (the default) or `openai` |
-| `CLICKER_WRITER_MODEL` | no | types text and proposes URLs; defaults to `claude-haiku-4-5` |
-| `CLICKER_ANSWER_MODEL` | no | reads the screen whenever the classifier stops; defaults to `claude-sonnet-5` |
+| `CLICKER_WRITER_MODEL` | no | types text and proposes URLs; defaults to `claude-haiku-4-5`, on OpenRouter `anthropic/claude-haiku-4.5` |
+| `CLICKER_ANSWER_MODEL` | no | reads the screen whenever the classifier stops; defaults to `claude-sonnet-5`, on OpenRouter `anthropic/claude-sonnet-5` |
 | `CLICKER_WRITER_VISION` | no | `false` for an answer model that reads text only; defaults to `true` |
 | `CLICKER_WRITER_REASONING` | no | the reasoning effort the writer's calls ask an OpenAI-API model for, such as `none`; unset leaves it to the model |
 | `CLICKER_ANSWER_REASONING` | no | the same for the answer model, such as `low` |
+
+## OpenRouter
+
+With `OPENROUTER_API_KEY` set, and neither `CLICKER_WRITER_BASE_URL` nor `ANTHROPIC_BASE_URL`, the
+writer goes to `https://openrouter.ai/api/v1` over OpenAI's Chat Completions API, with that key and
+no other. Any chat model OpenRouter serves can write or answer, by its OpenRouter id:
+`typesafe/jev-router` picks a model and effort per request, and other vendors' models work as
+well as Claude. The answer model reads a screenshot, so pick one
+that sees images or set `CLICKER_WRITER_VISION=false`. `CLICKER_WRITER_API=anthropic` keeps the
+writer on Anthropic's own API even with the OpenRouter key set.
+
+```
+OPENROUTER_API_KEY=sk-or-...
+CLICKER_WRITER_MODEL=typesafe/jev-router
+CLICKER_ANSWER_MODEL=anthropic/claude-sonnet-5
+```
 
 ## Other models
 
@@ -30,7 +46,7 @@ text. The answer model reads a screenshot; for a model that reads text only, set
 refuses the step it was for, and the run goes on.
 
 Keys never cross over: `CLICKER_WRITER_API_KEY` goes only to `CLICKER_WRITER_BASE_URL`, and
-`ANTHROPIC_API_KEY` and `OPENAI_API_KEY` never go there. On the Anthropic API it is sent in both
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `OPENROUTER_API_KEY` never go there. On the Anthropic API it is sent in both
 the `x-api-key` and `Authorization` headers, since proxies differ. Leave it empty for an endpoint
 that checks no key.
 

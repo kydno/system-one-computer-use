@@ -20,10 +20,10 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from PIL import Image
-from typesafe_sdk import Noul
 
 from typesafe_computer_use import actions, runner
 from typesafe_computer_use.actions import Context
+from typesafe_computer_use.decisions import Noul
 from typesafe_computer_use.models import AxNode, Field, Item, Popup, Screen
 from typesafe_computer_use.platform_adapter import desktop
 from typesafe_computer_use.runner import RunConfig, RunState, run
@@ -519,7 +519,7 @@ def drive(
     world.install(monkeypatch)
     fake = FakeTypeSafe(policy, noul)
     world.fake = fake
-    monkeypatch.setattr(runner, "TypeSafeClient", lambda: fake)
+    monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
     cfg = RunConfig(goal=goal, out=tmp_path / "run", act=True, steps=steps, delay=0)
     if handoffs is not None:
         cfg.handoffs = handoffs

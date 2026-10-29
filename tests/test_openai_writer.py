@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from typesafe_computer_use import config
 from typesafe_computer_use.calls import Calls, MeteredWriter
 from typesafe_computer_use.config import writer_api, writer_base_url
 from typesafe_computer_use.writer import WriterError, compose_answer, compose_url, make_writer, parse_json
@@ -188,3 +189,53 @@ def test_a_missing_flag_is_an_error_and_a_missing_string_is_empty(openai_env, en
         compose_url(writer(), "open example", [])
     endpoint.state["reply"] = '{"ok": true}'
     assert compose_url(writer(), "open example", []) == ""
+
+
+@pytest.fixture
+def openrouter_env(clean_env, endpoint):
+    """OPENROUTER_API_KEY alone, with OpenRouter's URL pointed at the local endpoint."""
+    clean_env.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    clean_env.delenv("CLICKER_WRITER_MODEL", raising=False)
+    clean_env.delenv("CLICKER_ANSWER_MODEL", raising=False)
+    clean_env.setattr(config, "OPENROUTER_CHAT_URL", f"{endpoint.url}/api/v1")
+    return clean_env
+
+
+def test_an_openrouter_key_alone_sends_the_writer_to_openrouter(openrouter_env, endpoint):
+    openrouter_env.setenv("ANTHROPIC_API_KEY", "sk-ant-real")
+    openrouter_env.setenv("OPENAI_API_KEY", "sk-openai-real")
+
+    assert writer_api() == "openai"
+    assert compose_url(writer(), "open example", []) == "https://example.com"
+
+    (request,) = endpoint.seen
+    assert request["path"] == "/api/v1/chat/completions"
+    assert request["headers"]["authorization"] == "Bearer sk-or-test"
+    assert not any("real" in v for v in request["headers"].values())
+    assert request["body"]["model"] == "anthropic/claude-haiku-4.5"
+    assert config.answer_model() == "anthropic/claude-sonnet-5"
+
+
+def test_any_openrouter_chat_model_can_write_and_answer(openrouter_env, endpoint):
+    openrouter_env.setenv("CLICKER_WRITER_MODEL", "typesafe/jev-router")
+    openrouter_env.setenv("CLICKER_ANSWER_MODEL", "openai/gpt-6-luna")
+
+    compose_url(writer(), "open example", [])
+
+    assert endpoint.seen[0]["body"]["model"] == "typesafe/jev-router"
+    assert config.answer_model() == "openai/gpt-6-luna"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CLICKER_WRITER_BASE_URL", "http://localhost:1234"),
+        ("ANTHROPIC_BASE_URL", "https://proxy.example"),
+        ("CLICKER_WRITER_API", "anthropic"),
+    ],
+)
+def test_a_named_writer_endpoint_wins_over_openrouter(openrouter_env, name, value):
+    openrouter_env.setenv(name, value)
+
+    assert not config.openrouter_writer()
+    assert config.writer_model() == config.DEFAULT_WRITER_MODEL

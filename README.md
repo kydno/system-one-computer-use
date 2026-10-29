@@ -70,13 +70,16 @@ cp .env.example .env     # fill in the keys
 
 | variable | required | purpose |
 |---|---|---|
-| `TYPESAFE_API_KEY` | yes | every decision |
-| `ANTHROPIC_API_KEY` | no | `type_text`, writer-proposed URLs, and the final answer |
+| `OPENROUTER_API_KEY` | one of these two | every decision, on OpenRouter; also the writer, unless another writer endpoint is set |
+| `TYPESAFE_API_KEY` | one of these two | every decision, on TypeSafe's own API |
+| `CLICKER_DECISION_MODEL` | no | the decision model; on OpenRouter `~typesafe/jev-latest` by default, or `inception/mercury-decide`, `openai/gpt-6-luna-decisions` |
+| `ANTHROPIC_API_KEY` | no | `type_text`, writer-proposed URLs, and the final answer, when OpenRouter is not the writer |
 | `CLICKER_EMAIL` | no | enables the `type_email` action |
 | `CLICKER_BROWSER` | no | defaults to `Google Chrome` |
 
 `.env` lives at the repo root and is read by every entry point (`clicker`, `clicker-inspect`).
-To run the writer on another model or endpoint (LM Studio, Ollama, any OpenAI-compatible
+With only `OPENROUTER_API_KEY` set, both the classifier and the writer run on OpenRouter; see
+[decision models](docs/decision-models.md) for the models and how the key is chosen. To run the writer on another model or endpoint (LM Studio, Ollama, any OpenAI-compatible
 server), see [writer endpoints](docs/writer-endpoints.md).
 
 Grant your terminal **Screen Recording** and **Accessibility** in System Settings >
@@ -106,7 +109,7 @@ and the writer then reads the screen and prints the answer. Every run writes
    labelled controls from the accessibility tree, which sees the icons OCR cannot.
 2. Code adds the facts: the date on any block and how far off it is, the row of a repeated
    label, the focused field, the app and URL, and the actions already tried on this screen.
-3. One TypeSafe request answers three `Choice`s: which kind of action, which item, which site.
+3. One decision request (OpenRouter or TypeSafe) answers three `Choice`s: which kind of action, which item, which site.
 4. The action runs deterministically, the loop waits, and the next capture is the only witness
    of what it did.
 5. When the classifier stops, the writer reads the screen and answers, or hands the run back
@@ -128,6 +131,7 @@ a one-command machine in Google Cloud.
 - [How a step works](docs/how-a-step-works.md): perception, the three-part decision, the action space, stalls, and the hand-off to the writer
 - [Run folder](docs/run-folder.md): what every run writes, the timing line, and offline replay
 - [Browser backend](docs/browser-backend.md): DOM perception over Chrome DevTools, no OCR, no screen permission
+- [Decision models](docs/decision-models.md): OpenRouter or TypeSafe, and the models that answer
 - [Writer endpoints](docs/writer-endpoints.md): every writer variable, and other models over the Anthropic or OpenAI API
 - [Windows](docs/windows.md): the experimental adapter and how it differs from macOS
 - [OSWorld](docs/osworld.md): setup, the two run commands, results, and the Google Cloud machine

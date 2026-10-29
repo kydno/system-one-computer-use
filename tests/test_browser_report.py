@@ -59,7 +59,7 @@ def test_serialize_answers_rebuilds_the_wire_shape():
             "probabilities": {"0": 0.5, "1": 0.5},
         },
     }
-    from typesafe_sdk import ChoiceAnswer, NoulAnswer, ScoreAnswer
+    from typesafe_computer_use.decisions import ChoiceAnswer, NoulAnswer, ScoreAnswer
 
     answers = {
         "kind": ChoiceAnswer(choice="click", probabilities={"click": 0.7, "wait": 0.3}, confidence=0.7),

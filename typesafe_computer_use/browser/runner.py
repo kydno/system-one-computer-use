@@ -4,7 +4,7 @@ Stage accounting is deliberate and literal:
 
 * `perceive_ms` — cost of producing the element list for this step's decision.
   Zero when the previous action already handed us a fresh observation.
-* `decide_ms` — the TypeSafe call.
+* `decide_ms` — the decision call.
 * `act_ms` — the input event, the post-type verification call if any, **and** the
   observation-until-changed that waits for the action to land.
 
@@ -20,8 +20,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from typesafe_sdk import TypeSafeClient
-
+from ..decisions import DecisionClient
 from ..writer import Writer, compose_browser_text, compose_url, looks_credential
 from . import act
 from .decide import Decision, available_actions, decide, field_context, verify_typed
@@ -139,7 +138,7 @@ def resolve_url(writer: Writer | None, goal: str, history: list[str]) -> tuple[s
 
 def run_goal(
     session,
-    client: TypeSafeClient,
+    client: DecisionClient,
     goal: str,
     *,
     start_url: str | None = None,

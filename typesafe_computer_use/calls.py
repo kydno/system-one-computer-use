@@ -85,10 +85,10 @@ class Calls:
 
 
 class MeteredClassifier:
-    """The TypeSafe client, counting each request. `system_one` is the only call the package makes.
+    """The decision client, counting each request. `system_one` is the only call the package makes.
 
-    TypeSafe's reply names its `model` and reports `usage` as `input_tokens` and `output_tokens`,
-    with no cached count.
+    The reply, from OpenRouter or TypeSafe, names its `model` and reports `usage` as `input_tokens`
+    and `output_tokens`, with no cached count.
     """
 
     def __init__(self, client, calls: Calls):

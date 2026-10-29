@@ -2,7 +2,7 @@
 
 The original replays a stall from `step-NN-raw.png`. A browser step has no pixels
 to replay, so the captured artefact is the element list itself. Everything else
-matches: the run log, the exact payload sent to TypeSafe, and every probability
+matches: the run log, the exact payload sent to the classifier, and every probability
 that came back. `load_step` reads a folder back so a decision can be re-run
 offline without touching a browser at all.
 """
@@ -102,7 +102,7 @@ def render_payload(
     actions: dict[str, str],
     elements: dict[str, str],
 ) -> str:
-    """Exactly what goes to TypeSafe this step, plus the element list it was built from."""
+    """Exactly what goes to the classifier this step, plus the element list it was built from."""
     parts = [
         RULE,
         "STATE  (sent as `state`)",

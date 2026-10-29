@@ -1,4 +1,4 @@
-"""The TypeSafe side of the browser backend: one request, three questions.
+"""The classifier side of the browser backend: one request, three questions.
 
 Same discipline as the original — split the decision so screen noise cannot leak
 into the action choice — but the option sets are browser-only, so they are
@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from typesafe_sdk import Choice, ChoiceAnswer, Noul, NoulAnswer, ScoreAnswer, TypeSafeClient
-
+from ..decisions import Choice, ChoiceAnswer, DecisionClient, Noul, NoulAnswer, ScoreAnswer
 from .perceive import Page
 
 STOP_KINDS = ("done", "none")
@@ -146,7 +145,7 @@ def base_state(
 
 
 def decide(
-    client: TypeSafeClient,
+    client: DecisionClient,
     goal: str,
     page: Page,
     history: list[str],
@@ -198,7 +197,7 @@ def decide(
 
 
 def verify_typed(
-    client: TypeSafeClient, goal: str, element_label: str, typed: str, value_now: str | None, *, model: str | None = None
+    client: DecisionClient, goal: str, element_label: str, typed: str, value_now: str | None, *, model: str | None = None
 ) -> float:
     """Probability the field now holds a sensible value. Same guard as the original."""
     state = {
@@ -229,11 +228,7 @@ def field_context(page: Page, index: int, *, span: int = 6) -> list[str]:
 
 
 def serialize_answers(answers: dict) -> dict[str, dict]:
-    """The SDK returns frozen msgspec structs with no `raw` payload.
-
-    Rebuild the wire shape so a run folder holds exactly what the API returned,
-    without depending on the SDK's internal decoding.
-    """
+    """The answers in their wire shape, so a run folder holds what the API returned."""
     out: dict[str, dict] = {}
     for key, ans in (answers or {}).items():
         if isinstance(ans, ChoiceAnswer):

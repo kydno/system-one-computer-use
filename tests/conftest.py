@@ -189,6 +189,7 @@ WRITER_ENV = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_PROFILE",
+    "OPENROUTER_API_KEY",  # sends the writer to OpenRouter when no other endpoint is named
 )
 
 

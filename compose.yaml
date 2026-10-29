@@ -16,7 +16,7 @@ services:
       - /tmp                         # browser profiles and scratch files never touch a disk
     shm_size: 2gb                    # Chromium draws through shared memory
     env_file:
-      - path: .env                   # TYPESAFE_API_KEY and the writer's keys, if present
+      - path: .env                   # OPENROUTER_API_KEY or TYPESAFE_API_KEY, and the writer's keys, if present
         required: false
     ports:
       - "127.0.0.1:6080:6080"        # noVNC, reachable from this machine only

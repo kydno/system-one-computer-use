@@ -7,12 +7,11 @@ import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from typesafe_sdk import TypeSafeClient
-
 from .actions import Context, perform
 from .calls import Calls, MeteredClassifier, MeteredWriter
 from .config import DEFAULT_DELAY, DEFAULT_HANDOFFS, DEFAULT_MIN_CONFIDENCE, DEFAULT_STEPS, MAX_OPTIONS
 from .decide import Decision, decide, offscreen_records
+from .decisions import DecisionClient, DecisionError
 from .models import Abort, Guidance, Item, Screen, Signature, same_screen, signature
 from .perception import OcrCache, capture, perceive
 from .platform_adapter import desktop
@@ -40,6 +39,7 @@ STOPPED = {
         "and the focus given each time did not help, so the run ends with this answer"
     ),
     "step limit": "the run used every step it was allowed",
+    "no decision": "the decision model gave no usable answer for this screen: it refused, failed, or was unreachable",
 }
 
 
@@ -107,7 +107,7 @@ def run(cfg: RunConfig, ctx_factory) -> RunState:
     state = RunState()
     started = time.time()
     try:
-        with TypeSafeClient() as typesafe:
+        with DecisionClient() as typesafe:
             ctx = metered(ctx_factory(typesafe, state.history), state.calls)
             for step in range(1, cfg.steps + 1):
                 if run_step(cfg, ctx, state, step, log):
@@ -171,7 +171,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     if stopped is None:
         return False
     if ctx.writer is None:
-        log("\nno answer: the writer is disabled (set ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL)")
+        log("\nno answer: the writer is disabled (set OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL)")
         return False
     if state.handoffs and state.handoffs[-1].actions == len(state.history) and state.answer is not None:
         log(f"\nanswer ({verdict(state.answer)}; the focus led to no action, so the last answer stands):\n  {state.answer.text}")
@@ -299,8 +299,14 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         render_payload(cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance), encoding="utf-8"
     )
 
-    with phase(timing, "decide"):
-        decision = decide(ctx.typesafe, cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance)
+    try:
+        with phase(timing, "decide"):
+            decision = decide(ctx.typesafe, cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance)
+    except DecisionError as e:
+        # A refusal or an outage is not a guess to act on: the writer reads this screen instead.
+        log(f"\nstep {step}: no decision ({e})")
+        state.outcome = "no decision"
+        return False
     by_index = {str(it.index): it for it in items}
     annotate(screen, items, decision.chosen, prefix.with_suffix(".png"))
 
