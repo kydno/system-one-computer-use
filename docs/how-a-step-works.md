@@ -1,7 +1,8 @@
 # How a step works
 
-A step reads the screen, adds the facts code can decide, asks TypeSafe one question in three
-parts, and acts. This page follows it from the capture to the stop that ends a run.
+A step reads the screen, adds the facts code can decide, asks Jev, TypeSafe's decision
+model, one question in three parts, and acts. This page follows it from the capture to the stop
+that ends a run. "The classifier" below always means Jev; the writer is a separate text model.
 
 ```
 screencapture ─► Vision OCR ─► merge lines into blocks ─► drop lines echoing the goal
@@ -19,7 +20,7 @@ layout        ─► "in the row of ..." on any label that appears more than onc
 runner.py     ─► the actions already tried on this same screen, each of which led back here
                      │
                      ▼
-        one TypeSafe request, three Choices, four with off-screen controls
+        one request to Jev, three Choices, four with off-screen controls
         ┌────────────────────────────────────────────────────────────┐
         │ kind      : click_item | use_browser | type_text | scroll… │
         │ item      : which item (used only for click_item)          │
