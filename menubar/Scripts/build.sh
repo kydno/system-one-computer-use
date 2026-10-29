@@ -30,7 +30,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/$NAME"
 cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :SystemOneProjectRoot string $PROJECT" "$APP/Contents/Info.plist"
+# plutil takes the path as its own argument, so a checkout path with spaces stays whole.
+plutil -insert SystemOneProjectRoot -string "$PROJECT" "$APP/Contents/Info.plist"
 
 [ -x "$PROJECT/.venv/bin/clicker" ] || echo "   note: no $PROJECT/.venv/bin/clicker yet; run \`uv sync\` in $PROJECT before the first run"
 
