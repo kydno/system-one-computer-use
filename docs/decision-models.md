@@ -1,9 +1,9 @@
 # Decision models
 
 Every decision goes to a decision model: a model that answers named questions about a state
-with a label and a probability for each label, not with text. jev asks one such request per step
+with a label and a probability for each label, not with text. The agent asks one such request per step
 (see [how a step works](how-a-step-works.md)). Two services answer it with the same request and
-the same reply, so jev needs neither one in particular:
+the same reply, so the agent needs neither one in particular:
 
 | service | URL | key | default model |
 |---|---|---|---|
@@ -15,7 +15,7 @@ With one key set, that service answers. With both, OpenRouter does, unless
 
 ## Models on OpenRouter
 
-`CLICKER_DECISION_MODEL` names any decision model OpenRouter serves. jev is set up for these,
+`CLICKER_DECISION_MODEL` names any decision model OpenRouter serves. The agent is set up for these,
 and the offline tests check its requests and replies with each id:
 
 | model | notes |
@@ -38,7 +38,7 @@ any stop does, which reads the screen, answers, and may send the classifier back
 failed check of typed text keeps the text and says it was not verified.
 
 OpenRouter answers a Luna request that Luna refuses any part of with a 502 for the whole request,
-so on Luna a refusal reaches jev as an error rather than as one refused answer; the effect is
+so on Luna a refusal reaches the agent as an error rather than as one refused answer; the effect is
 the same.
 
 ## Variables

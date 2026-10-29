@@ -6,8 +6,9 @@ design choice against it.
 ## Names
 
 - **Jev** is TypeSafe's decision model, the first of its System One models. It is the classifier
-  that picks each action, reached through `client.system_one` in `decide.py`. It is not this
-  project, and nothing in this repo decides which option fits the goal: Jev does.
+  that picks each action by default, reached through `client.system_one` in `decide.py`. It is not
+  this project, and nothing in this repo decides which option fits the goal: Jev does, or another
+  decision model on OpenRouter standing in for it (see `docs/decision-models.md`).
 - **System One Computer Use** is this project: the loop around Jev. It reads the screen, builds the
   options Jev chooses between, carries out the choice, and hands off to the writer model.
 - Some names predate this split and still say jev or typesafe for the project: the package

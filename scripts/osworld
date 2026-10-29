@@ -298,7 +298,7 @@ run_jev() {
   require_setup
   check_provider
   [[ -n "${OPENROUTER_API_KEY:-}" || -n "${TYPESAFE_API_KEY:-}" ]] ||
-    die "jev's classifier needs OPENROUTER_API_KEY or TYPESAFE_API_KEY (export it or put it in .env)"
+    die "the agent's classifier needs OPENROUTER_API_KEY or TYPESAFE_API_KEY (export it or put it in .env)"
   luna_writer
   # Build the agent once here, as the runner will: a bad OCR backend or writer setting fails now,
   # not after the VM has started.
