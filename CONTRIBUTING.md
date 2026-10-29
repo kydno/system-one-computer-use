@@ -8,7 +8,7 @@ so a stall can be replayed offline with `--image`.
 
 - Keep the action set mutually exclusive. Two options that mean the same thing
   split the vote and read as low confidence.
-- The classifier picks; code decides facts. Anything the model would have to
+- The classifier (Jev, TypeSafe's decision model) picks; code decides facts. Anything the model would have to
   compute (dates, URL validity, whether a field is focused) is computed in code
   and handed over as state.
 - Free text only ever comes from `writer.py`, with a structured reply and a

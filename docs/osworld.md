@@ -1,7 +1,7 @@
 # OSWorld
 
 [OSWorld](https://github.com/xlang-ai/OSWorld-V2) is a benchmark of real desktop tasks, each run
-in an Ubuntu VM and scored by OSWorld's own checks. jev runs there as an OSWorld agent,
+in an Ubuntu VM and scored by OSWorld's own checks. this project runs there as an OSWorld agent,
 `JevAgent` in `typesafe_computer_use/osworld/`, and OSWorld's own GPT agent runs the same task
 with GPT-6 Luna to compare against. OSWorld's runner does the reset, the steps, the scoring, and
 the recording. Both agents get the same task, 50 steps, and 2 seconds after each action.
@@ -12,8 +12,8 @@ OSWorld's VM runs under QEMU and needs a Linux host with KVM, so it does not run
 ## Run one task
 
 ```
-scripts/osworld setup                                    # OSWorld at the pinned commit, jev beside it
-scripts/osworld run-jev chrome/<task id> --ocr rapidocr  # one OSWorld 1.0 task with jev
+scripts/osworld setup                                    # OSWorld at the pinned commit, this project beside it
+scripts/osworld run-jev chrome/<task id> --ocr rapidocr  # one OSWorld 1.0 task with this agent
 scripts/osworld run-jev chrome/<id> chrome/<id> --ocr rapidocr   # several, one after another
 scripts/osworld run-jev chrome/<id> chrome/<id> chrome/<id> --ocr rapidocr --envs 3   # three VMs side by side
 scripts/osworld run-luna chrome/<task id>                # the same with OSWorld's GPT agent on Luna
@@ -22,12 +22,12 @@ scripts/osworld results                                  # each task's score, st
 
 `setup` is the only step between a fresh clone and a run. It fetches OSWorld-V2 at the commit
 pinned in `scripts/osworld` into `.osworld/OSWorld-V2`, installs OSWorld's locked dependencies
-with its `full` extra into its own `.venv`, installs jev into that `.venv`, and copies
-`osworld_overlay/` over the checkout. For jev, that is `mm_agents/jev_agent.py` and
+with its `full` extra into its own `.venv`, installs this project into that `.venv`, and copies
+`osworld_overlay/` over the checkout. For this agent, that is `mm_agents/jev_agent.py` and
 `scripts/python/run_multienv_jev.py`, OSWorld's generic runner changed only to build `JevAgent`,
-to leave AWS's image map to the AWS provider, to leave OSWorld's proxy off, and to hand jev the
+to leave AWS's image map to the AWS provider, to leave OSWorld's proxy off, and to hand the agent the
 VM's controller. That proxy needs credentials of OSWorld's own, and without them every task marked
-`"proxy": true` loads no page. The controller lets jev fetch the accessibility tree itself, so
+`"proxy": true` loads no page. The controller lets the agent fetch the accessibility tree itself, so
 OSWorld's observation carries the screenshot alone ([The accessibility tree](#the-accessibility-tree)).
 For Luna, it is `mm_agents/luna_agent.py` and `scripts/python/run_multienv_luna.py`, OSWorld's GPT
 runner changed only to leave the proxy off too and to write each task's tokens to `usage.json`,
@@ -35,12 +35,13 @@ since OSWorld's GPT agent records none. Its agent is OSWorld's own, counting eac
 nothing else. Luna runs at the GPT runner's default reasoning effort, `xhigh`, which sets its
 accuracy and cost more than anything else; `OSWORLD_LUNA_EFFORT` picks another, and `usage.json`
 records it. Every run copies the overlay again, so an edit to it needs no second `setup`.
-With `OSWORLD_OCR=rapidocr` it installs jev's RapidOCR extra too. `setup --v2-tasks` also
+With `OSWORLD_OCR=rapidocr` it installs this project's RapidOCR extra too. `setup --v2-tasks` also
 downloads OSWorld 2.0's tasks, a gated Hugging Face dataset, and needs `HF_TOKEN`; a 2.0 task is
 `tasks/<id>`.
 
-A run reads its keys from `.env`: `TYPESAFE_API_KEY` for jev and `OPENAI_API_KEY` for both. jev's
-writer and answer model in OSWorld are Luna too, so a run compares jev with Luna inside it to Luna
+A run reads its keys from `.env`: `TYPESAFE_API_KEY` for this agent's classifier, Jev, and `OPENAI_API_KEY` for both.
+This agent's writer and answer model in OSWorld are Luna too, so a run compares the agent with Luna
+inside it to Luna
 alone: `run-jev` points the `CLICKER_WRITER_*` settings at OpenAI's API and `gpt-6-luna`, with no
 reasoning for the writer's short calls and `low` for the answer model. `.env` overrides any of them. `--ocr` is required, since a result depends on the OCR that read the
 screen: `rapidocr` is the benchmark backend, and `vision` is macOS's own and runs only there.
@@ -52,13 +53,13 @@ it runs.
 
 Results land where OSWorld's runner puts them,
 `results/pyautogui/<observation type>/<model>/<domain>/<task id>/`: `result.txt` with the score,
-`traj.jsonl` with every action, a screenshot per step, and `recording.mp4`. jev's usual run folder
+`traj.jsonl` with every action, a screenshot per step, and `recording.mp4`. The agent's usual run folder
 is inside, as `jev/`, so `clicker --image` replays any step; its `run.json` holds the tokens per
 model and the OCR backend, provider, and architecture the run used, and `results` shows them, as
 it shows Luna's tokens from `usage.json`, reasoning tokens among them, with its model time and
-reasoning effort. jev's results are filed under `screenshot_a11y_tree`, since it reads the tree, and
+reasoning effort. The agent's results are filed under `screenshot_a11y_tree`, since it reads the tree, and
 Luna's under the GPT script's default, `screenshot`; OSWorld's observations carry the screenshot
-alone for both, and jev fetches its tree itself. After the tasks, `results` sums up each
+alone for both, and the agent fetches its tree itself. After the tasks, `results` sums up each
 agent: its means over the tasks it solved and, apart, over those it failed (a score below 1), since
 a run stuck until the step limit skews a mean over both, and the median time a failed task took to
 end. A task with no score is listed there, not counted. OSWorld's runner skips a task that already
@@ -68,7 +69,7 @@ two runs' files.
 
 After each cloud run, `scripts/osworld-gcp` appends one JSON line per task to
 `benchmarks/osworld/<run>.jsonl`: the score, steps, time, outcome, and tokens per model (for Luna,
-also its model time and reasoning effort; for jev, where its trees came from and how many fell back
+also its model time and reasoning effort; for this agent, where its trees came from and how many fell back
 to OSWorld's fetch), with the commit the run synced, whether the synced copy
 differed from it (and a hash of the difference), OSWorld's pinned commit, the command, and the
 machine. Rows are never edited; a rerun is a new file. They are not committed for you: committing a
@@ -78,7 +79,7 @@ would say that no task came back, and prints the command that records them after
 Screenshots and recordings stay in `results/`, out of git.
 
 OSWorld keeps no accessibility tree. With `JEV_OSWORLD_SAVE_A11Y=1` (in the environment or `.env`),
-jev saves each observation's raw tree, the one it read, in its run folder as `obs-NNN-a11y.xml`,
+the agent saves each observation's raw tree, the one it read, in its run folder as `obs-NNN-a11y.xml`,
 counting from `000`, the task's first, and OSWorld's full tree of the same screen beside it as
 `obs-NNN-a11y-full.xml` when a check fetched one; that is what a mismatch between the tree and
 `osworld/a11y.py` is diagnosed from. `tests/fixtures/osworld/` holds trees captured that way.
@@ -88,12 +89,12 @@ counting from `000`, the task's first, and OSWorld's full tree of the same scree
 OSWorld's own tree fetch walks every application on the desktop, about 2,500 nodes on a Chrome task,
 2,100 of them GNOME Shell's, asks each node about ten questions over D-Bus, and runs
 `libreoffice --version` first: 2.4 s of every step, most of a step's time besides OSWorld's 2 s wait.
-jev reads one application of that tree. So jev's runner asks OSWorld for the screenshot alone, and
-jev fetches the tree itself when each observation comes (`osworld/tree.py`): `osworld/light_walk.py`
+The agent reads one application of that tree. So its runner asks OSWorld for the screenshot alone,
+and the agent fetches the tree itself when each observation comes (`osworld/tree.py`): `osworld/light_walk.py`
 runs in the VM through OSWorld's `/run_python` endpoint, finds the application in front as
 `osworld/a11y.py` does, walks it alone, and asks each node only what `a11y.py` reads. It prints the
 XML OSWorld's fetch writes, so `a11y.py` is the one parser of both. On 52 trees saved from
-OSWorld's Chrome tasks, jev read the same app, window, focused field, URL, and controls with their
+OSWorld's Chrome tasks, the agent read the same app, window, focused field, URL, and controls with their
 boxes off both, from a sixth of the nodes and about a tenth of the AT-SPI calls;
 `tests/test_osworld_tree.py` checks that on the trees in `tests/fixtures/osworld/`.
 
@@ -102,7 +103,7 @@ the tree waits for it. The OCR bets on the previous step's app and window, which
 window keeps, and the step reads the screen again itself when the tree says otherwise
 (`OcrCache.read_ahead` in `perception.py`). No fetch runs while the VM acts: the step's actions go
 to OSWorld only once the fetch before them is over. OSWorld's 2 s wait and its `env.step` for every
-action stay as they were, so the tree's time moves from OSWorld's step into jev's own.
+action stay as they were, so the tree's time moves from OSWorld's step into the agent's own.
 
 When the light walk fails, takes longer than 10 s, or leaves the tree to OSWorld (a spreadsheet,
 whose cells OSWorld's walk picks out by hand, or a runaway of more than 20,000 nodes), OSWorld's own
@@ -110,14 +111,14 @@ fetch stands in, and a warning in OSWorld's log says why. That fetch asks with n
 chrome/2ad9387a, after a click on Chrome's menu, it never came back and held the run up for good. So
 each request runs on a thread of its own with a deadline, 10 s for the light walk and 20 s for
 OSWorld's fetch, and when both miss, the step goes on with no tree: the app and the controls are
-unknown, and OCR still reads the screen. jev's `run.json` records it all under `osworld`: `tree` is
+unknown, and OCR still reads the screen. The agent's `run.json` records it all under `osworld`: `tree` is
 `jev-light`, `tree_fetches` counts the fetches, `tree_fallbacks` those OSWorld's stood in for, with
 the reasons, `tree_missing` those that brought no tree at all, and `tree_seconds` and `tree_nodes`
 give each one's mean and maximum.
 
 `JEV_OSWORLD_TREE_CHECK=1` checks each light tree against OSWorld's on the same screen: after each
 light walk it fetches OSWorld's tree and walks again, and records under `tree_check` how many
-screens held still across the two walks, on how many of those jev read the two trees alike, where
+screens held still across the two walks, on how many of those the agent read the two trees alike, where
 they parted, and what each fetch cost. `tree` is then `jev-light-checked`, since every step also
 paid for OSWorld's fetch: such a run checks the walk, and its times are no benchmark.
 

@@ -8,7 +8,7 @@ are never edited; committing a run's file makes it part of the record.
 
 OSWorld marks these 52 of its 369 OSWorld 1.0 tasks `"proxy": true`: they browse live sites that
 block or vary for a datacenter IP. OSWorld's default provider is a residential proxy (DataImpulse);
-without its credentials the runners leave the proxy off, for jev and Luna alike, so these tasks wait
+without its credentials the runners leave the proxy off, for this agent and Luna alike, so these tasks wait
 until one is set up and turned on for both. Two of them ran before this was decided: 06fe7178 and
 7a5a7856.
 
