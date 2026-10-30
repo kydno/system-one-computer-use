@@ -9,11 +9,13 @@ and no other endpoint is named. These variables change the model or send it to a
 | `CLICKER_WRITER_BASE_URL` | no | send the writer to another endpoint; unset means `api.anthropic.com` |
 | `CLICKER_WRITER_API_KEY` | no | the key for `CLICKER_WRITER_BASE_URL`, if it checks one |
 | `CLICKER_WRITER_API` | no | what that endpoint speaks: `anthropic` (the default) or `openai` |
-| `CLICKER_WRITER_MODEL` | no | types text and proposes URLs; defaults to `claude-haiku-4-5`, on OpenRouter `anthropic/claude-haiku-4.5` |
-| `CLICKER_ANSWER_MODEL` | no | reads the screen whenever the classifier stops; defaults to `claude-sonnet-5`, on OpenRouter `anthropic/claude-sonnet-5` |
+| `CLICKER_WRITER_MODEL` | no | types text and proposes URLs; defaults to `claude-haiku-4-5`, on OpenRouter `inception/mercury-3` at medium effort |
+| `CLICKER_ANSWER_MODEL` | no | reads the screen whenever the classifier stops; defaults to `claude-sonnet-5`, on OpenRouter `openai/gpt-6.1-terra` |
 | `CLICKER_WRITER_VISION` | no | `false` for an answer model that reads text only; defaults to `true` |
-| `CLICKER_WRITER_REASONING` | no | the reasoning effort the writer's calls ask an OpenAI-API model for, such as `none`; unset leaves it to the model |
-| `CLICKER_ANSWER_REASONING` | no | the same for the answer model, such as `low` |
+| `CLICKER_WRITER_REASONING` | no | the reasoning effort the writer's calls ask an OpenAI-API model for, such as `none`; unset leaves it to the model, except `medium` for OpenRouter's default writer. A call with an effort gets tokens to think with on top of its own limit (1024 at `low`, 2048 at `medium`, 4096 at `high`). Thinking can still run past that on some calls and cut the reply off; a reply cut off at its limit is asked for once more with twice the room |
+| `CLICKER_ANSWER_REASONING` | no | the same for the answer model; unset leaves it to the model, except `low` for OpenRouter's default answer model |
+| `CLICKER_ANSWER_SORT` | no | the order OpenRouter tries the answer model's providers in: `price` for the cheapest first, `throughput` for the fastest; unset leaves it to OpenRouter, which weighs price and uptime. Either way it falls back to the next provider when one fails. The menu bar app's settings set this and `CLICKER_ANSWER_MODEL` |
+| `CLICKER_WRITER_PROVIDER` | no | the one OpenRouter provider the writer's calls go to, by its slug or tag such as `deepinfra/fp8`, with no fallback, so a busy provider fails the call; unset leaves routing to OpenRouter |
 
 ## OpenRouter
 

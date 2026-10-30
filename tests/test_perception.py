@@ -6,10 +6,11 @@ from conftest import busy_page
 from PIL import Image, ImageDraw
 
 from typesafe_computer_use import perception
-from typesafe_computer_use.models import AxNode, Field, Item, Popup, Screen
+from typesafe_computer_use.models import AxNode, Field, Item, KeyboardFocus, Popup, Screen
 from typesafe_computer_use.perception import (
     drawn,
     goal_echoes,
+    in_field,
     is_echo,
     merge_blocks,
     merge_sources,
@@ -17,6 +18,7 @@ from typesafe_computer_use.perception import (
     to_items,
 )
 from typesafe_computer_use.platform_adapter import desktop
+from typesafe_computer_use.runner import keys_desc
 
 
 def line(text, x1, y1, x2, y2, conf=1.0):
@@ -264,3 +266,24 @@ def test_the_text_in_the_focused_field_is_the_field_and_not_an_item_of_its_own(m
 )
 def test_the_same_text_stays_when_that_field_is_not_a_focused_one_line_field(monkeypatch, field):
     assert "O、 Do Not Track" in settings_search(monkeypatch, field)
+
+
+def test_text_inside_a_stand_in_field_stays_an_item(screen):
+    """A real field's value is in the state, so its text is no item. A stand-in's box is the text
+    that was clicked, and the screen is the only place its value shows, so that text stays."""
+    box = Field(role="", label="10", placeholder="", value="", x=490, y=290, w=40, h=30)
+    block = Item(0, "10", 0.9, 1000.0, 600.0, 1040.0, 620.0)
+    assert in_field(block, replace(screen, field=replace(box, role="AXTextField")))
+    assert not in_field(block, replace(screen, field=replace(box, clicked=True)))
+
+
+# ------------------------------------------------------------- where the keyboard goes, in the step line
+def keys_line(keys) -> str:
+    return keys_desc(Screen(image=Image.new("RGB", (10, 10)), scale=1.0, app="Brave Browser", field=None, url=None, keys=keys))
+
+
+def test_the_step_line_names_the_app_with_the_keyboard_only_when_it_is_not_the_one_in_front():
+    assert keys_line(KeyboardFocus("Brave Browser", 42)) == ""
+    assert keys_line(KeyboardFocus("SystemOne", 7)) == " keys='SystemOne'"
+    assert keys_line(KeyboardFocus("", None, "-25204")) == " keys='no app (-25204)'"
+    assert keys_line(None) == ""

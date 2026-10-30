@@ -19,7 +19,9 @@ class OpenAIWriter:
     translates both ways, and nothing else in the package knows which API is on the other end.
     `thinking` is accepted and dropped: Chat Completions has no such switch. `reasoning` is the
     effort an OpenAI reasoning model is asked for, and it is dropped for the rest of the run by an
-    endpoint that refuses it.
+    endpoint that refuses it. `provider` is OpenRouter's: the one provider the call may go to, with
+    no fallback, so a provider that is down fails the call instead of quietly changing models' hosts.
+    `sort` is OpenRouter's too: the order it tries providers in, `price` or `throughput`, with fallback.
     """
 
     def __init__(self, base_url: str, api_key: str):
@@ -40,7 +42,10 @@ class OpenAIWriter:
         output_config=None,
         thinking=None,
         reasoning: str | None = None,
+        provider: str | None = None,
+        sort: str | None = None,
     ):
+        routing = {"order": [provider], "allow_fallbacks": False} if provider else {"sort": sort} if sort else None
         chat = [{"role": "system", "content": system}, *(_chat_message(m) for m in messages)]
         schema = output_config["format"]["schema"] if output_config else None
         while True:
@@ -51,6 +56,7 @@ class OpenAIWriter:
                     **{self._token_limit: max_tokens},
                     **_response_format(self._formats[0], schema),
                     **({"reasoning_effort": reasoning} if reasoning and self._reasoning else {}),
+                    **({"extra_body": {"provider": routing}} if routing else {}),
                 )
             except openai.BadRequestError as e:
                 said = str(e).lower()
@@ -66,7 +72,13 @@ class OpenAIWriter:
                 raise
             text = reply.choices[0].message.content if reply.choices else None
             usage = _usage(getattr(reply, "usage", None))
-            return SimpleNamespace(content=[SimpleNamespace(type="text", text=text or "")], usage=usage)
+            # A reasoning model spends max_tokens on its thinking first, and may run out mid-reply.
+            cut = bool(reply.choices) and reply.choices[0].finish_reason == "length"
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=text or "")],
+                usage=usage,
+                stop_reason="max_tokens" if cut else "end_turn",
+            )
 
 
 def _usage(usage) -> SimpleNamespace | None:

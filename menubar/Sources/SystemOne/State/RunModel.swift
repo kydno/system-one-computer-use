@@ -8,6 +8,7 @@ enum RunPhase: Equatable {
     case idle
     /// `clicker` has the screen. The panel stays off it: anything on screen is
     /// something the run would read, and a key panel would take its keystrokes.
+    /// Locked, it stays as a passive strip instead, which neither happens to.
     case running
     /// The writer asked the user something, and the run waits for the reply.
     case asking(String)
@@ -43,16 +44,22 @@ final class RunModel: ObservableObject {
     @Published private(set) var runFolder: URL?
     @Published private(set) var seconds: Double?
 
-    /// Whether a run may click and type. Off is a dry run: one decision, shown
-    /// and not carried out, which is how `clicker` itself starts by default.
-    @Published var drives: Bool {
-        didSet { UserDefaults.standard.set(drives, forKey: K.Run.drivesDefaultsKey) }
+    /// The lock: an outside click leaves the panel open, and a run shows its
+    /// status in one row instead of the panel leaving the screen.
+    @Published var isPinned: Bool {
+        didSet {
+            UserDefaults.standard.set(isPinned, forKey: K.Run.pinnedDefaultsKey)
+            if isRunning, !isPinned { requestClose?() }
+        }
     }
 
     /// Bumped on every open so the view can replay its entrance and refocus the
     /// field; the hosting view is reused, so `.onAppear` fires only once.
     @Published private(set) var openToken = 0
     @Published private(set) var isClosing = false
+
+    /// The gear: the settings box shows in place of the run box.
+    @Published private(set) var isShowingSettings = false
 
     // MARK: - Hooks, set by the composition root
 
@@ -68,10 +75,13 @@ final class RunModel: ObservableObject {
     private var ended = false
 
     init() {
-        drives = UserDefaults.standard.bool(forKey: K.Run.drivesDefaultsKey)
+        isPinned = UserDefaults.standard.bool(forKey: K.Run.pinnedDefaultsKey)
     }
 
     var isRunning: Bool { phase == .running }
+
+    /// The panel is one row of status while a locked run has the screen.
+    var showsRunStrip: Bool { isRunning && isPinned }
 
     var isAsking: Bool {
         if case .asking = phase { return true }
@@ -89,9 +99,12 @@ final class RunModel: ObservableObject {
 
     var hasRunContent: Bool { phase != .idle || errorText != nil }
 
+    /// The clear button: a finished run's box can go, a live one cannot.
+    var canClear: Bool { hasRunContent && !isRunning && !isAsking }
+
     var placeholder: String { isAsking ? K.InputBar.replyPlaceholder : K.InputBar.goalPlaceholder }
 
-    /// One line for the status item's menu while the run has the screen.
+    /// One line for the status item's menu and the strip while the run has the screen.
     var progressLine: String {
         let doing = actions.last ?? note ?? "Reading the screen"
         return step > 0 ? "Step \(step) · \(doing)" : doing
@@ -101,6 +114,9 @@ final class RunModel: ObservableObject {
 
     func panelDidOpen() {
         isClosing = false
+        // With no decision key a run would stop before it starts, so the first
+        // thing to show is where to put one.
+        if phase == .idle, !hasDecisionKey { isShowingSettings = true }
         openToken &+= 1
     }
 
@@ -113,6 +129,25 @@ final class RunModel: ObservableObject {
 
     func reportContentHeight(_ height: CGFloat) {
         onContentHeightChange?(height)
+    }
+
+    // MARK: - Settings
+
+    var hasDecisionKey: Bool {
+        EnvSetting.decisionKeys.contains { EnvFile.value($0) != nil }
+    }
+
+    func toggleSettings() {
+        isShowingSettings ? closeSettings() : openSettings()
+    }
+
+    func openSettings() {
+        guard !isAsking else { return }
+        isShowingSettings = true
+    }
+
+    func closeSettings() {
+        isShowingSettings = false
     }
 
     // MARK: - Actions
@@ -128,6 +163,7 @@ final class RunModel: ObservableObject {
 
     func start(_ newGoal: String) {
         guard !isRunning, !isAsking else { return }
+        isShowingSettings = false
         switch Project.clicker() {
         case .failure(let error):
             reset(goal: newGoal)
@@ -138,16 +174,16 @@ final class RunModel: ObservableObject {
             inputText = ""
             phase = .running
             root = found.root
-            var arguments = ["--events"]
-            if drives { arguments.append("--act") }
-            arguments += ["--", newGoal]
+            // No step limit: Stop, `done`, low confidence or a stall ends the run.
+            let arguments = ["--events", "--act", "--steps", String(K.Run.unlimitedSteps), "--", newGoal]
             let run = AgentProcess(executable: found.executable, arguments: arguments, directory: found.root)
             run.onEvent = { [weak self] event in self?.handle(event) }
             run.onExit = { [weak self] status, stderr in self?.exited(status, stderr) }
             process = run
             // Off the screen before the run's first capture: the run reads
             // whatever is showing, and works in whichever app is in front.
-            requestClose?()
+            // Locked, the panel shrinks to its passive strip instead.
+            if !isPinned { requestClose?() }
             DispatchQueue.main.asyncAfter(deadline: .now() + K.Motion.panelClose + K.Run.screenSettle) { [weak self] in
                 MainActor.assumeIsolated { self?.launch(run) }
             }
@@ -160,7 +196,7 @@ final class RunModel: ObservableObject {
         guard isAsking, let process else { return }
         phase = .running
         inputText = ""
-        requestClose?()
+        if !isPinned { requestClose?() }
         DispatchQueue.main.asyncAfter(deadline: .now() + K.Motion.panelClose + K.Run.screenSettle) {
             process.send(text)
         }
@@ -169,6 +205,14 @@ final class RunModel: ObservableObject {
     /// As Ctrl-C in the terminal: the run stops where it is and says so.
     func stop() {
         process?.stop()
+    }
+
+    /// The clear button: the last run's box goes, and the panel is back to just
+    /// the input bar. What is typed in the field stays.
+    func clear() {
+        guard canClear else { return }
+        reset(goal: nil)
+        phase = .idle
     }
 
     func openRunFolder() {
@@ -210,6 +254,7 @@ final class RunModel: ObservableObject {
             noteTitle = "Focus"
         case .question(let text):
             phase = .asking(text)
+            isShowingSettings = false
             inputText = ""
             requestOpen?()
         case .answer(let text, let wasAchieved):
@@ -240,7 +285,7 @@ final class RunModel: ObservableObject {
         requestOpen?()
     }
 
-    private func reset(goal newGoal: String) {
+    private func reset(goal newGoal: String?) {
         goal = newGoal
         step = 0
         actions = []

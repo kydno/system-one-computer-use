@@ -126,7 +126,7 @@ struct RunBoxView: View {
 // MARK: - Labels
 
 /// "GOAL", "ANSWER · GOAL ACHIEVED": 10pt, uppercase, tracked, faint. Menu-Bar-Chat's turn label.
-private struct SectionLabel: View {
+struct SectionLabel: View {
 
     let text: String
     var trailing: String?
@@ -143,7 +143,7 @@ private struct SectionLabel: View {
     }
 }
 
-private struct LabelStyle: ViewModifier {
+struct LabelStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(.system(size: K.RunBox.labelFontSize, weight: .medium))

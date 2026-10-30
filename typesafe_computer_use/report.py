@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from PIL import ImageDraw, ImageFont
 
-from .decide import base_state, item_criteria, kind_criteria, offscreen_criteria, site_criteria
+from .decide import (
+    app_criteria,
+    base_state,
+    browser_criteria,
+    browser_names,
+    item_criteria,
+    kind_criteria,
+    offscreen_criteria,
+    site_criteria,
+)
 from .events import Events
 from .models import Guidance, Item, Screen
 
@@ -58,6 +68,8 @@ def render_payload(
     email: str | None,
     tried: list[str] | None = None,
     guidance: Guidance | None = None,
+    browsers: Sequence[str] = (),
+    apps: Sequence[str] = (),
 ) -> str:
     """Exactly what goes to the classifier for this screen, plus a table of every item."""
     parts = [
@@ -69,7 +81,7 @@ def render_payload(
         RULE,
         "QUESTION kind  (Choice criteria)",
         RULE,
-        json.dumps(kind_criteria(browser, email, bool(screen.offscreen)), indent=2),
+        json.dumps(kind_criteria(browser, email, bool(screen.offscreen), browsers, apps), indent=2),
         "",
         RULE,
         "QUESTION item  (Choice criteria)",
@@ -82,6 +94,22 @@ def render_payload(
         json.dumps(site_criteria(), indent=2),
         "",
     ]
+    if len(browser_names(browser, browsers)) > 1:
+        parts += [
+            RULE,
+            "QUESTION browser  (Choice criteria)",
+            RULE,
+            json.dumps(browser_criteria(browser, browsers, screen.app), indent=2),
+            "",
+        ]
+    if apps:
+        parts += [
+            RULE,
+            "QUESTION app  (Choice criteria; a request of its own, sent only once kind is open_app)",
+            RULE,
+            json.dumps(app_criteria(apps, screen.app), indent=2),
+            "",
+        ]
     if screen.offscreen:
         parts += [
             RULE,

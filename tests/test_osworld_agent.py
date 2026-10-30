@@ -635,6 +635,12 @@ def test_with_no_tree_nothing_is_known_but_the_screenshot_and_ocr():
     assert desktop.actions == ["pyautogui.scroll(5)"]
 
 
+def test_a_scroll_aimed_at_a_point_goes_there_and_not_to_the_window_center():
+    desktop = over(obs())
+    desktop.scroll(-10, (40.4, 300.6))
+    assert desktop.actions == ["pyautogui.scroll(-10, x=40, y=301)"]
+
+
 def test_nothing_can_be_pressed_through_the_tree_and_nothing_opens_here():
     desktop = over(obs())
     assert desktop.ax_press(object()) is False

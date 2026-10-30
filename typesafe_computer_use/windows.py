@@ -32,7 +32,7 @@ from PIL import Image, ImageGrab
 
 from .ax_walk import AX_PRESS, AxAttrs, Frame, walk_actionable
 from .config import ABORT_CORNER_PX
-from .models import Abort, AxNode, Field, Missed
+from .models import Abort, AxNode, Field, KeyboardFocus, Missed
 
 with suppress(AttributeError, OSError):  # pre-8.1 Windows without shcore, or awareness set by the host process
     ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
@@ -292,11 +292,12 @@ def clear_field() -> None:
     press("delete")
 
 
-def scroll(lines: int) -> None:
-    """Scroll events go to the view under the cursor, so park it over the frontmost window first."""
-    center = frontmost_window_center()
-    if center is not None:
-        _move((round(center[0]), round(center[1])))
+def scroll(lines: int, at: tuple[float, float] | None = None) -> None:
+    """Scroll events go to the view under the cursor, so park it at `at` first, or over the
+    frontmost window's center when no point is given."""
+    point = at if at is not None else frontmost_window_center()
+    if point is not None:
+        _move((round(point[0]), round(point[1])))
     _send(_mouse(MOUSEEVENTF_WHEEL, wheel_delta(lines)))
 
 
@@ -366,6 +367,22 @@ def open_url(browser: str, url: str) -> bool:
     else:
         webbrowser.open(url)
     return activate(browser)
+
+
+def installed_browsers() -> list[str]:
+    """The browsers in BROWSER_EXES whose executable is on the PATH."""
+    return [name for name, exe in BROWSER_EXES.items() if shutil.which(exe)]
+
+
+def installed_apps() -> list[str]:
+    """None: nothing here reads the Start menu yet, so open_app is not offered on Windows."""
+    return []
+
+
+def default_browser() -> str | None:
+    """None: Windows keeps its link handler in the registry, which nothing here reads yet, so
+    CLICKER_BROWSER or Chrome stands in."""
+    return None
 
 
 def browser_url(browser: str) -> str | None:
@@ -466,7 +483,8 @@ def _ui_default_action(element) -> str:
         return ""
 
 
-def focused_field() -> Field | None:
+def focused_field(pid: int | None = None) -> Field | None:
+    """The focused control. UI Automation always names it, so the frontmost `pid` is not needed."""
     try:
         element = auto.GetFocusedControl()
     except Exception:
@@ -486,6 +504,11 @@ def focused_field() -> Field | None:
         h=h,
         ref=element,
     )
+
+
+def keyboard_focus() -> KeyboardFocus | None:
+    """Nothing to report: Windows sends the keys to the foreground window, the one the run reads."""
+    return None
 
 
 # ------------------------------------------------------------------ acting on an element

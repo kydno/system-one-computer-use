@@ -157,6 +157,7 @@ def test_clicker_events_hands_the_run_its_events_and_their_questions(monkeypatch
     monkeypatch.setattr(cli, "_prepare", lambda: SimpleNamespace(describe=lambda: "openrouter ~typesafe/jev-latest"))
     monkeypatch.setattr(cli, "make_writer", lambda: None)
     monkeypatch.setattr(cli, "run", run)
+    monkeypatch.setattr(cli.desktop, "default_browser", lambda: None)
 
     cli.main([GOAL, "--events", "--out", str(tmp_path / "run")])
 

@@ -29,8 +29,13 @@ DEFAULT_TYPESAFE_DECISION_MODEL = "jev-latest"
 
 # The writer on OpenRouter, when OPENROUTER_API_KEY is set and no other writer endpoint is named.
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1"
-DEFAULT_OPENROUTER_WRITER_MODEL = "anthropic/claude-haiku-4.5"
-DEFAULT_OPENROUTER_ANSWER_MODEL = "anthropic/claude-sonnet-5"
+DEFAULT_OPENROUTER_WRITER_MODEL = "inception/mercury-3"  # short text calls: a fast, cheap model
+DEFAULT_OPENROUTER_ANSWER_MODEL = "openai/gpt-6.1-terra"
+# For the default models only; a named model keeps its own.
+DEFAULT_OPENROUTER_WRITER_REASONING = "medium"
+DEFAULT_OPENROUTER_ANSWER_REASONING = "low"
+# How OpenRouter may order the answer model's providers: cheapest first, or fastest first.
+ANSWER_SORTS = ("price", "throughput")
 
 # Sites the classifier can pick by name. Anything else goes through the writer.
 SITES: dict[str, str] = {
@@ -57,8 +62,10 @@ def load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
-def browser() -> str:
-    return os.environ.get("CLICKER_BROWSER", DEFAULT_BROWSER)
+def browser(system_default: str | None = None) -> str:
+    """The browser use_browser falls back to: CLICKER_BROWSER, else the system's default browser when
+    the adapter can drive it, else Chrome."""
+    return os.environ.get("CLICKER_BROWSER") or system_default or DEFAULT_BROWSER
 
 
 def openrouter_writer() -> bool:
@@ -132,13 +139,49 @@ def answer_model() -> str:
 
 
 def writer_reasoning() -> str | None:
-    """The reasoning effort the writer's short calls ask an OpenAI-API model for; None leaves it to the model."""
-    return os.environ.get("CLICKER_WRITER_REASONING", "").strip() or None
+    """The reasoning effort the writer's short calls ask an OpenAI-API model for; None leaves it to the model.
+
+    OpenRouter's default writer asks for medium effort unless CLICKER_WRITER_REASONING says otherwise."""
+    default = (
+        DEFAULT_OPENROUTER_WRITER_REASONING if _openrouter_default(writer_model(), DEFAULT_OPENROUTER_WRITER_MODEL) else None
+    )
+    return os.environ.get("CLICKER_WRITER_REASONING", "").strip() or default
 
 
 def answer_reasoning() -> str | None:
     """The same for the answer model, which judges the screen and may be worth more thought."""
-    return os.environ.get("CLICKER_ANSWER_REASONING", "").strip() or None
+    default = (
+        DEFAULT_OPENROUTER_ANSWER_REASONING if _openrouter_default(answer_model(), DEFAULT_OPENROUTER_ANSWER_MODEL) else None
+    )
+    return os.environ.get("CLICKER_ANSWER_REASONING", "").strip() or default
+
+
+def writer_provider() -> str | None:
+    """The one OpenRouter provider the writer's calls go to, with no fallback; None leaves routing to OpenRouter.
+
+    CLICKER_WRITER_PROVIDER names it, by its OpenRouter slug or tag. The answer model is always
+    routed by OpenRouter, in the order `answer_sort` asks for."""
+    if not openrouter_writer():
+        return None
+    return os.environ.get("CLICKER_WRITER_PROVIDER", "").strip() or None
+
+
+def answer_sort() -> str | None:
+    """The order OpenRouter tries the answer model's providers in: `price` for the cheapest first,
+    `throughput` for the fastest. None leaves it to OpenRouter's default, which weighs price and uptime.
+
+    OpenRouter still falls back down that order when the first provider fails, so a busy provider
+    costs a retry, not the call."""
+    if not openrouter_writer():
+        return None
+    raw = os.environ.get("CLICKER_ANSWER_SORT", "").strip().lower()
+    if raw and raw not in ANSWER_SORTS:
+        raise ValueError(f"CLICKER_ANSWER_SORT must be one of {', '.join(ANSWER_SORTS)}, not {raw!r}")
+    return raw or None
+
+
+def _openrouter_default(model: str, default: str) -> bool:
+    return openrouter_writer() and model == default
 
 
 def email() -> str | None:

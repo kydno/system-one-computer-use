@@ -107,6 +107,7 @@ def test_the_writer_and_the_answer_model_each_get_their_own_reasoning_effort(ope
         ("gpt-6-luna", "none"),
         ("gpt-6-luna", "low"),
     ]
+    assert [r["body"]["max_tokens"] for r in endpoint.seen] == [200, 1024 + 1024]  # no thinking, then low's room
 
 
 def test_an_endpoint_that_refuses_reasoning_effort_is_asked_without_it_from_then_on(openai_env, endpoint):
@@ -212,8 +213,12 @@ def test_an_openrouter_key_alone_sends_the_writer_to_openrouter(openrouter_env, 
     assert request["path"] == "/api/v1/chat/completions"
     assert request["headers"]["authorization"] == "Bearer sk-or-test"
     assert not any("real" in v for v in request["headers"].values())
-    assert request["body"]["model"] == "anthropic/claude-haiku-4.5"
-    assert config.answer_model() == "anthropic/claude-sonnet-5"
+    assert request["body"]["model"] == "inception/mercury-3"
+    assert request["body"]["reasoning_effort"] == "medium"
+    assert request["body"]["max_tokens"] == 200 + 2048  # the thinking gets room of its own
+    assert "provider" not in request["body"]  # OpenRouter routes it unless CLICKER_WRITER_PROVIDER says
+    assert config.answer_model() == "openai/gpt-6.1-terra"
+    assert config.answer_reasoning() == "low"
 
 
 def test_any_openrouter_chat_model_can_write_and_answer(openrouter_env, endpoint):
@@ -223,7 +228,37 @@ def test_any_openrouter_chat_model_can_write_and_answer(openrouter_env, endpoint
     compose_url(writer(), "open example", [])
 
     assert endpoint.seen[0]["body"]["model"] == "typesafe/jev-router"
+    assert "reasoning_effort" not in endpoint.seen[0]["body"]  # the effort is for the default model only
+    assert endpoint.seen[0]["body"]["max_tokens"] == 200
     assert config.answer_model() == "openai/gpt-6-luna"
+
+
+def test_the_writer_can_be_pinned_to_another_openrouter_provider(openrouter_env, endpoint):
+    openrouter_env.setenv("CLICKER_WRITER_PROVIDER", "deepinfra/fp8")
+
+    compose_url(writer(), "open example", [])
+
+    assert endpoint.seen[0]["body"]["provider"] == {"order": ["deepinfra/fp8"], "allow_fallbacks": False}
+
+
+@pytest.mark.parametrize("sort", ["price", "throughput"])
+def test_the_answer_model_can_ask_for_its_cheapest_or_fastest_provider(openrouter_env, endpoint, screen, make_item, sort):
+    openrouter_env.setenv("CLICKER_ANSWER_SORT", sort)
+    w = writer()
+
+    compose_url(w, "open example", [])
+    endpoint.state["reply"] = ANSWER
+    compose_answer(w, "find the concert", screen, [make_item(0, "SEP 19")], [], "the goal is achieved")
+
+    writing, answering = endpoint.seen
+    assert "provider" not in writing["body"]  # the writer's own calls are routed as before
+    assert answering["body"]["provider"] == {"sort": sort}
+
+
+def test_an_unknown_answer_sort_is_an_error(openrouter_env):
+    openrouter_env.setenv("CLICKER_ANSWER_SORT", "nearest")
+    with pytest.raises(ValueError, match="CLICKER_ANSWER_SORT"):
+        config.answer_sort()
 
 
 @pytest.mark.parametrize(
@@ -239,3 +274,22 @@ def test_a_named_writer_endpoint_wins_over_openrouter(openrouter_env, name, valu
 
     assert not config.openrouter_writer()
     assert config.writer_model() == config.DEFAULT_WRITER_MODEL
+
+
+def test_a_reply_cut_off_at_its_token_limit_is_asked_for_again_with_twice_the_room(openai_env, endpoint):
+    endpoint.state["cut"] = ['{"ok": true,']  # a reasoning model that thought until max_tokens was nearly spent
+
+    assert compose_url(writer(), "open example", []) == "https://example.com"
+    assert [r["body"]["max_tokens"] for r in endpoint.seen] == [200, 400]
+
+
+def test_a_reply_cut_off_twice_says_so_and_one_that_merely_lacks_json_is_not_retried(openai_env, endpoint):
+    endpoint.state["cut"] = ['{"ok": true,', '{"ok": true, "url":']
+    with pytest.raises(WriterError, match="cut off at its token limit twice, the second time at 400"):
+        compose_url(writer(), "open example", [])
+
+    endpoint.seen.clear()
+    endpoint.state["reply"] = "Sure, here is the URL."
+    with pytest.raises(WriterError, match="without usable JSON"):
+        compose_url(writer(), "open example", [])
+    assert len(endpoint.seen) == 1

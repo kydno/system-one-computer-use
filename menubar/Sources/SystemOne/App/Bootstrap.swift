@@ -31,15 +31,28 @@ enum SystemOneApp {
         // Quitting mid-run stops the run, as Ctrl-C would, rather than orphaning it.
         appDelegate.onTerminate = { model.stop() }
 
-        // A question waits on the user: an outside click must not decline it.
+        // The lock keeps the panel open, and so does a question waiting on the
+        // user: an outside click must not decline it.
         model.$phase
             .map { phase -> Bool in
                 if case .asking = phase { return true }
                 return false
             }
+            .combineLatest(model.$isPinned)
+            .map { $0 || $1 }
             .removeDuplicates()
-            .sink { [weak appDelegate] asking in
-                appDelegate?.panelController.isPinned = asking
+            .sink { [weak appDelegate] pinned in
+                appDelegate?.panelController.isPinned = pinned
+            }
+            .store(in: &cancellables)
+
+        // Locked, the panel stays on screen through the run as a status strip.
+        model.$phase
+            .combineLatest(model.$isPinned)
+            .map { $0 == .running && $1 }
+            .removeDuplicates()
+            .sink { [weak appDelegate] on in
+                appDelegate?.showRunStrip(on)
             }
             .store(in: &cancellables)
 
@@ -78,22 +91,27 @@ enum SystemOneApp {
         return menu
     }
 
-    /// A right click: whether runs drive the Mac, the last run's folder, and Quit.
+    /// A right click: the lock, the last run's folder, settings, and Quit.
     @MainActor
     private static func appMenu(_ model: RunModel) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        let drives = ClosureMenuItem("Drive the Mac", state: model.drives ? .on : .off) {
-            model.drives.toggle()
-        }
-        drives.isEnabled = !model.isRunning && !model.isAsking
-        menu.addItem(drives)
+        menu.addItem(ClosureMenuItem("Keep Panel Open", state: model.isPinned ? .on : .off) {
+            model.isPinned.toggle()
+        })
         let folder = ClosureMenuItem("Open Last Run Folder") { model.openRunFolder() }
         folder.isEnabled = model.runFolder != nil
         menu.addItem(folder)
         if model.isRunning {
             menu.addItem(ClosureMenuItem("Stop") { model.stop() })
         }
+        menu.addItem(.separator())
+        let settings = ClosureMenuItem("Settings…") {
+            model.openSettings()
+            model.requestOpen?()
+        }
+        settings.isEnabled = !model.isRunning && !model.isAsking
+        menu.addItem(settings)
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Quit System One") { NSApp.terminate(nil) })
         return menu

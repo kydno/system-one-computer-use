@@ -50,7 +50,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--act", action="store_true", help="actually click and type (default: dry run, one step)")
     parser.add_argument("--steps", type=int, default=config.DEFAULT_STEPS, help="max actions before stopping")
     parser.add_argument("--min-confidence", type=float, default=config.DEFAULT_MIN_CONFIDENCE, help="stop below this confidence")
-    parser.add_argument("--delay", type=float, default=config.DEFAULT_DELAY, help="seconds to wait after each action")
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=config.DEFAULT_DELAY,
+        help="most seconds to wait after each action for the screen to settle",
+    )
     parser.add_argument(
         "--handoffs",
         type=int,
@@ -105,15 +110,20 @@ def main(argv: list[str] | None = None) -> None:
     # A front end can always answer; a terminal only when someone is at it.
     ask = events.ask if events is not None else ask_user if sys.stdin.isatty() else None
 
+    browser, browsers = config.browser(desktop.default_browser()), tuple(desktop.installed_browsers())
+    apps = tuple(desktop.installed_apps())
+
     def ctx_factory(typesafe, history):
         return Context(
             goal=args.goal,
-            browser=config.browser(),
+            browser=browser,
             email=config.email(),
             typesafe=typesafe,
             writer=writer,
             history=history,
             ask=ask,
+            browsers=browsers,
+            apps=apps,
         )
 
     state = run(cfg, ctx_factory, events)
@@ -139,15 +149,18 @@ def inspect(argv: list[str] | None = None) -> None:
         time.sleep(1)
     print("capture")
 
-    browser = config.browser()
+    browser, browsers = config.browser(desktop.default_browser()), tuple(desktop.installed_browsers())
+    apps = tuple(desktop.installed_apps())
     timing: dict[str, float] = {}
-    screen = capture(browser=browser, timing=timing)
+    screen = capture(browser=browser, timing=timing, browsers=browsers)
     items = perceive(screen, config.MAX_OPTIONS, args.goal, timing)
     annotated = args.out / "annotated.png"
     text = args.out / "state.txt"
     screen.image.save(args.out / "raw.png")
     annotate(screen, items, chosen="", out=annotated)
-    text.write_text(render_payload(args.goal, screen, items, [], browser, config.email()), encoding="utf-8")
+    text.write_text(
+        render_payload(args.goal, screen, items, [], browser, config.email(), browsers=browsers, apps=apps), encoding="utf-8"
+    )
 
     print(
         f"app={screen.app!r} url={screen.url!r} items={len(items)} ax={ax_count(items)} "

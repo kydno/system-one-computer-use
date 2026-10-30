@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -41,13 +42,15 @@ def capture(
     browser: str = "",
     timing: dict[str, float] | None = None,
     ahead: OcrCache | None = None,
+    browsers: Sequence[str] = (),
 ) -> Screen:
     """Capture the main display, or load a saved capture for replay (then app/url are taken as given).
 
     Each query below is a round trip to the window server, AX, or AppleScript. Pass `timing` to
     record the seconds each one costs under "screenshot", "app", "window", "field", and "url".
     Pass `ahead`, the run's OCR cache, to start reading the capture while those queries run (see
-    `OcrCache.read_ahead`).
+    `OcrCache.read_ahead`). The URL is read from the frontmost app when it is one of `browsers`, the
+    other installed browsers, and from `browser` otherwise.
     """
     replay = image_path is not None and app is not None
     with phase(timing, "screenshot"):
@@ -64,10 +67,12 @@ def capture(
     with phase(timing, "window"):
         window = None if replay else desktop.frontmost_window_bounds(pid)
     with phase(timing, "field"):
-        field = None if replay else desktop.focused_field()
+        keys = None if replay else desktop.keyboard_focus()
+        field = None if replay else desktop.focused_field(pid)
     with phase(timing, "url"):
-        page_url = url if url is not None else (None if replay else desktop.browser_url(browser))
-    return Screen(image=image, scale=scale, app=frontmost, field=field, url=page_url, pid=pid, window=window)
+        reader = frontmost if frontmost in browsers else browser
+        page_url = url if url is not None else (None if replay else desktop.browser_url(reader))
+    return Screen(image=image, scale=scale, app=frontmost, field=field, url=page_url, pid=pid, window=window, keys=keys)
 
 
 def goal_echoes(goal: str) -> set[str]:
@@ -595,10 +600,11 @@ def in_field(block: Item, screen: Screen) -> bool:
 
     The field is an item already when the app declares it, and its value is in the state. Read again
     as a block of its own, the text just typed becomes something to click. A text area is left
-    alone: its lines are content, not one value.
+    alone: its lines are content, not one value, and so is an editor's. So is a stand-in for a field
+    the browser hid: its box is the text that was clicked, and its value is in no state but the screen's.
     """
     field = screen.field
-    if field is None or not field.is_text or field.role == "AXTextArea":
+    if field is None or not field.is_text or field.clicked or field.multiline:
         return False
     x, y = screen.to_points(block)
     return field.x < x < field.x + field.w and field.y < y < field.y + field.h

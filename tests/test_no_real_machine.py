@@ -23,6 +23,8 @@ from typesafe_computer_use.browser.cdp import Chrome, Session
         lambda: macos.open_url("Google Chrome", "https://example.com"),
         lambda: macos.activate("Finder"),
         lambda: macos.screenshot(),
+        lambda: macos.default_browser(),
+        lambda: macos.keyboard_focus(),
     ],
 )
 def test_an_unpatched_call_refuses_instead_of_reaching_the_machine(touch):

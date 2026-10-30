@@ -195,7 +195,12 @@ def test_l7_a_long_page_is_scrolled_three_times(monkeypatch, tmp_path):
     state = drive(world, long_list_policy, goal=GOAL, monkeypatch=monkeypatch, tmp_path=tmp_path)
 
     assert state.outcome == "done"
-    assert state.history == ["scrolled down", "scrolled down", "scrolled down", "clicked 'Buy'"]
+    assert state.history == [
+        "scrolled down over 'Event A'",
+        "scrolled down over 'Event C'",
+        "scrolled down over 'Event E'",
+        "clicked 'Buy'",
+    ]
     assert world.page.name == "checkout"
     assert world.log == ["scroll_down", "scroll_down", "scroll_down", "click:Buy"]
 
@@ -469,7 +474,7 @@ def test_l18_the_step_limit_ends_an_endless_list(monkeypatch, tmp_path):
     state = drive(world, always_scroll_policy, goal=GOAL, steps=3, monkeypatch=monkeypatch, tmp_path=tmp_path)
 
     assert state.outcome == "step limit"
-    assert state.history == ["scrolled down"] * 3
+    assert state.history == ["scrolled down over 'Post 1'", "scrolled down over 'Post 3'", "scrolled down over 'Post 5'"]
     assert world.page.name == "list4"
     assert world.log == ["scroll_down"] * 3
 
@@ -595,7 +600,7 @@ def test_l21_a_composite_task_runs_the_whole_pipeline(monkeypatch, tmp_path):
         "pressed Escape",
         "waited",
         "waited",
-        "scrolled down",
+        "scrolled down over 'Event A'",
         "pressed 'Search' via accessibility",
     ]
     assert state.history[6] == "typed 'bruno mars' into 'Search' via accessibility (verified 0.95)"
@@ -767,8 +772,9 @@ def test_l27_scrolling_past_the_end_stops_as_a_repeated_action(monkeypatch, tmp_
 
     assert state.outcome == "stalled"
     # One scroll that moved, then three at the bottom: the last of those is the second scroll
-    # already taken on this screen, so the repeat rule ends it.
-    assert state.history == ["scrolled down"] * 4
+    # already taken on this screen, so the repeat rule ends it. The screen says the bottom ones
+    # moved nothing.
+    assert state.history == ["scrolled down over 'Event A'"] + ["scrolled down over 'Event C' (nothing there moved)"] * 3
     assert world.page.name == "list2"
 
 
@@ -1191,9 +1197,9 @@ def test_l36_a_long_run_mixes_everything(monkeypatch, tmp_path):
         "went back",
         "went back",
         "pressed 'Show all dates' (off-screen control) via accessibility",
-        "scrolled down",
-        "scrolled down",
-        "scrolled down",
+        "scrolled down over 'All dates'",
+        "scrolled down over 'More dates'",
+        "scrolled down over 'Even more'",
         "clicked 'Buy' beside 'Coldplay', 'Oct 2', '$60'",
         "pressed Escape",
         "clicked 'Close'",
@@ -1847,3 +1853,136 @@ def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_s
     assert organise["under"] == "'Restore pages?'"
     assert "under 'Restore pages?'" in world.fake.asked[0]["item"].criteria[str(organise["i"])]
     assert state.calls.count["classifier"] == 2  # one decision to open the menu, one to stop
+
+
+CREDITS = "https://openrouter.ai/settings/credits"
+
+
+def credits_dialog(**page) -> Page:
+    """OpenRouter's Add Credits dialog in Brave: an Amount box holding 10, its page kept out of
+    accessibility, so a click puts the caret in the box and nothing reports it."""
+    defaults = {"items": ["Add Credits", ["Amount", "10"], "Total due $11.12", "Continue to Stripe"], "url": CREDITS}
+    return Page(name="dialog", field="Amount", hides_focus=True, **{**defaults, **page})
+
+
+def test_l58_a_box_a_browser_hides_the_focus_of_is_typed_into_after_the_click(monkeypatch, tmp_path):
+    """A run in Brave clicked the Amount box four times and stalled: with the page out of
+    accessibility no field was ever focused, so type_text was never offered. Now the box the last
+    click landed in stands in for the field, the text goes in by keystrokes over what the box held,
+    and the screen across its row is read again to check it."""
+    world = World([credits_dialog()])
+    world.typed["Amount"] = "10"
+
+    def policy(state: dict, questions: dict) -> tuple:
+        if state["previous_actions"] and state["previous_actions"][-1].startswith("typed"):
+            return ("done", None)
+        return ("type_text", None) if state["focused_field"] else ("click_item", "10")
+
+    state = drive(
+        world,
+        policy,
+        goal="add credits to bring the balance to $10",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        writer=FakeWriter(text="0.29"),
+    )
+
+    assert state.outcome == "done"
+    assert state.history == ["clicked '10'", "typed '0.29' into '10' via keystrokes (verified 0.95)"]
+    assert world.typed["Amount"] == "0.29"
+    assert world.log == ["click:10", "clear_field", "type:0.29"]
+    assert world.fake.states[0]["focused_field"] is None
+    stand_in = world.fake.states[1]["focused_field"]
+    assert stand_in["role"] == "unknown" and stand_in["label"] == "10" and "may not be" in stand_in["note"]
+    assert "current_value" not in stand_in  # the box's value is whatever the screen shows, not an empty string
+
+
+def test_l59_the_stand_in_lasts_one_screen_and_only_after_a_click_on_page_text_in_a_browser(monkeypatch, tmp_path):
+    """The stand-in is the last click and nothing else: not after a scroll, not for a control the
+    accessibility tree declared, and not in an app that is not a browser."""
+    seen: list = []
+
+    def policy(steps: list[tuple]):
+        def choose(state: dict, questions: dict) -> tuple:
+            seen.append(state["focused_field"])
+            return steps[len(seen) - 1] if len(seen) <= len(steps) else ("done", None)
+
+        return choose
+
+    world = World([credits_dialog()])
+    drive(world, policy([("click_item", "10"), ("scroll_down", None)]), monkeypatch=monkeypatch, tmp_path=tmp_path)
+    assert [f and f["label"] for f in seen] == [None, "10", None]
+
+    seen.clear()
+    world = World([credits_dialog(items=["Add Credits", ["Amount", ("10", "button")], "Continue to Stripe"])])
+    drive(world, policy([("click_item", "10")]), monkeypatch=monkeypatch, tmp_path=tmp_path / "ax")
+    assert seen == [None, None]
+
+    seen.clear()
+    world = World([credits_dialog(app="Discord", url=None)])
+    drive(world, policy([("click_item", "10")]), monkeypatch=monkeypatch, tmp_path=tmp_path / "app")
+    assert seen == [None, None]
+
+
+def test_a_stop_from_the_menu_bar_is_named_ctrl_c(monkeypatch, tmp_path):
+    # The menu bar stops a run with SIGINT, a KeyboardInterrupt with no message: "aborted ()" said nothing.
+    world = World([Page(name="home", items=["Shows"], url="https://example.com/")])
+
+    def interrupt(*_):
+        raise KeyboardInterrupt
+
+    state = drive(world, interrupt, goal=GOAL, monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.outcome == "aborted (Ctrl-C)"
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["outcome"] == "aborted (Ctrl-C)"
+
+
+def test_l60_a_focus_is_spent_once_acted_on_and_what_was_read_on_the_way_reaches_the_typing(monkeypatch, tmp_path):
+    """The Barcelona run: the writer sent the classifier to the flights tab, the classifier found the
+    fare and came back to the document, and the focus, still standing, sent it to the flights tab
+    again from every screen until the user stopped it. Nor could anything have typed the fare: the
+    text writer saw only the document."""
+    tabs = ["Flights tab", "Doc tab"]
+    world = World(
+        [
+            Page(
+                name="doc",
+                items=[*tabs, "Document"],
+                url="https://docs.example.com/d/1",
+                field="Document",
+                on={"click:Flights tab": "flights"},
+            ),
+            Page(
+                name="flights",
+                items=[*tabs, "$676 TAP Air Portugal 5:25 PM"],
+                url="https://flights.example.com/s",
+                on={"click:Doc tab": "doc"},
+            ),
+        ],
+        start="doc",
+    )
+
+    def policy(state: dict, questions: dict) -> tuple:
+        done = state["previous_actions"]
+        if "flights" in state["browser_active_tab_url"]:
+            return ("click_item", "Doc tab")
+        if state.get("current_focus"):
+            return ("click_item", "Flights tab")
+        if not done:
+            return ("click_item", "Flights tab", 0.3)  # unsure, so the writer reads the blank document
+        return ("done", None) if any(a.startswith("typed") for a in done) else ("type_text", None)
+
+    writer = FakeWriter(text="$676 TAP Air Portugal", reviews=[{"focus": "Click 'Flights tab'"}])
+    state = drive(
+        world, policy, goal="find the fare, then write it in the doc", monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer
+    )
+
+    assert state.outcome == "done"
+    assert world.log == ["click:Flights tab", "click:Doc tab", "type:$676 TAP Air Portugal"]
+    assert [s.get("current_focus") for s in world.fake.states] == [None, "Click 'Flights tab'", None, None, None]
+    fill = json.loads(
+        next(r for r in writer.requests if "fill" in r["output_config"]["format"]["schema"]["properties"])["messages"][0][
+            "content"
+        ][-1]["text"]
+    )
+    assert any("$676 TAP Air Portugal 5:25 PM" in s["text"] for s in fill["earlier_screens"])

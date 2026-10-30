@@ -50,6 +50,8 @@ if _absent("Quartz"):
     _stub("Quartz").kCGHIDEventTap = 0
 if not REAL_ACCESSIBILITY:
     _stub("ApplicationServices")
+if _absent("AppKit"):
+    _stub("AppKit")
 if _absent("ocrmac"):
 
     class _OCR:
@@ -78,8 +80,9 @@ def no_real_machine(monkeypatch):
 
     The suite runs on the developer's own Mac, often while they use it. Every call that would
     move the pointer, press a key, run AppleScript (which opens apps and URLs), capture the
-    screen, open a file, or act on another app's accessibility element refuses here, so a test
-    that forgot to patch one fails instead of taking over the machine. A test that needs one
+    screen, open a file, ask which app opens links, or act on another app's accessibility
+    element, or ask which app holds the keyboard, refuses here, so a test that forgot to patch
+    one fails instead of taking over the machine. A test that needs one
     patches it itself, after this. The pointer reads as mid-screen, never the abort corner.
     """
 
@@ -89,7 +92,7 @@ def no_real_machine(monkeypatch):
 
         return call
 
-    for name in ("_post", "osascript", "screenshot", "open_path"):
+    for name in ("_post", "osascript", "screenshot", "open_path", "_link_handler", "keyboard_focus"):
         monkeypatch.setattr(macos, name, refuse(f"macos.{name}"))
     monkeypatch.setattr(macos, "mouse_location", lambda: (500.0, 500.0))
     if REAL_ACCESSIBILITY:
@@ -185,6 +188,8 @@ WRITER_ENV = (
     "CLICKER_WRITER_BASE_URL",
     "CLICKER_WRITER_API_KEY",
     "CLICKER_WRITER_VISION",
+    "CLICKER_WRITER_PROVIDER",
+    "CLICKER_ANSWER_SORT",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -209,6 +214,7 @@ def endpoint():
     request with its headers, and replies with `state["reply"]`. `state["reject"]` may return an
     error message for a request body, which then gets a 400, the way an endpoint refuses a parameter.
     `state["usage"]`, when set, is the Chat Completions reply's `usage`; without it there is none.
+    `state["cut"]` lists replies to send first, one per request, each as if cut off at max_tokens.
     """
     seen: list[dict] = []
     state: dict = {"reply": '{"ok": true, "url": "https://example.com", "reason": ""}', "reject": lambda body: None}
@@ -216,6 +222,8 @@ def endpoint():
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            cut = bool(state.get("cut"))
+            reply = state["cut"].pop(0) if cut else state["reply"]
             seen.append({"path": self.path, "headers": {k.lower(): v for k, v in self.headers.items()}, "body": body})
             refusal = state["reject"](body)
             if refusal:
@@ -229,7 +237,11 @@ def endpoint():
                         "created": 0,
                         "model": body["model"],
                         "choices": [
-                            {"index": 0, "message": {"role": "assistant", "content": state["reply"]}, "finish_reason": "stop"}
+                            {
+                                "index": 0,
+                                "message": {"role": "assistant", "content": reply},
+                                "finish_reason": "length" if cut else "stop",
+                            }
                         ],
                         **({"usage": state["usage"]} if "usage" in state else {}),
                     },
@@ -242,8 +254,8 @@ def endpoint():
                         "type": "message",
                         "role": "assistant",
                         "model": body["model"],
-                        "content": [{"type": "text", "text": state["reply"]}],
-                        "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": reply}],
+                        "stop_reason": "max_tokens" if cut else "end_turn",
                         "stop_sequence": None,
                         "usage": {"input_tokens": 1, "output_tokens": 1},
                     },

@@ -53,7 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status.menuForClick = { [weak self] in self?.menuForClick?() }
         status.contextMenu = { [weak self] in self?.contextMenu?() ?? NSMenu() }
         status.onWillShowMenu = { [weak self] in
-            self?.panelController.close()
+            // The status strip stays under the run's menu; it takes no clicks.
+            guard let self, !self.panelController.isPassive else { return }
+            self.panelController.close()
         }
         statusItemController = status
     }
@@ -70,7 +72,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func openPanel() {
         guard let button = statusItemController?.button else { return }
-        if !panelController.isOpen {
+        if panelController.isOpen {
+            panelController.focus()
+        } else {
+            panelController.open(anchoredTo: button)
+        }
+    }
+
+    /// The locked panel while the run has the screen: one passive row of status,
+    /// shown over full-screen apps too, since a locked panel joins every Space.
+    func showRunStrip(_ on: Bool) {
+        panelController.setPassive(on)
+        if on, !panelController.isOpen, let button = statusItemController?.button {
             panelController.open(anchoredTo: button)
         }
     }

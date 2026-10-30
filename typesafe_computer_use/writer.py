@@ -16,11 +16,13 @@ from PIL import Image
 from .config import (
     answer_model,
     answer_reasoning,
+    answer_sort,
     custom_writer_endpoint,
     openrouter_writer,
     writer_api,
     writer_base_url,
     writer_model,
+    writer_provider,
     writer_reasoning,
     writer_vision,
 )
@@ -30,6 +32,10 @@ from .openai_writer import OpenAIWriter
 
 ANSWER_IMAGE_EDGE = 1568  # the longest edge a vision model reads without shrinking the image itself
 PLACEHOLDER_KEY = "not-needed"  # an endpoint you host yourself does not check a key
+# Tokens a reasoning model may think with on top of a call's own limit, by effort. The thinking
+# comes out of max_tokens ahead of the reply: at medium effort a 256-token call spent it all and
+# came back with no text. An effort not listed gets medium's.
+REASONING_TOKENS = {"none": 0, "minimal": 256, "low": 1024, "medium": 2048, "high": 4096}
 
 
 type Writer = anthropic.Anthropic | OpenAIWriter  # both answer `messages.create` the Anthropic way
@@ -103,18 +109,34 @@ def _structured(
         effort = answer_reasoning() if answering else writer_reasoning()
         if effort:
             extra["reasoning"] = effort
-    try:
-        response = writer.messages.create(
-            model=answer_model() if answering else writer_model(),
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": content}],
-            output_config={"format": {"type": "json_schema", "schema": schema}},
-            **extra,
-        )
-    except (anthropic.APIError, openai.APIError) as e:
-        raise WriterError(f"the request failed: {e}") from e
-    return checked(parse_json("".join(b.text for b in response.content if b.type == "text")), properties)
+            max_tokens += REASONING_TOKENS.get(effort, REASONING_TOKENS["medium"])
+        provider = None if answering else writer_provider()
+        if provider:
+            extra["provider"] = provider
+        sort = answer_sort() if answering else None
+        if sort:
+            extra["sort"] = sort
+    # A reply cut off before its object closes, most often by a reasoning model's own thinking, which
+    # runs longer on some calls than others, is asked for once more with twice the room.
+    for limit in (max_tokens, max_tokens * 2):
+        try:
+            response = writer.messages.create(
+                model=answer_model() if answering else writer_model(),
+                max_tokens=limit,
+                system=system,
+                messages=[{"role": "user", "content": content}],
+                output_config={"format": {"type": "json_schema", "schema": schema}},
+                **extra,
+            )
+        except (anthropic.APIError, openai.APIError) as e:
+            raise WriterError(f"the request failed: {e}") from e
+        text = "".join(b.text for b in response.content if b.type == "text")
+        try:
+            return checked(parse_json(text), properties)
+        except WriterError:
+            if getattr(response, "stop_reason", None) != "max_tokens":
+                raise
+    raise WriterError(f"the writer's reply was cut off at its token limit twice, the second time at {limit}: {text[:400]!r}")
 
 
 def parse_json(text: str) -> dict:
@@ -175,10 +197,15 @@ def compose_text(
     items: list[Item],
     history: list[str],
     guidance: Guidance | None = None,
+    earlier: list[dict] | None = None,
 ) -> Fill:
     """The exact string to type into the focused field, and whether to submit it with Return.
 
-    Return never follows text in a text area, where it starts a new line instead."""
+    Return never follows text in a text area, where it starts a new line instead. Text there may run
+    to paragraphs, so it gets more room than a one-line value. `earlier` is the text of the screens
+    before this one (see `runner.earlier_screens`): a goal that says to write down what was found
+    is typed on a page that does not show it."""
+    multiline = screen.field is not None and screen.field.multiline
     packet = {
         "goal": goal,
         **(guidance.state() if guidance else {}),
@@ -188,14 +215,18 @@ def compose_text(
         "focused_field": screen.field.summary() if screen.field else None,
         "text_near_field": screen.near_field(items),
         "all_screen_text": [it.text for it in items][:120],
+        **({"earlier_screens": earlier} if earlier else {}),
     }
     data = _structured(
         writer,
         system=(
             "You fill in one text field on a user's screen. You receive the user's goal, recent "
             "actions, the focused field's label and placeholder, and nearby screen text, and, when "
-            "there are any, the step the agent is now working on and what the user said when asked. "
-            "Decide the exact string to type. Never invent credentials, passwords, or personal data; for such "
+            "there are any, the step the agent is now working on, what the user said when asked, and "
+            "the text of the screens the agent passed through before this one, oldest first. "
+            "Decide the exact string to type. When the goal says to write down something found on the way, "
+            "such as a price or a name, take it from those screens, never from memory and never a guess. "
+            "Never invent credentials, passwords, or personal data; for such "
             "fields, or when the field should not be filled, set fill to false. Set submit to true when this "
             "text completes what the goal asks of the field and Return should confirm it now, as a Save or OK "
             "button would: a name or value the goal says to create, rename, change, or save, or a search it "
@@ -209,10 +240,9 @@ def compose_text(
             "reason": {"type": "string"},
             "submit": {"type": "boolean"},
         },
-        max_tokens=256,
+        max_tokens=1024 if multiline else 256,
     )
     text = data["text"].strip() if data["fill"] else ""
-    multiline = screen.field is not None and screen.field.role == "AXTextArea"
     return Fill(text, submit=bool(text) and data["submit"] and not multiline)
 
 
@@ -354,8 +384,8 @@ ANSWER_SYSTEM = (
     "Set focus to send the classifier back to work: one short imperative sentence naming the next "
     "step in terms of what this screen shows, quoting the text of the item to use when there is "
     "one. The classifier can click an on-screen item, type into a focused field, replacing what "
-    "the field holds, press Return or Escape, scroll, go back, wait, and open a website by its "
-    "https address; it cannot read, "
+    "the field holds, press Return or Escape, scroll, go back, wait, open a website by its "
+    "https address, and open an app installed on this computer by its name; it cannot read, "
     "compare, or remember, so a focus is one move, not a plan. It has no other key or shortcut and "
     "cannot right-click, double-click, or select text, so a focus that needs one of those is "
     "refused: name the button, menu, or link on screen that does the same. Never conclude from "

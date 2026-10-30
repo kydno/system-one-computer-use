@@ -4,12 +4,14 @@ import SwiftUI
 /// area, a 13pt glyph at half strength that comes up on hover over a faint plate.
 struct HoverButton: View {
 
-    let systemName: String
+    var systemName: String
     var help: String = ""
     /// Latched, for toggles: full strength with its plate showing.
     var isOn: Bool = false
     /// False dims the glyph and stops it responding.
     var isEnabled: Bool = true
+    /// Degrees the glyph turns while hovered; the settings gear's.
+    var hoverRotation: Double = 0
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,6 +28,7 @@ struct HoverButton: View {
                 .font(.system(size: K.InputBar.buttonGlyphSize, weight: .regular))
                 .foregroundStyle(.primary)
                 .opacity(glyphOpacity)
+                .rotationEffect(.degrees(isHovering ? hoverRotation : 0))
                 .frame(width: K.InputBar.buttonHitSize, height: K.InputBar.buttonHitSize)
                 .background {
                     RoundedRectangle(cornerRadius: K.InputBar.buttonHoverCornerRadius, style: .continuous)

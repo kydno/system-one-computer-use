@@ -23,6 +23,13 @@ def test_a_signature_names_the_app_the_page_the_focus_and_the_text_in_reading_or
     assert signature(screen, [])[2] is None
 
 
+def test_a_stand_in_field_is_no_part_of_the_signature(screen, make_item):
+    """It is the last click, not something the screen showed: with it, every click would read as a change."""
+    box = Field(role="", label="10", placeholder="", value="", x=0, y=0, w=10, h=10, clicked=True)
+    items = [make_item(0, "Amount")]
+    assert signature(replace(screen, field=box), items) == signature(screen, items)
+
+
 def test_the_same_text_on_another_page_or_app_or_focus_is_another_screen():
     here = ("Google Chrome", "https://a/", None, texts("Home", "Tickets"))
     assert same_screen(here, here)

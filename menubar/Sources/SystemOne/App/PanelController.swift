@@ -75,7 +75,8 @@ final class PanelController<Content: View> {
         isOpen = true
         ignoreDismissUntil = Date().addingTimeInterval(K.Panel.dismissGrace)
 
-        // The only show call in the app. Never `NSApp.activate`.
+        // The only show call in the app. Never `NSApp.activate`. A passive
+        // panel cannot become key, so this only orders it front.
         panel.makeKeyAndOrderFront(nil)
         installMonitors()
         onOpen?()
@@ -97,6 +98,29 @@ final class PanelController<Content: View> {
         }
         pendingOrderOut = work
         DispatchQueue.main.asyncAfter(deadline: .now() + K.Motion.panelClose, execute: work)
+    }
+
+    // MARK: - The run's status strip
+
+    var isPassive: Bool { panel?.isPassive ?? false }
+
+    /// The panel as the run's status strip, or back to the panel. A key panel
+    /// gives up key only by leaving the screen, so it goes out and straight back.
+    func setPassive(_ passive: Bool) {
+        let panel = ensurePanel()
+        guard panel.isPassive != passive else { return }
+        panel.isPassive = passive
+        guard passive, panel.isKeyWindow else { return }
+        panel.orderOut(nil)
+        panel.orderFrontRegardless()
+    }
+
+    /// An open panel takes key again, as on open: the run asks, or has ended,
+    /// while the strip was showing.
+    func focus() {
+        guard isOpen, let panel else { return }
+        panel.makeKeyAndOrderFront(nil)
+        onOpen?()
     }
 
     // MARK: - Sizing

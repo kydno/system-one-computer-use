@@ -39,7 +39,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..models import AxNode, Field
+from ..models import AxNode, Field, KeyboardFocus
 from ..platform_adapter import OcrLine
 from . import a11y
 from .tree import Fetched, Later
@@ -177,9 +177,12 @@ class OSWorldDesktop:
     def clear_field(self) -> None:
         self._do("pyautogui.hotkey('ctrl', 'a'); pyautogui.press('delete')")
 
-    def scroll(self, lines: int) -> None:
-        """Scroll under the pointer, parked over the active window's center when the tree gives it,
-        as the Mac adapter parks it: the pointer may sit anywhere after the last click."""
+    def scroll(self, lines: int, at: tuple[float, float] | None = None) -> None:
+        """Scroll under the pointer, parked at `at`, or over the active window's center when the tree
+        gives it, as the Mac adapter parks it: the pointer may sit anywhere after the last click."""
+        if at is not None:
+            self._do(f"pyautogui.scroll({int(lines)}, x={round(at[0])}, y={round(at[1])})")
+            return
         window = a11y.frame(a11y.active_window(self._tree.result()))  # the screen the decision was made on
         if window is None:
             self._do(f"pyautogui.scroll({int(lines)})")
@@ -205,6 +208,18 @@ class OSWorldDesktop:
         address bar would, or as the page it starts on when it does not."""
         self._do(_browser_code(url))
         return True
+
+    def installed_browsers(self) -> list[str]:
+        """None to choose between: the VM's one browser is the run's own."""
+        return []
+
+    def installed_apps(self) -> list[str]:
+        """None: no app but the browser can be brought forward in the VM (see `activate`)."""
+        return []
+
+    def default_browser(self) -> str | None:
+        """None: the VM's one browser is the run's own."""
+        return None
 
     def browser_url(self, browser: str) -> str | None:
         return a11y.browser_url(self._now(), browser or None)
@@ -232,8 +247,11 @@ class OSWorldDesktop:
     def recognize_text(self, image: Image.Image) -> list[OcrLine]:
         return self._recognize(image)
 
-    def focused_field(self) -> Field | None:
+    def focused_field(self, pid: int | None = None) -> Field | None:
         return a11y.focused_field(self._now())
+
+    def keyboard_focus(self) -> KeyboardFocus | None:
+        return None  # the VM's tree holds the focus of the one desktop it shows
 
     def actionable_elements(self, pid: int, display_w_pt: float, display_h_pt: float) -> tuple[list[AxNode], list[AxNode], bool]:
         return a11y.walk(a11y.active_app(self._now()), display_w_pt, display_h_pt)

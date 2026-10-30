@@ -40,7 +40,26 @@ def test_typing_checks_abort_between_characters_and_releases_the_key(input_event
     monkeypatch.setattr(macos, "mouse_location", lambda: (0, 0) if input_events else (500, 500))
     with pytest.raises(Abort):
         macos.type_text("abc")
-    assert input_events == [{"down": True, "text": "a"}, {"down": False, "text": "a"}]
+    assert input_events == [{"down": True, "text": "a", "flags": 0}, {"down": False, "text": "a", "flags": 0}]
+
+
+def test_typed_text_after_select_all_carries_no_command(input_events):
+    # A sourceless event inherits the Command that Cmd+A left held, and "Barcelona"'s n opened a new window.
+    macos.clear_field()
+    macos.type_text("Barcelona")
+
+    select_all, delete, typed = input_events[:2], input_events[2:4], input_events[4:]
+    assert [event["flags"] for event in select_all + delete] == ["command", "command", 0, 0]
+    assert "".join(event["text"] for event in typed if event["down"]) == "Barcelona"
+    assert all(event["flags"] == 0 for event in typed)
+
+
+def test_a_line_break_is_typed_as_the_return_key(input_events, monkeypatch):
+    pressed = []
+    monkeypatch.setattr(macos, "press", lambda key, command=False: pressed.append(key))
+    macos.type_text("a\nb")
+    assert pressed == ["return"]
+    assert [event["text"] for event in input_events if event["down"]] == ["a", "b"]
 
 
 def test_click_releases_the_button_when_interrupted_after_mouse_down(input_events, monkeypatch):
@@ -73,6 +92,20 @@ def test_corner_abort_stops_a_scroll_before_the_pointer_is_parked(input_events, 
     with pytest.raises(Abort):
         macos.scroll(-10)
     assert input_events == []
+
+
+def test_a_scroll_parks_the_pointer_at_the_point_it_was_given(input_events, monkeypatch):
+    monkeypatch.setattr(macos, "frontmost_window_center", lambda: pytest.fail("a point was given"))
+    monkeypatch.setattr(macos, "mouse_location", lambda: (500, 500))
+    macos.scroll(-10, (175.0, 590.0))
+    assert input_events == [("move", (175.0, 590.0)), ("scroll", -10)]
+
+
+def test_a_scroll_with_no_point_parks_the_pointer_over_the_window_center(input_events, monkeypatch):
+    monkeypatch.setattr(macos, "frontmost_window_center", lambda: (300.0, 300.0))
+    monkeypatch.setattr(macos, "mouse_location", lambda: (500, 500))
+    macos.scroll(10)
+    assert input_events == [("move", (300.0, 300.0)), ("scroll", 10)]
 
 
 @pytest.mark.parametrize(

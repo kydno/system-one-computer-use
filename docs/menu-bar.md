@@ -52,12 +52,14 @@ terminal. In System Settings > Privacy & Security, give System One:
 | | |
 |---|---|
 | Click the icon | Opens the panel. Type a goal and press Enter. |
-| The eye / pointer button | Dry run or drive. A dry run is `clicker`'s own default: one decision, shown and not carried out. Driving is `--act`. The right-click menu has the same switch, as **Drive the Mac**. |
-| While it runs | The panel stays off the screen and the icon shows the step. Clicking it shows the goal, the step, the last action, and **Stop**. |
+| Clear | Clears the last run's box, leaving just the input bar; what you have typed stays. Off while a run is going. Every run from the panel drives the Mac with no step limit, until `done`, a stall, low confidence or **Stop**; the dry run is in the terminal. |
+| The lock | Keeps the panel open when you click another app, as Menu-Bar-Chat's does, and during a run keeps one row of status on screen instead of hiding the panel. |
+| The gear | Settings: the OpenRouter key, the email for `type_email`, the decision model (Jev latest, Mercury Decide or OpenAI's), and the reviewer, the answer model that reads the screen when the decision model stops: search OpenRouter's models that read screenshots, pick one, and send it to its cheapest or fastest provider first (`CLICKER_ANSWER_MODEL`, `CLICKER_ANSWER_SORT`), all written to this checkout's `.env`. **Prompt Permissions** asks macOS for Accessibility, Screen Recording and Automation, or opens System Settings for one already asked. |
+| While it runs | The icon shows the step. Unlocked, the panel stays off the screen. Locked, it shrinks to one row: the step and the last action. That row never takes the keyboard, lets clicks through to the app under it, is left out of the run's screenshots, and shows over full-screen apps. Clicking the icon shows the goal, the step, the last action, and **Stop**. |
 | Stop | Stops the run as Ctrl-C does in a terminal: it writes `run.json` and ends as `aborted`. Slamming the mouse into the top-left corner still works too. |
 | A question | The panel opens with it. Type a reply and press Enter, and the panel leaves before the run reads the screen again. Escape, or the icon, declines, as an empty reply does in the terminal: the run ends with the answer it has. |
 | The end | The panel shows the goal, every action, and the writer's answer or how the run ended, with the time and a button for the run folder. |
-| Right click | Drive the Mac, Open Last Run Folder, Stop while a run is going, Quit. |
+| Right click | Keep Panel Open, Open Last Run Folder, Stop while a run is going, Settings…, Quit. |
 
 Quitting the app mid-run stops the run.
 

@@ -258,3 +258,15 @@ def test_an_action_makes_the_last_capture_stale(tmp_path, screen, monkeypatch):
 
     assert keep_going
     assert state.view is None
+
+
+def test_the_typed_text_may_come_from_the_screens_before_this_one(screen):
+    earlier = [{"app": "Google Chrome", "url": "https://flights.example.com", "text": ["$676 TAP Air Portugal"]}]
+    fake = FakeWriter({"fill": True, "text": "$676", "submit": False, "reason": "read on the way"})
+
+    writer.compose_text(fake, GOAL, screen, [], [], earlier=earlier)
+    writer.compose_text(fake, GOAL, screen, [], [])
+
+    sent = [json.loads(r["messages"][0]["content"][-1]["text"]) for r in fake.requests]
+    assert sent[0]["earlier_screens"] == earlier
+    assert "earlier_screens" not in sent[1]

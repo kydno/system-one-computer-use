@@ -20,7 +20,17 @@ import AppKit
 final class NonActivatingPanel: NSPanel {
 
     /// Borderless windows refuse key status unless this is overridden.
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { !isPassive }
+
+    /// The run's status strip: never key, so the run's keystrokes reach the app
+    /// in front; clicks fall through to that app; and screen captures leave it
+    /// out, so the run never reads it as part of the screen.
+    var isPassive = false {
+        didSet {
+            ignoresMouseEvents = isPassive
+            sharingType = isPassive ? .none : .readOnly
+        }
+    }
 
     /// Never main. Becoming main is what greys the previous app permanently.
     override var canBecomeMain: Bool { false }

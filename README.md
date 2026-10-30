@@ -80,7 +80,7 @@ cp .env.example .env     # fill in the keys
 | `CLICKER_DECISION_MODEL` | no | the decision model; on OpenRouter `~typesafe/jev-latest` by default, or `inception/mercury-decide`, `openai/gpt-6-luna-decisions` |
 | `ANTHROPIC_API_KEY` | no | `type_text`, writer-proposed URLs, and the final answer, when OpenRouter is not the writer |
 | `CLICKER_EMAIL` | no | enables the `type_email` action |
-| `CLICKER_BROWSER` | no | defaults to `Google Chrome` |
+| `CLICKER_BROWSER` | no | the default browser; unset, the Mac's own default browser when `use_browser` can drive it, else `Google Chrome`. When others are installed, Jev picks the one the goal names or the one in front |
 
 `.env` lives at the repo root and is read by every entry point (`clicker`, `clicker-inspect`).
 With only `OPENROUTER_API_KEY` set, both the classifier and the writer run on OpenRouter; see
@@ -96,7 +96,7 @@ synthetic clicks are silently dropped, and `--act` refuses to start.
 ```
 uv run clicker "open the Playground"                 # dry run: one step, prints what it would do
 uv run clicker "open the Playground" --act           # drives the machine, up to 100 steps
-uv run clicker "log in" --act --steps 20 --delay 3   # longer and slower
+uv run clicker "log in" --act --steps 20 --delay 3   # longer, and up to 3 s for a slow page to settle
 uv run clicker "log in" --act --handoffs 0           # the classifier alone: its first stop ends the run
 uv run clicker-inspect "any goal"                    # 3-2-1, capture, open the annotated screen + payload
 ```

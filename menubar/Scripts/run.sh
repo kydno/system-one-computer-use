@@ -19,5 +19,10 @@ if pgrep -x "$NAME" >/dev/null 2>&1; then
 fi
 
 echo "==> launching"
-open "$ROOT/$NAME.app"
+# `open` hands the app this shell's environment, and runs inherit it: an
+# ANTHROPIC_BASE_URL from the shell would take the writer away from OpenRouter.
+# Launch clean, as from Finder or the login item, so only `.env` decides.
+env -i HOME="$HOME" USER="$USER" LOGNAME="${LOGNAME:-$USER}" TMPDIR="${TMPDIR:-/tmp}" \
+    LANG="${LANG:-en_US.UTF-8}" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+    open "$ROOT/$NAME.app"
 echo "==> look for the icon in the menu bar"

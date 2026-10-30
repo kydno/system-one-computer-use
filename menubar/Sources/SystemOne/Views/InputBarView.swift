@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The first box, from Menu-Bar-Chat's input bar: the goal, or the reply to a
-/// question, and the switch between a dry run and driving the Mac.
+/// question, a clear for the last run's box, and Menu-Bar-Chat's lock.
 struct InputBarView: View {
 
     @ObservedObject var model: RunModel
@@ -13,14 +13,19 @@ struct InputBarView: View {
     var body: some View {
         HStack(spacing: K.InputBar.elementGap) {
             HoverButton(
-                systemName: model.drives ? "cursorarrow.click.2" : "eye",
-                help: model.drives
-                    ? "Drives the Mac: clicks and types. Click for a dry run instead."
-                    : "Dry run: says what it would do, and does nothing. Click to let it drive the Mac.",
-                isOn: model.drives,
-                isEnabled: !model.isAsking
+                systemName: K.InputBar.clearSymbol,
+                help: "Clear",
+                isEnabled: model.canClear
             ) {
-                model.drives.toggle()
+                model.clear()
+            }
+
+            HoverButton(
+                systemName: model.isPinned ? "lock.fill" : "lock.open",
+                help: model.isPinned ? "Unpin" : "Keep open",
+                isOn: model.isPinned
+            ) {
+                model.isPinned.toggle()
             }
 
             TextField(model.placeholder, text: $model.inputText)
@@ -32,8 +37,18 @@ struct InputBarView: View {
                 .accessibilityLabel(model.placeholder)
 
             HoverButton(
+                systemName: "gearshape",
+                help: "Settings",
+                isOn: model.isShowingSettings,
+                isEnabled: !model.isAsking,
+                hoverRotation: K.Settings.gearHoverRotation
+            ) {
+                model.toggleSettings()
+            }
+
+            HoverButton(
                 systemName: model.isAsking ? "arrowshape.turn.up.left" : "arrow.up",
-                help: model.isAsking ? "Reply" : (model.drives ? "Start" : "Dry run"),
+                help: model.isAsking ? "Reply" : "Start",
                 isEnabled: model.canSubmit
             ) {
                 model.submit()

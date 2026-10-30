@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -113,6 +114,7 @@ class Page:
     offscreen: tuple[str, ...] = ()  # labels the app exposes without showing
     loads_in: int = 0  # steps of "wait" before the items appear
     no_ax_value: bool = False  # the field refuses to have its value set, so text has to be typed in
+    hides_focus: bool = False  # Chromium with its page kept out of accessibility: the field takes keys but is never reported
     covered_by: str | None = None  # an overlay eating every mouse click: the text of what is really hit
     popup: str | None = None  # a window in front of the page, by name; the row reading "Close" is its close button
     under_popup: tuple[str, ...] = ()  # the page's items under that window, which eats a mouse click on them
@@ -136,6 +138,7 @@ class World:
         self.typed: dict[str, str] = {}
         self.log: list[str] = []
         self.mouse: list[tuple[float, float]] = []
+        self.wheel: list[tuple[float, float] | None] = []  # where each scroll parked the pointer, None for the window's center
         self.fake: FakeTypeSafe | None = None  # the classifier `drive` built, for fake.states
         self.asked: list[str] = []  # the questions the writer put to the user
         self.loading = {p.name: p.loads_in for p in pages}
@@ -213,7 +216,7 @@ class World:
             for lbl in self.page.offscreen
         ]
         screen = Screen(
-            image=Image.new("RGB", CAPTURE),
+            image=self.drawn(),
             scale=SCALE,
             app=self.page.app,
             field=self.focused_field(),
@@ -224,6 +227,19 @@ class World:
         )
         self.ticks += 1
         return screen
+
+    def drawn(self) -> Image.Image:
+        """The display as an image: one band whose shade moves with every action the world takes, so
+        a press it took shows on the next screenshot, as a page repaints (see `actions.press_showed`).
+        Each row is a box shaded by its text, so the rows look the same until the rows change, as a
+        list scrolled past its end does (see `actions.scroll_showed`)."""
+        image = Image.new("RGB", CAPTURE)
+        shade = len(self.log) * 40 % 256
+        image.paste((shade, shade, shade), (0, CAPTURE[1] // 2, CAPTURE[0], CAPTURE[1] // 2 + 200))
+        for cell in self.cells():
+            tone = 40 + zlib.crc32(cell.text.encode()) % 200
+            image.paste((tone, tone, tone), tuple(round(v) for v in cell.box))
+        return image
 
     def perceive(self, screen: Screen) -> list[Item]:
         """The rows as items, filling `screen.ax_refs` for the ones the app declared, and
@@ -256,14 +272,14 @@ class World:
             button = AxNode(role="AXButton", label="Close", x=x1, y=y1, w=x2 - x1, h=y2 - y1, pressable=False)
         return Popup(self.page.popup, 0.0, 0.0, CAPTURE[0] / SCALE, CAPTURE[1] / SCALE, close=button)
 
-    def focused_field(self) -> Field | None:
+    def focused_field(self, pid: int | None = None) -> Field | None:
         """The page's text field, at the row that carries its label.
 
         A field is placed by the row that reads as its label, so a page that names a field it does
         not show is a mistake in the scenario rather than a case the world has to invent a box for.
         """
         label = self.page.field
-        if label is None:
+        if label is None or self.page.hides_focus:
             return None
         labelled = next((c for c in self.cells() if c.text == label), None)
         if labelled is None:
@@ -280,6 +296,21 @@ class World:
             h=ROW_TEXT_HEIGHT / SCALE,
             ref=self._field_ref(label),
         )
+
+    def recognize_text(self, image: Image.Image) -> list[tuple[str, float, tuple[float, float, float, float]]]:
+        """OCR of the row the page's field sits in: its label, then what it holds now.
+
+        The world does not track which strip of the screen was cropped, and the one caller reads the
+        field's row, so that row is what it gets.
+        """
+        label = self.page.field
+        row = next((c for c in self.cells() if c.text == label), None)
+        if row is None:
+            return []
+        _, y1, x2, y2 = row.box
+        lines = [(c.text, 1.0, c.box) for c in self.cells() if c.row == row.row]
+        held = self.typed.get(label or "", "")
+        return lines + ([(held, 1.0, (x2 + 1, y1, x2 + 100, y2))] if held else [])
 
     # ----- the machine ---------------------------------------------------------------------
 
@@ -314,7 +345,8 @@ class World:
             return
         self.apply("enter" if name == "return" else name)
 
-    def scroll(self, lines: int) -> None:
+    def scroll(self, lines: int, at: tuple[float, float] | None = None) -> None:
+        self.wheel.append(at)
         self.apply("scroll_down" if lines < 0 else "scroll_up")
 
     def type_text(self, text: str) -> None:
@@ -360,6 +392,9 @@ class World:
         monkeypatch.setattr(desktop, "ax_value", self.ax_value)
         monkeypatch.setattr(desktop, "clear_field", self.clear_field)
         monkeypatch.setattr(desktop, "focused_field", self.focused_field)
+        monkeypatch.setattr(desktop, "screenshot", self.drawn)
+        monkeypatch.setattr(desktop, "display_scale", lambda image: SCALE)
+        monkeypatch.setattr(desktop, "recognize_text", self.recognize_text)
         monkeypatch.setattr(desktop, "activate", self.activate)
         monkeypatch.setattr(desktop, "open_url", self.open_url)
         # `wait` is the one action that touches no machine call, so the only way the world hears
@@ -374,8 +409,8 @@ class FakeTypeSafe:
     """The classifier, replaced by a policy over the state the real `decide` builds.
 
     A policy returns (kind, target) and this maps the target to whatever key the question wants:
-    the item's index for click_item, the off-screen control's key for press_offscreen, the site key
-    for use_browser. So a scenario never writes an index, and renumbering the page cannot break it.
+    the item's index for click_item and for a scroll aimed at an item, the off-screen control's key
+    for press_offscreen, the site key for use_browser. So a scenario never writes an index, and renumbering the page cannot break it.
 
     Every decision state lands in `states`, so a test can assert what the model was shown. The
     `verify_typed` Noul that `actions._type_text` makes is a different question about a different
@@ -407,7 +442,8 @@ class FakeTypeSafe:
     def _answers(self, state: dict, questions: dict, kind: str, target, confidence: float) -> dict:
         answers = {"kind": _answer(kind, confidence), "site": _answer(target if kind == "use_browser" else "none", confidence)}
         if "item" in questions:
-            answers["item"] = _answer(self._item_key(state, target) if kind == "click_item" else "0", confidence)
+            aimed = kind == "click_item" or (kind in ("scroll_down", "scroll_up") and target is not None)
+            answers["item"] = _answer(self._item_key(state, target) if aimed else "0", confidence)
         if "offscreen" in questions:
             key = self._offscreen_key(state, target) if kind == "press_offscreen" else "0"
             answers["offscreen"] = _answer(key, confidence)

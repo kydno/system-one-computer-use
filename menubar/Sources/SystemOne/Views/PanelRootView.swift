@@ -15,12 +15,21 @@ struct PanelRootView: View {
             // One glass surface for the whole column: two boxes each draw their
             // own specular edge, so even touching they seam.
             VStack(spacing: 0) {
-                InputBarView(model: model, isFieldFocused: $isFieldFocused)
-                    .geometryGroup()
+                // Locked, a run shows one row of status in place of the column.
+                if model.showsRunStrip {
+                    RunStripView(model: model)
+                        .transition(.opacity)
+                } else {
+                    InputBarView(model: model, isFieldFocused: $isFieldFocused)
+                        .geometryGroup()
 
-                if model.hasRunContent {
-                    RunBoxView(model: model)
-                        .transition(.opacity.combined(with: .scale(scale: K.Motion.secondBoxScale, anchor: .top)))
+                    if model.isShowingSettings {
+                        SettingsView(model: model)
+                            .transition(.opacity.combined(with: .scale(scale: K.Motion.secondBoxScale, anchor: .top)))
+                    } else if model.hasRunContent {
+                        RunBoxView(model: model)
+                            .transition(.opacity.combined(with: .scale(scale: K.Motion.secondBoxScale, anchor: .top)))
+                    }
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -31,6 +40,8 @@ struct PanelRootView: View {
         .background { SizeReader { model.reportContentHeight($0.height) } }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.hasRunContent)
+        .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.isShowingSettings)
+        .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.showsRunStrip)
         .opacity(isPresented ? 1 : 0)
         .scaleEffect(isPresented ? 1 : restingScale, anchor: .top)
         .offset(y: isPresented ? 0 : restingOffset)

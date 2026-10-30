@@ -54,7 +54,7 @@ class Guidance:
     """What the run has learned about its goal since it began.
 
     The goal is one sentence and never changes. `focus` is the sub-goal the writer sent the
-    classifier back to work on the last time the classifier stopped, and `exchanges` are the
+    classifier back to work on the last time the classifier stopped, until it acts on it, and `exchanges` are the
     questions the user answered on the way. Every model call reads both, so the classifier
     steers by them and the writer types by them.
     """
@@ -64,6 +64,11 @@ class Guidance:
 
     def focused(self, focus: str) -> Guidance:
         return replace(self, focus=focus)
+
+    def followed(self) -> Guidance:
+        """The guidance once the classifier has acted on its focus. A focus is one move, so once made
+        it is spent: kept, it would send the classifier back to it from every screen after."""
+        return replace(self, focus=None)
 
     def heard(self, question: str, reply: str) -> Guidance:
         return replace(self, exchanges=(*self.exchanges, Exchange(question, reply)))
@@ -95,9 +100,10 @@ def signature(screen: Screen, items: list[Item]) -> Signature:
     A click that only moves the focus changes no text, but it changes what the next action can do,
     so it counts. A scroll on a dense page keeps nine tenths of the text and moves all of it, so the
     row counts too: the same line lower down is a different line. A tab's memory figure is no part
-    of the screen (see TAB_MEMORY).
+    of the screen (see TAB_MEMORY). A stand-in field is no part of it either: it is the last click,
+    not something the screen showed, and with it every click would count as a change.
     """
-    focused = f"{screen.field.role}:{screen.field.label}" if screen.field else None
+    focused = f"{screen.field.role}:{screen.field.label}" if screen.field and not screen.field.clicked else None
     row = ROW_PT * screen.scale
     return (screen.app, screen.url, focused, tuple((TAB_MEMORY.sub("", it.text), round(it.center[1] / row)) for it in items))
 
@@ -194,11 +200,30 @@ class Popup:
         return self.x <= point[0] < self.x + self.w and self.y <= point[1] < self.y + self.h
 
 
+CLICKED_NOTE = (
+    "The browser does not say what has the keyboard focus. This is the item the last click landed on: "
+    "it may be a text box or may not be, and what it holds is whatever the screen shows there."
+)
+
+EDITOR_NOTE = (
+    "A document's text editor has the keyboard focus, though it is no form field. Typing goes in at its "
+    "caret, after what the document already holds, and its text is on the screen rather than here."
+)
+
+
 @dataclass(frozen=True)
 class Field:
     """The focused accessibility element, in screen points.
 
-    `ref` is the element itself, so text can be set on it directly instead of typed.
+    `ref` is the element itself, so text can be set on it directly instead of typed. `clicked` marks
+    a stand-in, not an element: Chromium browsers keep their pages out of accessibility until an
+    assistive app asks the right way, and then report no focus at all, so the box the last click
+    landed in stands in for the field (see `runner.clicked_field`). It has no element and no value,
+    so text goes in by keystrokes and the screen is read again to check it.
+
+    `editor` marks the caret of a rich-text editor that is no form field, such as a Google Doc, which
+    takes its keys in a hidden box and draws its text itself. What it holds is a document, so text
+    goes in at the caret and nothing is emptied or replaced first.
     """
 
     role: str
@@ -210,22 +235,45 @@ class Field:
     w: float
     h: float
     ref: object | None = field(default=None, compare=False, repr=False)
+    clicked: bool = False
+    editor: bool = False
 
     @property
     def is_text(self) -> bool:
-        return self.role in TEXT_ROLES
+        return self.role in TEXT_ROLES or self.clicked or self.editor
+
+    @property
+    def multiline(self) -> bool:
+        """Whether Return starts a new line here instead of confirming the text."""
+        return self.role == "AXTextArea" or self.editor
 
     def record(self) -> dict:
         """Everything but the opaque element handle, which no log can serialize."""
         return {f.name: getattr(self, f.name) for f in fields(self) if f.name != "ref"}
 
     def summary(self) -> dict:
+        if self.clicked:
+            return {"role": "unknown", "label": self.label, "note": CLICKED_NOTE}
         return {
             "role": self.role,
             "label": self.label,
             "placeholder": self.placeholder,
             "current_value": self.value[:200],
+            **({"note": EDITOR_NOTE} if self.editor else {}),
         }
+
+
+@dataclass(frozen=True)
+class KeyboardFocus:
+    """The app the keyboard goes to, as accessibility names it.
+
+    Kept for the log. A screen with no focused field cannot be typed into, and this says whether the
+    keys go to another app than the one in front, or accessibility names none at all.
+    """
+
+    app: str  # empty when accessibility names no app, or one that has quit since
+    pid: int | None
+    error: str | None = None  # why accessibility named no app, as it said it: -25212 is no value, -25204 no answer
 
 
 @dataclass(frozen=True)
@@ -239,6 +287,7 @@ class Screen:
     url: str | None
     pid: int | None = None  # frontmost process, for the accessibility walk; None in replay
     window: tuple[float, float, float, float] | None = None  # frontmost window, x/y/w/h in points; None in replay
+    keys: KeyboardFocus | None = None  # where the keyboard goes; None in replay and where the adapter cannot say
     ax_refs: dict[int, object] = field(default_factory=dict)  # item index -> accessibility element, when it has one
     offscreen: list[AxNode] = field(default_factory=list)  # labelled controls the app exposes but does not show
     covered: dict[int, Popup] = field(default_factory=dict)  # item index -> the popup a click on it would land on

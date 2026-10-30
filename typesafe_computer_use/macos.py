@@ -14,6 +14,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
+import AppKit
 import ApplicationServices as AS
 import Quartz
 from ocrmac import ocrmac
@@ -21,10 +22,27 @@ from PIL import Image
 
 from .ax_walk import AX_PRESS, AxAttrs, Frame, walk_actionable
 from .config import ABORT_CORNER_PX
-from .models import Abort, AxNode, Field
+from .models import TEXT_ROLES, Abort, AxNode, Field, KeyboardFocus
 
 KEYCODES = {"return": 36, "tab": 48, "escape": 53, "a": 0, "delete": 51, "[": 33}
+# Browsers name, on any element inside editable page content, the element its editing belongs to.
+# A focused element with one and no text role is a rich-text editor, such as a Google Doc's hidden
+# key box, which reports itself as a bare AXGroup.
+EDITABLE_ANCESTOR = "AXEditableAncestor"
+# Brave names no editable ancestor for that key box when its page is out of accessibility, but its
+# DOM id still says what it is. Docs, Sheets and Slides all take their keys in one of these.
+GOOGLE_KEY_BOX = "docs-texteventtarget"
 MIN_WINDOW_SIDE_PT = 50.0  # anything smaller is a palette or a shadow, not the window being worked in
+
+# The browsers use_browser can work in, by the name the frontmost app reports: Chromium's AppleScript
+# dictionary, which open_url and browser_url speak.
+BROWSERS = ("Google Chrome", "Brave Browser", "Microsoft Edge", "Arc", "Chromium")
+APP_FOLDERS = (Path("/Applications"), Path.home() / "Applications")
+# Where open_app looks: the folders above, the system's own apps (Photos, Notes, Calendar), and the
+# Utilities inside each.
+APP_FOLDERS_ALL = tuple(
+    folder / sub for folder in (*APP_FOLDERS, Path("/System/Applications")) for sub in (Path(), Path("Utilities"))
+)
 
 # ------------------------------------------------------------------ escape hatch
 
@@ -86,24 +104,34 @@ def press(key: str, command: bool = False) -> None:
 
     def event(down: bool):
         e = Quartz.CGEventCreateKeyboardEvent(None, code, down)
-        if command:
-            Quartz.CGEventSetFlags(e, Quartz.kCGEventFlagMaskCommand)
+        Quartz.CGEventSetFlags(e, Quartz.kCGEventFlagMaskCommand if command else 0)
         return e
 
     _down_then_up(event)
 
 
 def _unicode_key(ch: str, down: bool):
+    """A key event carrying one character, with no modifier held.
+
+    An event made without a source takes the modifiers the session last saw, and a Cmd-flagged
+    press such as clear_field's Cmd+A leaves Command among them: "Barcelona" then went in as
+    Cmd+B, Cmd+A, ... and its n opened a new browser window. The flags are set, never inherited.
+    """
     event = Quartz.CGEventCreateKeyboardEvent(None, 0, down)
     Quartz.CGEventKeyboardSetUnicodeString(event, len(ch), ch)
+    Quartz.CGEventSetFlags(event, 0)
     return event
 
 
 def type_text(text: str) -> None:
-    """One character at a time, checking the abort corner before each."""
+    """One character at a time, checking the abort corner before each. A line break is the Return key,
+    which every editor reads as one; a character event carrying it is left to each app to read."""
     for ch in text:
         check_abort()
-        _down_then_up(partial(_unicode_key, ch))
+        if ch == "\n":
+            press("return")
+        else:
+            _down_then_up(partial(_unicode_key, ch))
 
 
 def clear_field() -> None:
@@ -111,12 +139,13 @@ def clear_field() -> None:
     press("delete")
 
 
-def scroll(lines: int) -> None:
-    """Scroll events go to the view under the cursor, so park it over the frontmost window first."""
-    center = frontmost_window_center()
+def scroll(lines: int, at: tuple[float, float] | None = None) -> None:
+    """Scroll events go to the view under the cursor, so park it at `at` first, or over the
+    frontmost window's center when no point is given."""
+    point = at if at is not None else frontmost_window_center()
     check_abort()
-    if center is not None:
-        _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, center, Quartz.kCGMouseButtonLeft))
+    if point is not None:
+        _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, point, Quartz.kCGMouseButtonLeft))
     _post(Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, lines))
 
 
@@ -144,9 +173,12 @@ def frontmost_pid() -> int:
 
 
 def activate(app: str, timeout: float = 3.0) -> bool:
-    """Bring an app to the front and confirm it got there."""
+    """Bring an app to the front, starting it when it is not running, and confirm it got there."""
     check_abort()
-    osascript(f'tell application "{app}" to activate')
+    try:
+        osascript(f'tell application "{app}" to activate')
+    except subprocess.CalledProcessError:
+        return False  # no app goes by that name
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         check_abort()
@@ -154,7 +186,10 @@ def activate(app: str, timeout: float = 3.0) -> bool:
             return True
         time.sleep(0.1)
     check_abort()
-    osascript(f'tell application "System Events" to set frontmost of process "{app}" to true')
+    try:
+        osascript(f'tell application "System Events" to set frontmost of process "{app}" to true')
+    except subprocess.CalledProcessError:
+        return False  # still starting, or its process goes by another name than its bundle
     time.sleep(0.3)
     return frontmost_app() == app
 
@@ -163,6 +198,38 @@ def open_url(browser: str, url: str) -> bool:
     check_abort()
     osascript(f'tell application "{browser}" to open location "{url}"')
     return activate(browser)
+
+
+def installed_browsers() -> list[str]:
+    """The browsers in BROWSERS with an app bundle in an Applications folder. Reads the disk, nothing else."""
+    return [name for name in BROWSERS if any((folder / f"{name}.app").is_dir() for folder in APP_FOLDERS)]
+
+
+def installed_apps() -> list[str]:
+    """Every app bundle in APP_FOLDERS_ALL by name, sorted, except the browsers, which use_browser
+    reaches. A name AppleScript could not quote is left out. Reads the disk, nothing else."""
+    names = {
+        path.stem
+        for folder in APP_FOLDERS_ALL
+        if folder.is_dir()
+        for path in folder.iterdir()
+        if path.suffix == ".app" and not path.name.startswith(".")
+    }
+    return sorted((name for name in names if name not in BROWSERS and not set('"\\') & set(name)), key=str.lower)
+
+
+def default_browser() -> str | None:
+    """The browser macOS opens web links in, when it is one of BROWSERS; None for any other, such as Safari."""
+    handler = _link_handler()
+    name = Path(handler).stem if handler else None
+    return name if name in BROWSERS else None
+
+
+def _link_handler() -> str | None:
+    """The path of the app LaunchServices opens https links with. Asks, and opens nothing."""
+    link = AppKit.NSURL.URLWithString_("https://example.com/")
+    app = AppKit.NSWorkspace.sharedWorkspace().URLForApplicationToOpenURL_(link)
+    return str(app.path()) if app is not None else None
 
 
 def browser_url(browser: str) -> str | None:
@@ -178,11 +245,29 @@ def open_path(path: Path, as_text: bool = False) -> None:
 
 
 def frontmost_window_bounds(pid: int | None = None) -> tuple[float, float, float, float] | None:
-    """The frontmost app's topmost on-screen window as x, y, w, h in points. Pure Quartz, no AX needed.
+    """The frontmost app's focused window as x, y, w, h in points.
+
+    Accessibility names that window; Quartz only lists windows. Chrome in full screen draws its
+    toolbar in a window of its own above the page's, so the topmost Quartz window is the toolbar,
+    and a region cut to it never reads the page. Quartz's topmost window stands in when
+    accessibility has no answer: not trusted, or an app that exposes no focused window.
 
     Pass the pid when the caller already has it; looking it up costs an AppleScript round trip.
     """
     pid = frontmost_pid() if pid is None else pid
+    return _focused_window(pid) or _topmost_window(pid)
+
+
+def _focused_window(pid: int) -> tuple[float, float, float, float] | None:
+    app = AS.AXUIElementCreateApplication(pid)
+    AS.AXUIElementSetMessagingTimeout(app, AX_MESSAGE_TIMEOUT)
+    window = _ax_attr(app, AS.kAXFocusedWindowAttribute)
+    frame = _ax_frame(window) if window is not None else None
+    return frame if frame is not None and frame[2] > MIN_WINDOW_SIDE_PT and frame[3] > MIN_WINDOW_SIDE_PT else None
+
+
+def _topmost_window(pid: int) -> tuple[float, float, float, float] | None:
+    """The app's topmost on-screen window at the normal level. Pure Quartz, no AX needed."""
     options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
     for window in Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or []:
         if window.get("kCGWindowOwnerPID") == pid and window.get("kCGWindowLayer") == 0:
@@ -229,9 +314,42 @@ def _ax_attr(element, name: str):
     return value if err == 0 else None
 
 
-def focused_field() -> Field | None:
-    system = AS.AXUIElementCreateSystemWide()
-    element = _ax_attr(system, AS.kAXFocusedUIElementAttribute)
+def _app_name(pid: int) -> str:
+    running = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+    return str(running.localizedName()) if running is not None else ""
+
+
+def keyboard_focus() -> KeyboardFocus | None:
+    """The app the keyboard goes to, as the system-wide accessibility element names it.
+
+    It can differ from the app in front: a panel that takes keys without coming to the front keeps
+    the keyboard with its own app. It can also be no app at all, with the error that said so.
+    """
+    try:
+        err, app = AS.AXUIElementCopyAttributeValue(AS.AXUIElementCreateSystemWide(), AS.kAXFocusedApplicationAttribute, None)
+    except Exception as e:
+        err, app = type(e).__name__, None
+    owner, owner_pid = "", None
+    if err == 0 and app is not None:
+        err, found = AS.AXUIElementGetPid(app, None)
+        if err == 0:
+            owner, owner_pid = _app_name(found), found
+    return KeyboardFocus(owner, owner_pid, None if err == 0 else str(err))
+
+
+def focused_field(pid: int | None = None) -> Field | None:
+    """The focused element, asked of the whole system, and of the frontmost app `pid` when the
+    system cannot say.
+
+    The system-wide question can fail at once with -25204 for every app, whichever is in front,
+    while the app asked itself still names its focused element: a Google Doc's key box went unseen
+    that way, and a run that sees no field never types.
+    """
+    element = _ax_attr(AS.AXUIElementCreateSystemWide(), AS.kAXFocusedUIElementAttribute)
+    if element is None and pid is not None:
+        app = AS.AXUIElementCreateApplication(pid)
+        AS.AXUIElementSetMessagingTimeout(app, AX_MESSAGE_TIMEOUT)
+        element = _ax_attr(app, AS.kAXFocusedUIElementAttribute)
     if element is None:
         return None
     x = y = w = h = 0.0
@@ -243,8 +361,9 @@ def focused_field() -> Field | None:
         x, y, w, h = pt.x, pt.y, sz.width, sz.height
     value = _ax_attr(element, AS.kAXValueAttribute)
     label = _ax_attr(element, AS.kAXTitleAttribute) or _ax_attr(element, AS.kAXDescriptionAttribute) or ""
+    role = str(_ax_attr(element, AS.kAXRoleAttribute) or "")
     return Field(
-        role=str(_ax_attr(element, AS.kAXRoleAttribute) or ""),
+        role=role,
         label=str(label),
         placeholder=str(_ax_attr(element, AS.kAXPlaceholderValueAttribute) or ""),
         value=value if isinstance(value, str) else "",
@@ -253,6 +372,11 @@ def focused_field() -> Field | None:
         w=w,
         h=h,
         ref=element,
+        editor=role not in TEXT_ROLES
+        and (
+            _ax_attr(element, EDITABLE_ANCESTOR) is not None
+            or str(_ax_attr(element, "AXDOMIdentifier") or "").startswith(GOOGLE_KEY_BOX)
+        ),
     )
 
 

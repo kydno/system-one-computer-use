@@ -7,13 +7,13 @@ import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from .actions import Context, perform
+from .actions import Context, moved, perform
 from .calls import Calls, MeteredClassifier, MeteredWriter
 from .config import DEFAULT_DELAY, DEFAULT_HANDOFFS, DEFAULT_MIN_CONFIDENCE, DEFAULT_STEPS, MAX_OPTIONS
-from .decide import Decision, decide, offscreen_records
+from .decide import Decision, browser_names, decide, offscreen_records
 from .decisions import DecisionClient, DecisionError
 from .events import Events
-from .models import Abort, Guidance, Item, Screen, Signature, same_screen, signature
+from .models import Abort, Field, Guidance, Item, Screen, Signature, same_screen, signature
 from .perception import OcrCache, capture, perceive
 from .platform_adapter import desktop
 from .report import Log, annotate, ax_count, render_payload, top
@@ -25,6 +25,7 @@ from .writer import Answer, WriterError, compose_answer
 MAX_IDLE = 3  # consecutive actions that left the screen as it was: refusals, waits on a spinner, scrolls at the bottom
 MAX_REPEATS = 2  # consecutive actions already taken on the same screen earlier in the run: a cycle, or a click that does nothing
 MAX_STALLS = 3  # stalls with no new page between them; the last is final, since two focuses from the writer did not free the run
+SETTLE_LOOK = 0.25  # between two looks at a screen that may still be moving; each look is a capture of its own
 EARLIER_LINES = 600  # lines of text from the screens before the last one that the answer may also be read from
 MAX_QUESTIONS = 3  # questions the writer may put to the user in one run; an empty reply ends the asking sooner
 
@@ -76,6 +77,9 @@ class Handoff:
     actions: int  # how many actions the run had taken by then, so a focus that led to none can be told
 
 
+Clicked = tuple[str, str | None, Field]  # app, URL, and the box a click on page text landed in
+
+
 @dataclass
 class RunState:
     history: list[str] = field(default_factory=list)
@@ -95,6 +99,7 @@ class RunState:
     guidance: Guidance = field(default_factory=Guidance)  # the writer's focus and the user's replies, as they stand
     handoffs: list[Handoff] = field(default_factory=list)
     calls: Calls = field(default_factory=Calls)  # requests to each model, over the whole run
+    clicked: Clicked | None = None  # the last action's click on page text, for the screen right after it
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -115,17 +120,17 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
         with DecisionClient() as typesafe:
             ctx = metered(ctx_factory(typesafe, state.history), state.calls)
             for step in range(1, cfg.steps + 1):
+                ctx = replace(ctx, guidance=state.guidance)  # a handoff sets the focus, and the action it asked for spends it
                 if run_step(cfg, ctx, state, step, log):
                     continue
                 if not hand_off(cfg, ctx, state, step, log):
                     break
-                ctx = replace(ctx, guidance=state.guidance)
             else:
                 log(f"\nstopped after {cfg.steps} steps")
                 state.outcome = "step limit"
                 hand_off(cfg, ctx, state, cfg.steps, log)
     except (KeyboardInterrupt, Abort) as e:
-        state.outcome = f"aborted ({e or 'Ctrl-C'})"
+        state.outcome = f"aborted ({str(e) or 'Ctrl-C'})"  # a bare KeyboardInterrupt is truthy but prints as ""
         log(f"\n{state.outcome} after {len(state.history)} actions")
     finally:
         summary = {
@@ -259,7 +264,7 @@ def review(cfg: RunConfig, ctx: Context, state: RunState, stopped: str, can_ask:
     """
     if state.view is None:
         desktop.check_abort()
-        screen = capture(cfg.image, cfg.app, cfg.url, ctx.browser)
+        screen = capture(cfg.image, cfg.app, cfg.url, ctx.browser, browsers=ctx.browsers)
         screen.image.save(cfg.out / "answer-raw.png")
         state.view = (screen, perceive(screen, MAX_OPTIONS, cfg.goal))
     screen, items = state.view
@@ -297,7 +302,11 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     started = time.perf_counter()
     cache = None if cfg.replay else state.ocr_cache
     with phase(timing, "capture"):
-        screen = capture(cfg.image, cfg.app, cfg.url, ctx.browser, timing, ahead=cache if cfg.read_ahead else None)
+        screen = capture(
+            cfg.image, cfg.app, cfg.url, ctx.browser, timing, ahead=cache if cfg.read_ahead else None, browsers=ctx.browsers
+        )
+    screen = with_clicked_field(screen, state.clicked, browser_names(ctx.browser, ctx.browsers))
+    state.clicked = None
     items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache)
     state.view = (screen, items)
     if not screen_moved(state, screen, items, log):
@@ -306,12 +315,27 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     prefix = cfg.out / f"step-{step:03d}"  # three digits, so a run of 100 steps still lists in order
     screen.image.save(prefix.with_name(prefix.name + "-raw.png"))
     prefix.with_name(prefix.name + "-payload.txt").write_text(
-        render_payload(cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance), encoding="utf-8"
+        render_payload(
+            cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance, ctx.browsers, ctx.apps
+        ),
+        encoding="utf-8",
     )
 
     try:
         with phase(timing, "decide"):
-            decision = decide(ctx.typesafe, cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance)
+            decision = decide(
+                ctx.typesafe,
+                cfg.goal,
+                screen,
+                items,
+                state.history,
+                ctx.browser,
+                ctx.email,
+                tried,
+                ctx.guidance,
+                ctx.browsers,
+                ctx.apps,
+            )
     except DecisionError as e:
         # A refusal or an outage is not a guess to act on: the writer reads this screen instead.
         log(f"\nstep {step}: no decision ({e})")
@@ -320,11 +344,15 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     by_index = {str(it.index): it for it in items}
     annotate(screen, items, decision.chosen, prefix.with_suffix(".png"))
 
-    field_desc = f" field={screen.field.role}:{screen.field.label!r}" if screen.field else ""
+    field_desc = (
+        f" field={'clicked' if screen.field.clicked else screen.field.role}:{screen.field.label!r}" if screen.field else ""
+    )
     log(
-        f"\nstep {step}: app={screen.app!r}{field_desc} url={screen.url!r} items={len(items)} ax={ax_count(items)} "
+        f"\nstep {step}: app={screen.app!r}{field_desc}{keys_desc(screen)} url={screen.url!r} items={len(items)} ax={ax_count(items)} "
         f"offscreen={len(screen.offscreen)} kind={decision.kind.choice} ({decision.kind.confidence:.2f}) "
         f"site={decision.site.choice}"
+        + (f" browser={decision.browser.choice!r} ({decision.browser.confidence:.2f})" if decision.browser is not None else "")
+        + (f" open={decision.app.choice!r} ({decision.app.confidence:.2f})" if decision.app is not None else "")
     )
     for key, p in top(decision.kind, 4):
         log(f"  {p:5.2f}  {key}")
@@ -339,6 +367,9 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
 
     keep_going = resolve(cfg, ctx, state, screen, items, decision, timing, log)
     timing.setdefault("act", 0.0)
+    if state.view is None:  # an action ran: let the screen settle before the next step, or the answer, reads it
+        with phase(timing, "settle"):
+            settle(screen, cfg.delay)
     timing["total"] = round(time.perf_counter() - started, 3)
     state.timings.append(timing)
 
@@ -347,10 +378,29 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     )
     log(f"  files: {prefix.name}-raw.png, {prefix.name}.png, {prefix.name}-payload.txt, {prefix.name}-answers.json")
     log(format_timing(timing))
-
-    if state.view is None:  # an action ran: let the screen settle before the next step, or the answer, reads it
-        desktop.sleep_watching(cfg.delay)
     return keep_going
+
+
+def settle(before: Screen, limit: float) -> None:
+    """Wait for what an action did to finish showing, for `limit` seconds at most.
+
+    A fixed pause cost every action the whole limit, 20 s of a 116 s run on Google Flights, though
+    most pages repaint in a fraction of it. So the display is looked at instead: once it differs
+    from the capture the action was decided on and then holds still for one look, it has settled.
+    A screen that has not changed at all may be waiting on the network, and one that never holds
+    still is loading or playing something, so both get the whole limit, as before. No limit means
+    no looks, as on OSWorld, where each one would be a round trip.
+    """
+    if limit <= 0:
+        return
+    end = time.monotonic() + limit
+    last = None
+    while (left := end - time.monotonic()) > 0:
+        desktop.sleep_watching(min(SETTLE_LOOK, left))
+        now = desktop.screenshot()
+        if last is not None and moved(before.image, now, before.scale) and not moved(last, now, before.scale):
+            return
+        last = now
 
 
 def resolve(
@@ -378,13 +428,72 @@ def resolve(
         state.outcome = "dry run"
         return False
 
+    if decision.kind.choice == "type_text":
+        # What to write may have been read on another page: a fare found on the way, typed into a document.
+        ctx = replace(ctx, earlier=earlier_screens(state, state.last))
     with phase(timing, "act"):
         what = perform(decision, screen, items, ctx)
     state.view = None
+    if state.guidance.focus and decision.kind.choice != "wait" and "refused:" not in what:
+        state.guidance = state.guidance.followed()
+        log("  the focus is followed; back to the goal")
+    state.clicked = clicked_field(screen, items, decision, what)
     state.history.append(what)
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
     return not repeating(state, what, decision.kind.choice == "wait", log)
+
+
+def keys_desc(screen: Screen) -> str:
+    """Where the keyboard goes, for the step line, when it is not the app in front: it says why a
+    screen with no focused field cannot be typed into."""
+    keys = screen.keys
+    if keys is None:
+        return ""
+    nobody = "no app" + (f" ({keys.error})" if keys.error else "")
+    return f" keys={keys.app or nobody!r}" if keys.app != screen.app else ""
+
+
+def clicked_field(screen: Screen, items: list[Item], decision: Decision, what: str) -> Clicked | None:
+    """Where a click on text read off the page landed, kept to stand in for the field it may have focused.
+
+    Only a mouse click on page text counts: a control from the accessibility tree is reported with
+    its focus when it takes it, and the menu bar is no page.
+    """
+    if not decision.clicking or "click refused" in what:
+        return None
+    item = next((it for it in items if str(it.index) == decision.item.choice), None)
+    if item is None or item.from_ax or screen.in_menu_bar(item):
+        return None
+    s = screen.scale
+    box = Field(
+        role="",
+        label=item.text,
+        placeholder="",
+        value="",
+        x=item.x1 / s,
+        y=item.y1 / s,
+        w=(item.x2 - item.x1) / s,
+        h=(item.y2 - item.y1) / s,
+        clicked=True,
+    )
+    return screen.app, screen.url, box
+
+
+def with_clicked_field(screen: Screen, clicked: Clicked | None, browsers: list[str]) -> Screen:
+    """The screen, with the box the last click landed in as its focused field when a browser reports none.
+
+    Chromium browsers keep their pages out of accessibility, and then report no focused element at
+    all, so a click into a text box reads as a click on nothing. type_text is never offered, and the
+    run clicks the box until it stalls. Only the screen right after the click gets the stand-in, in
+    the same browser on the same page; the classifier is told it may not be a text box.
+    """
+    if screen.field is not None or clicked is None or screen.app not in browsers:
+        return screen
+    app, url, box = clicked
+    if (screen.app, screen.url) != (app, url):
+        return screen
+    return replace(screen, field=box)
 
 
 def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
@@ -458,6 +567,12 @@ def answers(
         "item_probabilities": decision.item.probabilities if decision.item else None,
         "site": decision.site.choice,
         "site_probabilities": decision.site.probabilities,
+        **(
+            {"browser": decision.browser.choice, "browser_probabilities": decision.browser.probabilities}
+            if decision.browser
+            else {}
+        ),
+        **({"app_to_open": decision.app.choice, "app_to_open_probabilities": decision.app.probabilities} if decision.app else {}),
         "offscreen": decision.offscreen.choice if decision.offscreen else None,
         "offscreen_probabilities": decision.offscreen.probabilities if decision.offscreen else None,
         "offscreen_controls": offscreen_records(screen.offscreen),
@@ -469,6 +584,7 @@ def answers(
         "timing": timing,
         "items": [asdict(it) for it in items],
         "field": screen.field.record() if screen.field else None,
+        "keyboard": asdict(screen.keys) if screen.keys else None,
         "app": screen.app,
         "url": screen.url,
     }

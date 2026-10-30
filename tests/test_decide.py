@@ -4,15 +4,18 @@ from types import SimpleNamespace
 from typesafe_computer_use.config import SITES
 from typesafe_computer_use.decide import (
     Decision,
+    app_criteria,
     base_state,
+    browser_criteria,
     decide,
     item_criteria,
     kind_criteria,
     offscreen_criteria,
     row_mates,
     site_criteria,
+    verify_typed,
 )
-from typesafe_computer_use.models import AxNode, Guidance
+from typesafe_computer_use.models import AxNode, Field, Guidance
 
 
 def answer(choice, confidence, probabilities=None):
@@ -166,3 +169,116 @@ def test_the_item_question_steers_around_what_was_tried_here_as_the_kind_questio
     for key in ("kind", "item"):
         assert "already tried on this screen" in questions[key].instructions
         assert "led straight back here" in questions[key].instructions
+
+
+def asked_questions(screen, browsers):
+    """The questions decide sends for one screen, with the installed browsers given."""
+    asked = []
+
+    def system_one(state, questions):
+        asked.append(questions)
+        return SimpleNamespace(answers={"kind": answer("use_browser", 0.9), "site": answer("none", 1.0)})
+
+    decide(
+        SimpleNamespace(system_one=system_one),
+        "open openrouter in Brave",
+        screen,
+        [],
+        [],
+        "Google Chrome",
+        None,
+        browsers=browsers,
+    )
+    (questions,) = asked
+    return questions
+
+
+def test_one_browser_asks_no_browser_question(screen):
+    questions = asked_questions(screen, ())
+    assert "browser" not in questions
+    assert questions["kind"].criteria["use_browser"].startswith("Work in Google Chrome:")
+    assert "browser" not in asked_questions(screen, ("Google Chrome",))
+
+
+def test_more_browsers_ask_which_one_and_the_answer_reaches_the_decision(screen):
+    """'in Brave open openrouter' opened Chrome, the one browser the run knew."""
+    questions = asked_questions(replace(screen, app="Brave Browser"), ("Brave Browser", "Google Chrome", "Arc"))
+    assert list(questions["browser"].criteria) == ["Google Chrome", "Brave Browser", "Arc"]
+    assert questions["kind"].criteria["use_browser"].startswith("Work in a web browser (the browser question says which)")
+
+    def system_one(state, questions):
+        return SimpleNamespace(
+            answers={"kind": answer("use_browser", 0.9), "site": answer("none", 1.0), "browser": answer("Brave Browser", 0.8)}
+        )
+
+    d = decide(SimpleNamespace(system_one=system_one), "g", screen, [], [], "Google Chrome", None, browsers=("Brave Browser",))
+    assert d.browser.choice == "Brave Browser" and d.confidence == 0.9  # a split on the browser never stops the run
+
+
+def test_open_app_is_offered_only_when_there_are_apps_to_open():
+    assert "open_app" not in kind_criteria("Google Chrome", None)
+    assert "open_app" in kind_criteria("Google Chrome", None, apps=("Photos",))
+
+
+def test_app_criteria_mark_the_app_in_front_and_offer_none():
+    assert app_criteria(("Notes", "Photos"), "Notes") == {
+        "Notes": "Open Notes (the app in front now).",
+        "Photos": "Open Photos.",
+        "none": "None of these apps is the one the goal needs.",
+    }
+
+
+def test_the_app_is_asked_in_a_second_request_only_once_open_app_is_chosen(screen):
+    """The app list is long and most steps open no app, so the step's request leaves it out."""
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "app" in questions:
+            return SimpleNamespace(answers={"app": answer("Photos", 0.7)})
+        return SimpleNamespace(answers={"kind": answer(kind, 0.95), "site": answer("none", 1.0)})
+
+    client = SimpleNamespace(system_one=system_one)
+    goal = "Open Photos and tell me roughly how many screenshots I took this month"
+    kind = "click_item"
+    assert decide(client, goal, screen, [], [], "Google Chrome", None, apps=("Photos", "Notes")).app is None
+    assert len(requests) == 1 and "app" not in requests[0][1]
+
+    requests.clear()
+    kind = "open_app"
+    d = decide(
+        client, goal, screen, [], [], "Google Chrome", None, guidance=Guidance(focus="open Photos"), apps=("Photos", "Notes")
+    )
+    assert d.chosen == "open_app" and d.app.choice == "Photos" and d.confidence == 0.95  # a split on the app never stops the run
+    state, questions = requests[1]
+    assert state == {"goal": goal, "current_focus": "open Photos", "frontmost_app": "Google Chrome"}
+    assert list(questions["app"].criteria) == ["Photos", "Notes", "none"]
+
+
+def test_browser_criteria_say_which_is_in_front_and_which_is_the_default():
+    crit = browser_criteria("Google Chrome", ("Brave Browser", "Google Chrome"), "Brave Browser")
+    assert crit == {
+        "Google Chrome": "Work in Google Chrome (the default).",
+        "Brave Browser": "Work in Brave Browser (the app in front now).",
+    }
+    assert browser_criteria("Google Chrome", (), "Google Chrome") == {
+        "Google Chrome": "Work in Google Chrome (the app in front now; the default)."
+    }
+
+
+def test_a_stand_in_field_is_checked_against_the_screen_text_across_its_row():
+    """The browser hid the box, so there is no value to read back and no focus to compare: the
+    check reads what the screen shows across the box's row, and says that is what it is."""
+    states = []
+
+    def system_one(state, questions):
+        states.append(state)
+        return SimpleNamespace(answers={"ok": SimpleNamespace(noul=0.9)})
+
+    box = Field(role="", label="10", placeholder="", value="", x=500, y=300, w=20, h=16, clicked=True)
+    after = replace(box, value="Amount | 0.29")
+    assert verify_typed(SimpleNamespace(system_one=system_one), "top up to $10", box, "0.29", after) == 0.9
+    (state,) = states
+    assert state["screen_text_across_the_field_row_now"] == "Amount | 0.29"
+    assert "field_value_now" not in state and "field_still_focused" not in state
+    assert state["field"]["role"] == "unknown"

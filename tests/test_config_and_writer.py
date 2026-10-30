@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from typesafe_computer_use import config
 from typesafe_computer_use.calls import Calls, MeteredWriter
 from typesafe_computer_use.config import custom_writer_endpoint, load_dotenv, writer_base_url
 from typesafe_computer_use.writer import WriterError, compose_url, make_writer, parse_json, provider, valid_url
@@ -146,3 +147,12 @@ def test_valid_url():
     assert not valid_url("https://localhost")
     assert not valid_url("https://www.cnn.com/a b")
     assert not valid_url("")
+
+
+def test_the_browser_is_the_setting_then_the_system_default_then_chrome(monkeypatch):
+    """Asked from Discord to open OpenRouter, a run went to Chrome while Brave was the Mac's browser."""
+    monkeypatch.delenv("CLICKER_BROWSER", raising=False)
+    assert config.browser() == "Google Chrome"
+    assert config.browser("Brave Browser") == "Brave Browser"
+    monkeypatch.setenv("CLICKER_BROWSER", "Arc")
+    assert config.browser("Brave Browser") == "Arc"
