@@ -38,8 +38,13 @@ any stop does, which reads the screen, answers, and may send the classifier back
 failed check of typed text keeps the text and says it was not verified.
 
 OpenRouter answers a Luna request that Luna refuses any part of with a 502 for the whole request,
-so on Luna a refusal reaches the agent as an error rather than as one refused answer; the effect is
-the same.
+so on Luna a refusal reaches the agent as an error rather than as one refused answer, and every
+other answer in the request is lost with it. The message names the question, and a refusal is not
+retried as an outage is. Luna refuses the item question now and then, the one whose labels are text
+read off the screen: on a Claude window full of a conversation about IAM roles, a run never got as
+far as opening the browser its goal named. So a refused item is asked again without it. Opening a
+site or an app, typing, scrolling, and waiting need no item and go ahead; a click is left without a
+decision. The step's log line and `answers.json` say `refused`.
 
 ## Variables
 

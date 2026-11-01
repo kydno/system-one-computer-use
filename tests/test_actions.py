@@ -209,6 +209,8 @@ def browser(monkeypatch):
     log: list[tuple] = []
     monkeypatch.setattr(desktop, "activate", lambda app: log.append(("activate", app)) or True)
     monkeypatch.setattr(desktop, "open_url", lambda app, url: log.append(("open", app, url)) or True)
+    monkeypatch.setattr(desktop, "browser_tabs", lambda app: [])
+    monkeypatch.setattr(desktop, "show_tab", lambda app, url: log.append(("show", app, url)) or True)
     return log
 
 
@@ -242,7 +244,7 @@ def test_use_browser_asks_the_writer_for_a_site_outside_the_catalog(screen, brow
     monkeypatch.setattr(
         actions,
         "compose_url",
-        lambda w, goal, history, guidance: asked.append((w, goal)) or "https://www.songkick.com/",
+        lambda w, goal, history, guidance, tabs: asked.append((w, goal)) or "https://www.songkick.com/",
     )
     assert actions.perform(browsing("other"), screen, [], context(writer)) == "opened https://www.songkick.com/"
     assert asked == [(writer, "find the next upcoming bruno mars concert")]
@@ -256,10 +258,41 @@ def test_use_browser_without_a_writer_refuses_a_site_outside_the_catalog(screen,
 
 
 def test_use_browser_refuses_when_the_writer_proposes_nothing(screen, browser, monkeypatch):
-    monkeypatch.setattr(actions, "compose_url", lambda writer, goal, history, guidance: "")
+    monkeypatch.setattr(actions, "compose_url", lambda writer, goal, history, guidance, tabs: "")
     refusal = actions.perform(browsing("other"), screen, [], context(object()))
     assert refusal == "use_browser refused: the writer proposed no usable URL for this goal"
     assert browser == []
+
+
+GUIDE = "https://docs.google.com/document/d/abc/edit"
+OPEN_TABS = [("kydno/Golf-Party issue 69", "https://github.com/kydno/Golf-Party/issues/69"), ("Ch. 10 Reading Guide", GUIDE)]
+
+
+def test_use_browser_switches_to_the_open_tab_the_writer_names(screen, browser, monkeypatch):
+    """The page the goal is about is open behind another tab: the writer reads the tabs, names it,
+    and the run shows that tab instead of opening the page a second time."""
+    monkeypatch.setattr(desktop, "browser_tabs", lambda app: OPEN_TABS)
+    read = []
+    monkeypatch.setattr(actions, "compose_url", lambda w, goal, history, guidance, tabs: read.append(tabs) or GUIDE)
+    assert actions.perform(browsing("other"), screen, [], context(object())) == f"switched to the open tab {GUIDE}"
+    assert read == [OPEN_TABS]
+    assert browser == [("show", "Google Chrome", GUIDE)]
+
+
+def test_use_browser_opens_a_url_that_is_not_an_open_tab(screen, browser, monkeypatch):
+    monkeypatch.setattr(desktop, "browser_tabs", lambda app: OPEN_TABS)
+    monkeypatch.setattr(actions, "compose_url", lambda *a: "https://www.songkick.com/")
+    assert actions.perform(browsing("other"), screen, [], context(object())) == "opened https://www.songkick.com/"
+    assert browser == [("open", "Google Chrome", "https://www.songkick.com/")]
+
+
+def test_use_browser_opens_the_url_when_the_tab_cannot_be_shown(screen, browser, monkeypatch):
+    """The tab closed between the read and the switch: the page opens by its address instead."""
+    monkeypatch.setattr(desktop, "browser_tabs", lambda app: OPEN_TABS)
+    monkeypatch.setattr(desktop, "show_tab", lambda app, url: browser.append(("show", app, url)) and False)
+    monkeypatch.setattr(actions, "compose_url", lambda *a: GUIDE)
+    assert actions.perform(browsing("other"), screen, [], context(object())) == f"opened {GUIDE}"
+    assert browser == [("show", "Google Chrome", GUIDE), ("open", "Google Chrome", GUIDE)]
 
 
 @pytest.fixture
@@ -515,6 +548,110 @@ def test_an_editor_takes_text_at_its_caret_and_is_never_emptied_or_overwritten(c
     monkeypatch.setattr(desktop, "ax_set_value", lambda *a: pytest.fail("a value would replace the document"))
     assert fill_field(DOC, "Flights to Barcelona") == "at the caret via keystrokes"
     assert calls == [("type", "Flights to Barcelona")]
+
+
+# The same Google Doc once Chrome has put the page in accessibility: its whole body is one text area.
+DOC_BODY = Field(
+    role="AXTextArea",
+    label="Document content",
+    placeholder="",
+    value="Chapter 10 Reading Guide\nReading Schedule\n1. Describe the two key differences between interest groups and political parties.\n",
+    x=280,
+    y=250,
+    w=1200,
+    h=900,
+    ref=object(),
+)
+
+
+def test_a_text_area_holding_a_document_takes_text_at_its_caret_and_is_never_emptied_or_overwritten(calls, monkeypatch):
+    """Answering question 1 in a Google Doc replaced the whole document with the answer."""
+    monkeypatch.setattr(desktop, "ax_set_value", lambda *a: pytest.fail("a value would replace the document"))
+    assert fill_field(DOC_BODY, "Interest groups and political parties differ") == "at the caret via keystrokes"
+    assert calls == [("type", "Interest groups and political parties differ")]
+
+
+def test_a_text_area_is_checked_where_the_typing_landed_not_at_the_top_of_the_document(screen, calls, monkeypatch):
+    monkeypatch.setattr(actions, "compose_text", lambda *a: Fill("Parties run candidates."))
+    monkeypatch.setattr(actions.time, "sleep", lambda *a: None)
+    after = replace(DOC_BODY, value="x" * 2000 + "Parties run candidates." + "y" * 2000)
+    monkeypatch.setattr(desktop, "focused_field", lambda pid=None: after)
+    seen = []
+
+    class Client:
+        def system_one(self, state, questions):
+            seen.append(state)
+            return SimpleNamespace(answers={"ok": SimpleNamespace(noul=0.9)})
+
+    result = actions._type_text(None, replace(screen, field=DOC_BODY), [], replace(context(object()), typesafe=Client()))
+
+    assert result == "typed 'Parties run candidates.' into 'Document content' at the caret via keystrokes (verified 0.90)"
+    assert calls == [("type", "Parties run candidates.")]
+    assert "Parties run candidates." in seen[0]["field_value_now"]
+
+
+QUESTION = "1. Describe the two key differences between interest groups and political parties."
+GUIDE_TEXT = f"Chapter 10 Reading Guide\n{QUESTION}\n2. In one sentence, summarize pluralist theory.\n"
+MID_QUESTION = GUIDE_TEXT.index("between")  # where the click on the question left the caret
+QUESTION_END = GUIDE_TEXT.index("\n2.")
+
+
+@pytest.fixture
+def keys(monkeypatch):
+    """The keys pressed and where the caret ends up: each Right press moves it one character."""
+    state = {"caret": MID_QUESTION, "pressed": []}
+
+    def press(key, command=False, shift=False):
+        state["pressed"].append(("shift+" if shift else "") + key)
+        if key == "right":
+            state["caret"] += 1
+
+    monkeypatch.setattr(desktop, "press", press)
+    monkeypatch.setattr(desktop, "sleep_watching", lambda seconds: None)
+    monkeypatch.setattr(desktop, "focused_field", lambda pid=None: replace(DOC_BODY, value=GUIDE_TEXT, caret=state["caret"]))
+    return state
+
+
+def test_a_caret_inside_a_question_walks_to_its_end_and_the_answer_starts_a_line_of_its_own(keys):
+    """Answering question 1 typed the answer into the middle of the question."""
+    assert actions.make_line(replace(DOC_BODY, value=GUIDE_TEXT, caret=MID_QUESTION), 7) is True
+    assert keys["pressed"] == ["right"] * (QUESTION_END - MID_QUESTION) + ["shift+return"]  # Return would renumber the list
+
+
+def test_a_caret_on_a_blank_line_or_in_an_empty_field_types_where_it_is(keys):
+    blank = "Question 1\n\nQuestion 2"
+    assert actions.make_line(replace(DOC_BODY, value=blank, caret=blank.index("\n") + 1), 7) is False
+    assert actions.make_line(replace(DOC_BODY, value="", caret=0), 7) is False
+    assert actions.make_line(replace(DOC_BODY, value=GUIDE_TEXT, caret=None), 7) is False  # no caret reported
+    assert keys["pressed"] == []
+
+
+def test_a_caret_that_does_not_reach_the_paragraph_end_types_nothing(screen, calls, keys, monkeypatch):
+    monkeypatch.setattr(
+        desktop, "focused_field", lambda pid=None: replace(DOC_BODY, value=GUIDE_TEXT, caret=MID_QUESTION)
+    )  # the arrows went somewhere else
+    monkeypatch.setattr(actions, "compose_text", lambda *a: Fill("Parties run candidates."))
+    field_in_text = replace(DOC_BODY, value=GUIDE_TEXT, caret=MID_QUESTION)
+
+    result = actions._type_text(None, replace(screen, field=field_in_text), [], context(object()))
+
+    assert result == "type_text refused: the caret is inside text and could not be moved to the end of its paragraph"
+    assert "shift+return" not in keys["pressed"] and not any(call[0] == "type" for call in calls)
+
+
+def test_the_answer_is_typed_on_its_new_line(screen, calls, keys, monkeypatch):
+    monkeypatch.setattr(actions, "compose_text", lambda *a: Fill("Parties run candidates."))
+    monkeypatch.setattr(actions, "verify_typed", lambda *a: 0.9)
+    monkeypatch.setattr(actions.time, "sleep", lambda *a: None)
+    field_in_text = replace(DOC_BODY, value=GUIDE_TEXT, caret=MID_QUESTION)
+
+    result = actions._type_text(None, replace(screen, field=field_in_text), [], context(object()))
+
+    assert (
+        result
+        == "typed 'Parties run candidates.' into 'Document content' on a new line at the caret via keystrokes (verified 0.90)"
+    )
+    assert keys["pressed"][-1] == "shift+return" and calls == [("type", "Parties run candidates.")]
 
 
 def test_an_editor_is_read_back_from_the_screen_lines_that_share_a_word_with_the_typing(monkeypatch):

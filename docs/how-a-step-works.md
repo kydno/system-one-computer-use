@@ -225,6 +225,15 @@ its up. The loop also stops itself on `done` or `none`, on confidence under
 `--min-confidence` (0.4), when it stalls, or at `--steps`. Each of those stops goes to the
 writer, which answers and may hand the run back (below).
 
+Two things let a click through under that floor. A goal that only asks to find something out
+("confirm the BigQuery export is on") clicks down to `--read-only-confidence` (0.15): the
+decision model is asked once, at the start, whether the goal changes nothing, and a wrong
+click on such a run only opens the wrong page. And a click the writer's focus quotes goes
+ahead whatever the item's confidence, as long as the action itself clears the floor and no
+other item of the same text comes within half its odds: two models agreeing on one item is
+what the floor stands for. GPT-6 Luna spreads an item's odds over every item on screen, and
+gave its right click 0.11 to 0.24 on three Firebase and Cloud Console runs.
+
 ## Stalls
 
 Nothing in an action's description says what came of it; only the next capture
@@ -262,10 +271,15 @@ capture that stopped such a run at 0.39, the same classifier picks the filter at
 when there is something only you can say ("13 or 15 inch?"); your reply joins the
 state for the rest of the run, the writer reads the screen again with it, and the app
 you were in comes back to the front. An empty reply declines, and the answer stands.
+Or it may say the screen is still **loading**: a classifier shown the half-drawn Cloud
+Console ranked a click on the menu over a wait, at 0.32, so the run waits itself, as a wait
+the classifier chose would, and the classifier reads the screen once it has loaded.
 The writer never picks a click: every action is still the classifier's.
 
 The exchange cannot go round on itself. A focus the classifier takes no action under
-leaves the answer it came with standing, without a second reading of the same screen.
+leaves the answer it came with standing, without a second reading of the same screen. A
+screen that changed on its own since that answer, as a page finishing loading does, is read
+again: the answer describes a screen that is gone.
 `--handoffs` (10) bounds the trips, three questions bound the asking, and a stop on
 the last step is final. So is a third stall with no new page since the first: two focuses
 did not free the classifier, so the run ends `stuck`, and the writer's answer says what

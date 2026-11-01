@@ -7,7 +7,7 @@ from typesafe_computer_use.calls import Calls, MeteredWriter
 from typesafe_computer_use.config import writer_api, writer_base_url
 from typesafe_computer_use.writer import WriterError, compose_answer, compose_url, make_writer, parse_json
 
-ANSWER = '{"achieved": true, "answer": "Sep 19 in Miami.", "focus": "", "question": ""}'
+ANSWER = '{"achieved": true, "answer": "Sep 19 in Miami.", "focus": "", "question": "", "wait": false}'
 
 
 @pytest.fixture
@@ -55,11 +55,21 @@ def test_usage_comes_back_in_the_messages_shape_with_cached_tokens_apart(openai_
     assert (usage.requests, usage.input_tokens, usage.cached_input_tokens, usage.output_tokens) == (1, 200, 1000, 30)
 
 
+def test_the_cost_openrouter_adds_to_usage_is_kept(openai_env, endpoint):
+    endpoint.state["usage"] = {"prompt_tokens": 1200, "completion_tokens": 30, "total_tokens": 1230, "cost": 0.00042}
+    calls = Calls()
+    compose_url(MeteredWriter(make_writer(), calls), "open example", [])
+    (usage,) = calls.usage.values()
+    assert usage.cost == pytest.approx(0.00042)
+    assert calls.cost() == pytest.approx(0.00042)
+
+
 def test_an_endpoint_that_reports_no_usage_still_counts_the_request(openai_env, endpoint):
     calls = Calls()
     compose_url(MeteredWriter(make_writer(), calls), "open example", [])
     (usage,) = calls.usage.values()
     assert (usage.requests, usage.input_tokens, usage.cached_input_tokens, usage.output_tokens) == (1, 0, 0, 0)
+    assert usage.cost is None
 
 
 def test_a_refused_format_steps_down_once_and_stays_down(openai_env, endpoint):
@@ -293,3 +303,12 @@ def test_a_reply_cut_off_twice_says_so_and_one_that_merely_lacks_json_is_not_ret
     with pytest.raises(WriterError, match="without usable JSON"):
         compose_url(writer(), "open example", [])
     assert len(endpoint.seen) == 1
+
+
+def test_a_url_proposal_reads_the_open_tabs_and_omits_them_when_there_are_none(openai_env, endpoint):
+    tabs = [("Ch. 10 Reading Guide", "https://docs.google.com/document/d/abc/edit")]
+    compose_url(writer(), "complete the chapter 10 reading guide", [], tabs=tabs)
+    compose_url(writer(), "open example", [])
+    with_tabs, without = (json.loads(r["body"]["messages"][1]["content"][0]["text"]) for r in endpoint.seen)
+    assert with_tabs["open_tabs"] == [{"title": "Ch. 10 Reading Guide", "url": "https://docs.google.com/document/d/abc/edit"}]
+    assert "open_tabs" not in without

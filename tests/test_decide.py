@@ -1,6 +1,8 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
+from conftest import item
+
 from typesafe_computer_use.config import SITES
 from typesafe_computer_use.decide import (
     Decision,
@@ -15,7 +17,9 @@ from typesafe_computer_use.decide import (
     site_criteria,
     verify_typed,
 )
+from typesafe_computer_use.decisions import ChoiceAnswer, DecisionError
 from typesafe_computer_use.models import AxNode, Field, Guidance
+from typesafe_computer_use.runner import goal_only_looks, named_by_focus
 
 
 def answer(choice, confidence, probabilities=None):
@@ -282,3 +286,41 @@ def test_a_stand_in_field_is_checked_against_the_screen_text_across_its_row():
     assert state["screen_text_across_the_field_row_now"] == "Amount | 0.29"
     assert "field_value_now" not in state and "field_still_focused" not in state
     assert state["field"]["role"] == "unknown"
+
+
+def manage_cards() -> list:
+    return [item(0, "Google Analytics"), item(1, "Manage →"), item(2, "BigQuery"), item(3, "Manage →")]
+
+
+def clicking(key: str, probabilities: dict[str, float]) -> Decision:
+    return Decision(
+        kind=ChoiceAnswer("click_item", 0.93, {"click_item": 0.93}),
+        item=ChoiceAnswer(key, probabilities[key], probabilities),
+        site=ChoiceAnswer("none", 0.9),
+    )
+
+
+def test_a_focus_names_the_click_when_it_quotes_its_text():
+    decision = clicking("3", {"3": 0.18, "2": 0.17, "1": 0.05})
+    for focus in ("Click \u201cManage\u201d on the BigQuery card.", "Click 'manage' on BigQuery", 'Click "Manage →"'):
+        assert named_by_focus(decision, manage_cards(), focus) == "Manage →"
+
+
+def test_a_focus_names_no_click_it_does_not_quote_or_cannot_tell_from_its_twin():
+    cards = manage_cards()
+    assert named_by_focus(clicking("2", {"2": 0.18}), cards, "Click \u201cManage\u201d on the BigQuery card.") is None
+    assert named_by_focus(clicking("3", {"3": 0.18}), cards, "Click the browser's Manage button") is None  # not quoted
+    assert named_by_focus(clicking("3", {"3": 0.18}), cards, "Click \u201cManage billing\u201d") is None
+    assert named_by_focus(clicking("3", {"3": 0.18}), cards, None) is None
+    # The other card's Manage is close behind: the quote cannot say which of the two it means.
+    assert named_by_focus(clicking("3", {"3": 0.18, "1": 0.12}), cards, "Click \u201cManage\u201d") is None
+
+
+def test_an_unknown_answer_to_the_read_only_question_keeps_the_floor():
+    def refuses(**request):
+        raise DecisionError("openrouter answered 502")
+
+    ctx = SimpleNamespace(typesafe=SimpleNamespace(system_one=refuses))
+    lines = []
+    assert goal_only_looks(ctx, "confirm the export is on", lines.append) is False
+    assert lines == ["read-only: unknown (openrouter answered 502), so the floor stays"]

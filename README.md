@@ -126,7 +126,8 @@ panel. It needs macOS 26; `menubar/Scripts/run.sh` builds and opens it. See
 4. The action runs deterministically, the loop waits, and the next capture is the only witness
    of what it did.
 5. When the classifier stops, the writer reads the screen and answers, or hands the run back
-   with a focus (one move) or a question for you. It never picks an action.
+   with a focus (one move), a question for you, or a wait for a screen still loading. It
+   never picks a click.
 
 The full walk, with the OCR cost, the tree walk, the action space, and the stop rules, is in
 [how a step works](docs/how-a-step-works.md).

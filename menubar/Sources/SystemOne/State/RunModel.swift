@@ -16,6 +16,32 @@ enum RunPhase: Equatable {
     case finished
 }
 
+/// One run as the box shows it. A finished run stays on show above the next
+/// one until Clear, and is told to the runs after it, so a goal such as
+/// "search for it" can lean on the one before.
+struct RunRecord: Identifiable, Equatable {
+    let id = UUID()
+    var goal: String?
+    var actions: [String] = []
+    var answer: String?
+    var achieved: Bool?
+    var outcome: String?
+    var errorText: String?
+    var runFolder: URL?
+    var seconds: Double?
+    var cost: Double?
+
+    /// What `--earlier-tasks` carries for this run; nil for one that never began.
+    var earlierTask: [String: Any]? {
+        guard let goal, runFolder != nil else { return nil }
+        var task: [String: Any] = ["goal": goal]
+        if let answer { task["answer"] = answer }
+        if let achieved { task["achieved"] = achieved }
+        if let outcome { task["outcome"] = outcome }
+        return task
+    }
+}
+
 /// The only interface between the views and the run, as `PanelModel` is in
 /// Menu-Bar-Chat. Views read it and call its methods; the composition root
 /// wires its hooks to the window layer.
@@ -43,6 +69,10 @@ final class RunModel: ObservableObject {
     @Published private(set) var errorText: String?
     @Published private(set) var runFolder: URL?
     @Published private(set) var seconds: Double?
+    /// What the run cost in USD, as its replies reported it; nil when none did.
+    @Published private(set) var cost: Double?
+    /// The runs before this one since the last Clear, oldest first.
+    @Published private(set) var past: [RunRecord] = []
 
     /// The lock: an outside click leaves the panel open, and a run shows its
     /// status in one row instead of the panel leaving the screen.
@@ -97,9 +127,18 @@ final class RunModel: ObservableObject {
         isAsking || (!isRunning && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
-    var hasRunContent: Bool { phase != .idle || errorText != nil }
+    var hasRunContent: Bool { phase != .idle || errorText != nil || !past.isEmpty }
 
-    /// The clear button: a finished run's box can go, a live one cannot.
+    /// The run on show below the earlier ones, as a record; nil before the first.
+    var current: RunRecord? {
+        guard phase != .idle || errorText != nil else { return nil }
+        return RunRecord(
+            goal: goal, actions: actions, answer: answer, achieved: achieved, outcome: outcome,
+            errorText: errorText, runFolder: runFolder, seconds: seconds, cost: cost
+        )
+    }
+
+    /// The clear button: the box can go once no run is live.
     var canClear: Bool { hasRunContent && !isRunning && !isAsking }
 
     var placeholder: String { isAsking ? K.InputBar.replyPlaceholder : K.InputBar.goalPlaceholder }
@@ -164,6 +203,7 @@ final class RunModel: ObservableObject {
     func start(_ newGoal: String) {
         guard !isRunning, !isAsking else { return }
         isShowingSettings = false
+        if phase == .finished, let finished = current { past.append(finished) }
         switch Project.clicker() {
         case .failure(let error):
             reset(goal: newGoal)
@@ -175,7 +215,14 @@ final class RunModel: ObservableObject {
             phase = .running
             root = found.root
             // No step limit: Stop, `done`, low confidence or a stall ends the run.
-            let arguments = ["--events", "--act", "--steps", String(K.Run.unlimitedSteps), "--", newGoal]
+            var arguments = ["--events", "--act", "--steps", String(K.Run.unlimitedSteps)]
+            let earlier = past.compactMap(\.earlierTask).suffix(K.Run.earlierTasks)
+            if !earlier.isEmpty,
+               let data = try? JSONSerialization.data(withJSONObject: Array(earlier)),
+               let json = String(data: data, encoding: .utf8) {
+                arguments += ["--earlier-tasks", json]
+            }
+            arguments += ["--", newGoal]
             let run = AgentProcess(executable: found.executable, arguments: arguments, directory: found.root)
             run.onEvent = { [weak self] event in self?.handle(event) }
             run.onExit = { [weak self] status, stderr in self?.exited(status, stderr) }
@@ -207,17 +254,20 @@ final class RunModel: ObservableObject {
         process?.stop()
     }
 
-    /// The clear button: the last run's box goes, and the panel is back to just
-    /// the input bar. What is typed in the field stays.
+    /// The clear button: every run's box goes, the next goal starts a new thread
+    /// with no earlier tasks, and the panel is back to just the input bar. What
+    /// is typed in the field stays.
     func clear() {
         guard canClear else { return }
+        past = []
         reset(goal: nil)
         phase = .idle
     }
 
-    func openRunFolder() {
-        guard let runFolder else { return }
-        NSWorkspace.shared.open(runFolder)
+    /// The latest run's folder, or `folder` when an earlier run's box asks.
+    func openRunFolder(_ folder: URL? = nil) {
+        guard let folder = folder ?? runFolder else { return }
+        NSWorkspace.shared.open(folder)
     }
 
     // MARK: - The run
@@ -266,6 +316,7 @@ final class RunModel: ObservableObject {
             achieved = achieved ?? end.achieved
             outcome = end.why ?? end.outcome
             seconds = end.seconds
+            cost = end.cost
             if let root { runFolder = Project.folder(end.folder, in: root) }
         }
     }
@@ -297,6 +348,7 @@ final class RunModel: ObservableObject {
         errorText = nil
         runFolder = nil
         seconds = nil
+        cost = nil
         logTail = []
         ended = false
     }

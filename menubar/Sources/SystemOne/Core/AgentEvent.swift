@@ -26,6 +26,8 @@ enum AgentEvent: Equatable, Sendable {
         var folder: String
         var steps: Int
         var seconds: Double
+        /// USD, over the replies that reported a cost (OpenRouter's do); nil when none did.
+        var cost: Double?
     }
 
     init(line: String) {
@@ -72,7 +74,8 @@ enum AgentEvent: Equatable, Sendable {
                 achieved: o["goal_achieved"] as? Bool,
                 folder: folder,
                 steps: o["steps_taken"] as? Int ?? 0,
-                seconds: (o["seconds"] as? NSNumber)?.doubleValue ?? 0
+                seconds: (o["seconds"] as? NSNumber)?.doubleValue ?? 0,
+                cost: (o["cost"] as? NSNumber)?.doubleValue
             ))
         default:
             // An event this build does not know yet: shown nowhere, broken nothing.

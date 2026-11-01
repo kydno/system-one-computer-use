@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -31,6 +32,7 @@ from .models import Guidance, Item, Screen
 from .openai_writer import OpenAIWriter
 
 ANSWER_IMAGE_EDGE = 1568  # the longest edge a vision model reads without shrinking the image itself
+MAX_TABS = 60  # the open tabs a URL proposal reads; past that, a list costs more than it helps
 PLACEHOLDER_KEY = "not-needed"  # an endpoint you host yourself does not check a key
 # Tokens a reasoning model may think with on top of a call's own limit, by effort. The thinking
 # comes out of max_tokens ahead of the reply: at medium effort a 256-token call spent it all and
@@ -184,10 +186,11 @@ def _image_block(image: Image.Image) -> dict:
 @dataclass(frozen=True)
 class Fill:
     """What goes into the focused field: the exact text, empty when the writer declined, and whether
-    Return follows it."""
+    Return follows it. `reason` is the writer's own, so a decline says why in the run's history."""
 
     text: str
     submit: bool = False
+    reason: str = ""
 
 
 def compose_text(
@@ -208,7 +211,7 @@ def compose_text(
     multiline = screen.field is not None and screen.field.multiline
     packet = {
         "goal": goal,
-        **(guidance.state() if guidance else {}),
+        **(guidance.writer_state() if guidance else {}),
         "now": now_context(),
         "frontmost_app": screen.app,
         "previous_actions": history[-8:],
@@ -223,7 +226,9 @@ def compose_text(
             "You fill in one text field on a user's screen. You receive the user's goal, recent "
             "actions, the focused field's label and placeholder, and nearby screen text, and, when "
             "there are any, the step the agent is now working on, what the user said when asked, and "
-            "the text of the screens the agent passed through before this one, oldest first. "
+            "the text of the screens the agent passed through before this one, oldest first, and the tasks the "
+            "user gave before this one in the same session with what came of each. The goal may lean on "
+            'those: "search for it" or "use search" right after a question means that question. '
             "Decide the exact string to type. When the goal says to write down something found on the way, "
             "such as a price or a name, take it from those screens, never from memory and never a guess. "
             "Never invent credentials, passwords, or personal data; for such "
@@ -243,7 +248,7 @@ def compose_text(
         max_tokens=1024 if multiline else 256,
     )
     text = data["text"].strip() if data["fill"] else ""
-    return Fill(text, submit=bool(text) and data["submit"] and not multiline)
+    return Fill(text, submit=bool(text) and data["submit"] and not multiline, reason=data["reason"].strip())
 
 
 def valid_url(url: str) -> bool:
@@ -334,15 +339,35 @@ def compose_browser_text(
     return text
 
 
-def compose_url(writer: Writer, goal: str, history: list[str], guidance: Guidance | None = None) -> str:
-    """The URL to open for this goal. Empty means no sensible site, or an invalid proposal."""
+def compose_url(
+    writer: Writer,
+    goal: str,
+    history: list[str],
+    guidance: Guidance | None = None,
+    tabs: Sequence[tuple[str, str]] = (),
+) -> str:
+    """The URL to open for this goal. Empty means no sensible site, or an invalid proposal.
+
+    `tabs` are the title and URL of each tab open in the browser, so a goal about a page the user
+    already has open ("the chapter 10 reading guide") can name that page, which no guess could.
+    """
     data = _structured(
         writer,
         system=(
             "Given a user's goal for their web browser, give the single best https URL to open first. "
-            "Prefer the site's homepage or the most direct public page. If no website is implied, set ok to false."
+            "When earlier_tasks are given, they are what the user asked before in the same session, and "
+            "the goal may lean on them. "
+            "When one of the browser's open tabs is the page the goal is about, give that tab's URL exactly "
+            "as listed. Otherwise prefer the site's homepage or the most direct public page. If no website "
+            "is implied, set ok to false."
         ),
-        packet={"goal": goal, **(guidance.state() if guidance else {}), "now": now_context(), "previous_actions": history[-8:]},
+        packet={
+            "goal": goal,
+            **(guidance.writer_state() if guidance else {}),
+            "now": now_context(),
+            "previous_actions": history[-8:],
+            **({"open_tabs": [{"title": title, "url": url} for title, url in tabs[:MAX_TABS]]} if tabs else {}),
+        },
         properties={"ok": {"type": "boolean"}, "url": {"type": "string"}, "reason": {"type": "string"}},
         max_tokens=200,
     )
@@ -354,14 +379,16 @@ def compose_url(writer: Writer, goal: str, history: list[str], guidance: Guidanc
 class Answer:
     """What the writer made of a stop: the words for the user, and how the run goes on when it can.
 
-    At most one of `focus` and `question` is acted on. A focus sends the classifier back to work,
-    a question goes to the user first, and neither means the run is over.
+    At most one of `focus`, `question`, and `wait` is acted on. A focus sends the classifier back to
+    work, a question goes to the user first, a wait gives a screen still loading time before the
+    classifier reads it again, and none of them means the run is over.
     """
 
     text: str
     achieved: bool  # whether the screen itself shows the goal reached, in the writer's judgement
     focus: str = ""  # the next sub-goal for the classifier, in terms of the screen
     question: str = ""  # what only the user can say
+    wait: bool = False  # the screen is still loading, so the run waits for it instead of asking the classifier to
 
 
 ANSWER_SYSTEM = (
@@ -370,7 +397,8 @@ ANSWER_SYSTEM = (
     "why the classifier stopped, a capture of the screen as it is now, the text read from that "
     "screen, and the text of the screens it passed through on the way, oldest first. You may also "
     "receive the focus the classifier was working on, the earlier times it stopped with the focus "
-    "you gave each time, and what the user said when asked.\n\n"
+    "you gave each time, what the user said when asked, and the tasks the user gave before this one "
+    "in the same session with what came of each, which a short goal may lean on.\n\n"
     "Tell the user the result. When the goal asks for information, lead with that information, "
     "taken only from those screens and from what the user said: never from memory, and never a "
     "guess. When the goal asks for something to be done, say whether the screen shows it done. "
@@ -380,11 +408,16 @@ ANSWER_SYSTEM = (
     "itself shows the goal reached, every part of it: check each thing the goal names, such as "
     "which item, where it goes, and what value it takes, and when the screen shows something done "
     "but not one of those parts, the goal is not reached.\n\n"
-    "When the goal is not reached you may keep the run going, in one of two ways and never both. "
+    "When the goal is not reached you may keep the run going, in one of three ways and never more "
+    "than one. Set wait to true when the screen is still loading: a spinner, a progress bar, or a "
+    "page whose frame is drawn and whose content is not; the agent then waits for it itself and the "
+    "classifier reads the loaded screen. "
     "Set focus to send the classifier back to work: one short imperative sentence naming the next "
     "step in terms of what this screen shows, quoting the text of the item to use when there is "
-    "one. The classifier can click an on-screen item, type into a focused field, replacing what "
-    "the field holds, press Return or Escape, scroll, go back, wait, open a website by its "
+    "one. A tab in the browser's tab strip is such an item: to reach a page already open in a tab, "
+    "name that tab, quoting its title, rather than a tab search or a menu. The classifier can "
+    "click an on-screen item, type into a focused field, replacing what the field holds, press "
+    "Return or Escape, scroll, go back, open a website by its "
     "https address, and open an app installed on this computer by its name; it cannot read, "
     "compare, or remember, so a focus is one move, not a plan. It has no other key or shortcut and "
     "cannot right-click, double-click, or select text, so a focus that needs one of those is "
@@ -394,13 +427,14 @@ ANSWER_SYSTEM = (
     "marked as matching, a menu, or a section not yet opened, give opening it as the focus. "
     "Do not give again a focus from earlier_stops that changed "
     "nothing. Set question to ask the user, only when user_can_be_asked is true, and only for what "
-    "the screens cannot tell you and the goal leaves open: a choice between options the user would "
-    "care about, or a fact only the user has. One short question. Never ask for a password or any "
-    "other credential, and never ask what user_said already answers. Leave both empty when the "
-    "goal is reached, when no action of the agent's would help, or when the next step is one only "
-    "the user should take, such as a login or a payment. When the run ends short of the goal, "
-    "because you leave both empty or because why_the_run_stopped says it ends, say plainly what "
-    "the agent could not do."
+    "the screens cannot tell you, the goal leaves open, and earlier_tasks do not settle: a choice "
+    "between options the user would care about, a fact only the user has, or the text to type when "
+    "the writer declined a field because nothing says what goes in it. One short question. Never ask for a password or any "
+    "other credential, and never ask what user_said already answers. Leave focus and question "
+    "empty and wait false when the goal is reached, when no action of the agent's would help, or "
+    "when the next step is one only the user should take, such as a login or a payment. When the "
+    "run ends short of the goal, because you keep it going in none of these ways or because "
+    "why_the_run_stopped says it ends, say plainly what the agent could not do."
 )
 
 
@@ -426,7 +460,7 @@ def compose_answer(
     """
     packet = {
         "goal": goal,
-        **(guidance.state() if guidance else {}),
+        **(guidance.writer_state() if guidance else {}),
         "now": now_context(),
         "why_the_run_stopped": stopped,
         "actions_taken": history,
@@ -448,11 +482,16 @@ def compose_answer(
             "answer": {"type": "string"},
             "focus": {"type": "string"},
             "question": {"type": "string"},
+            "wait": {"type": "boolean"},
         },
         max_tokens=1024,
         answering=True,
         image=screen.image if writer_vision() else None,
     )
     return Answer(
-        text=data["answer"].strip(), achieved=data["achieved"], focus=data["focus"].strip(), question=data["question"].strip()
+        text=data["answer"].strip(),
+        achieved=data["achieved"],
+        focus=data["focus"].strip(),
+        question=data["question"].strip(),
+        wait=data["wait"],
     )

@@ -163,8 +163,10 @@ class OSWorldDesktop:
         x, y = point
         self._do(f"pyautogui.click({round(x)}, {round(y)})")
 
-    def press(self, key: str, command: bool = False) -> None:
-        if command and key == "[":
+    def press(self, key: str, command: bool = False, shift: bool = False) -> None:
+        if shift:
+            self._do(f"pyautogui.hotkey('shift', {KEYS.get(key, key)!r})")
+        elif command and key == "[":
             self._do("pyautogui.hotkey('alt', 'left')")  # Back, where Command-[ is Back on a Mac
         elif command:
             self._do(f"pyautogui.hotkey('ctrl', {KEYS.get(key, key)!r})")
@@ -223,6 +225,13 @@ class OSWorldDesktop:
 
     def browser_url(self, browser: str) -> str | None:
         return a11y.browser_url(self._now(), browser or None)
+
+    def browser_tabs(self, browser: str) -> list[tuple[str, str]]:
+        """None: the VM's browser is driven by address, a tab at a time (see `open_url`)."""
+        return []
+
+    def show_tab(self, browser: str, url: str) -> bool:
+        return False
 
     def open_path(self, path: Path, as_text: bool = False) -> None:
         raise NotImplementedError("an OSWorld run shows no file on this machine")

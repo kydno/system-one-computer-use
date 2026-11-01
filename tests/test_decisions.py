@@ -22,6 +22,7 @@ from typesafe_computer_use.decisions import (
     Endpoint,
     Noul,
     NoulAnswer,
+    Refusal,
     Score,
     ScoreAnswer,
     endpoint,
@@ -214,8 +215,25 @@ def test_an_overloaded_service_is_asked_again():
     assert reply.answers["ok"] == NoulAnswer(noul=0.9)
 
 
-def test_a_refused_request_fails_after_its_retries():
+def test_a_refusal_names_its_question_and_is_not_asked_again():
     # OpenRouter answers a request Luna refuses any part of with a 502 for the whole of it.
+    service = Service((502, {"error": {"message": 'OpenAI refused to answer question "item"', "code": 502}}))
+
+    with pytest.raises(Refusal, match="502") as refused:
+        service.client().system_one(state="s", questions=QUESTIONS)
+    assert refused.value.question == "item"
+    assert len(service.seen) == 1
+
+
+def test_a_refusal_answered_natively_names_its_question():
+    with pytest.raises(Refusal) as refused:
+        Service({"kind": {"type": "refusal", "reason": "policy"}}).client().system_one(
+            state="s", questions={"kind": QUESTIONS["kind"]}
+        )
+    assert refused.value.question == "kind"
+
+
+def test_a_502_that_names_no_question_fails_after_its_retries():
     service = Service((502, {"error": {"message": "upstream refused"}}))
 
     with pytest.raises(DecisionError, match="502"):
@@ -244,3 +262,55 @@ def test_a_step_without_a_decision_hands_the_run_to_the_writer(monkeypatch, tmp_
     assert world.log == []  # nothing was guessed
     assert writer.packets[0]["why_the_run_stopped"] == STOPPED["no decision"]
     assert state.answer is not None
+
+
+IAM = "https://console.cloud.google.com/iam-admin/iam?project=flexcheck-e0c96"
+REFUSED_ITEM = Refusal('openrouter answered 502: OpenAI refused to answer question "item"', "item")
+
+
+def claude_window() -> World:
+    """A conversation about IAM roles in front, the browser the goal names behind it."""
+    return World(
+        [
+            Page(
+                name="claude",
+                items=["Grant the connector access", "ok I gave it access, try again"],
+                app="Claude",
+                on={f"open:{IAM}": "iam"},
+            ),
+            Page(name="iam", items=["IAM", "Grant access"], url=IAM),
+        ]
+    )
+
+
+def test_a_refused_item_is_asked_again_without_it_and_a_move_that_needs_none_is_taken(monkeypatch, tmp_path):
+    world = claude_window()
+
+    def policy(state: dict, questions: dict) -> tuple:
+        if state["frontmost_app"] == "Claude":
+            if "item" in questions:
+                raise REFUSED_ITEM
+            return ("use_browser", "other")
+        return ("done", None)
+
+    state = drive(world, policy, monkeypatch=monkeypatch, tmp_path=tmp_path, writer=FakeWriter(url=IAM))
+
+    assert world.page.name == "iam" and state.outcome == "done"
+    assert ["item" in asked for asked in world.fake.asked] == [True, False, True]  # each step asks for one first
+    answers = json.loads((tmp_path / "run" / "step-001-answers.json").read_text())
+    assert answers["refused"] == "item" and answers["item"] is None
+    assert "refused=item, asked again without it" in (tmp_path / "run" / "run.log").read_text()
+
+
+def test_a_click_chosen_once_the_item_was_refused_is_no_decision(monkeypatch, tmp_path):
+    world = claude_window()
+
+    def policy(state: dict, questions: dict) -> tuple:
+        if "item" in questions:
+            raise REFUSED_ITEM
+        return ("click_item", None)
+
+    state = drive(world, policy, monkeypatch=monkeypatch, tmp_path=tmp_path, writer=FakeWriter())
+
+    assert state.outcome == "no decision"
+    assert world.log == []  # nothing was guessed

@@ -10,12 +10,14 @@ environment.
 The question and answer types mirror TypeSafe's SDK, so nothing else in the package knows which
 service is on the other end. An answer is checked against the question it answers before it is
 returned: a model that skips a question, refuses it, or names a label it was not offered raises
-`DecisionError`, and the caller decides what a step without a decision does.
+`DecisionError`, and the caller decides what a step without a decision does. A refusal raises
+`Refusal`, which names the question refused when the service said which.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -39,6 +41,18 @@ MAX_RETRY_WAIT = 8.0  # seconds; a longer Retry-After fails the step instead of 
 
 class DecisionError(Exception):
     """The decision model could not be reached, or did not answer every question it was asked."""
+
+
+class Refusal(DecisionError):
+    """The decision model refused a question. `question` names it, or is None when the service did not say."""
+
+    def __init__(self, message: str, question: str | None = None):
+        super().__init__(message)
+        self.question = question
+
+
+# How OpenRouter names the question Luna refused, in the message of the 502 it answers with.
+REFUSED_QUESTION = re.compile(r'refused to answer question "(\w+)"')
 
 
 @dataclass(frozen=True)
@@ -205,6 +219,11 @@ class DecisionClient:
                     raise DecisionError(f"{self.endpoint.provider} could not be reached: {e}") from e
                 time.sleep(_backoff(attempt))
                 continue
+            refused = _refused(response)
+            if refused is not None:
+                # A refusal is the model's answer to this state, not an outage: asking the same again
+                # only spends the retries' waits on it.
+                raise Refusal(f"{self.endpoint.provider} answered {response.status_code}: {response.text[:300]}", refused)
             if response.status_code in RETRY_STATUSES and not last:
                 wait = _retry_after(response) or _backoff(attempt)
                 if wait <= MAX_RETRY_WAIT:
@@ -238,7 +257,7 @@ def _answer(name: str, question: Question, raw: Any) -> Answer:
         raise DecisionError(f"no answer to {name!r}")
     kind = raw.get("type")
     if kind == "refusal":
-        raise DecisionError(f"the model refused {name!r}: {str(raw.get('reason') or raw.get('refusal') or '')[:200]}")
+        raise Refusal(f"the model refused {name!r}: {str(raw.get('reason') or raw.get('refusal') or '')[:200]}", name)
     try:
         if isinstance(question, Choice):
             if kind != "choice" or raw.get("choice") not in question.criteria:
@@ -278,6 +297,23 @@ def _int(value: Any) -> int | None:
 
 def _backoff(attempt: int) -> float:
     return 0.5 * 2**attempt
+
+
+def _refused(response: httpx.Response) -> str | None:
+    """The question an error reply says the model refused, or None for any other error.
+
+    OpenRouter answers a request Luna refuses any part of with a 502 for all of it, and names the
+    question only in the message: `OpenAI refused to answer question "item"`.
+    """
+    if not response.is_error:
+        return None
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return None
+    message = error.get("message") if isinstance(error, dict) else None
+    match = REFUSED_QUESTION.search(message) if isinstance(message, str) else None
+    return match.group(1) if match else None
 
 
 def _retry_after(response: httpx.Response) -> float | None:

@@ -24,7 +24,7 @@ from PIL import Image
 
 from typesafe_computer_use import actions, runner
 from typesafe_computer_use.actions import Context
-from typesafe_computer_use.decisions import Noul
+from typesafe_computer_use.decisions import Endpoint, Noul
 from typesafe_computer_use.events import Events
 from typesafe_computer_use.models import AxNode, Field, Item, Popup, Screen
 from typesafe_computer_use.platform_adapter import desktop
@@ -339,7 +339,7 @@ class World:
         self.apply(ref.name)
         return True
 
-    def press(self, name: str, command: bool = False) -> None:
+    def press(self, name: str, command: bool = False, shift: bool = False) -> None:
         if command and name == "[":
             self.apply("back")
             return
@@ -397,6 +397,8 @@ class World:
         monkeypatch.setattr(desktop, "recognize_text", self.recognize_text)
         monkeypatch.setattr(desktop, "activate", self.activate)
         monkeypatch.setattr(desktop, "open_url", self.open_url)
+        monkeypatch.setattr(desktop, "browser_tabs", lambda browser: [])  # the world's browser has the one page
+        monkeypatch.setattr(desktop, "show_tab", lambda browser, url: False)
         # `wait` is the one action that touches no machine call, so the only way the world hears
         # about it is the handler itself. Without this a loading page would never finish loading.
         monkeypatch.setitem(actions._HANDLERS, "wait", lambda decision, screen, items, ctx: (self.apply("wait"), "waited")[1])
@@ -417,9 +419,12 @@ class FakeTypeSafe:
     state, so it is answered without being recorded and `states` stays one entry per step.
     """
 
-    def __init__(self, policy: Policy, noul: float = 0.95):
+    endpoint = Endpoint("fake", "https://decisions.example.com/v1/decisions", "", "fake/decisions")
+
+    def __init__(self, policy: Policy, noul: float = 0.95, read_only: bool = False):
         self.policy = policy
         self.noul = noul
+        self.read_only = read_only  # how the goal question at the start of a run is answered
         self.states: list[dict] = []
         self.asked: list[dict] = []  # the questions each decision was asked, so a test can read the criteria offered
 
@@ -430,6 +435,8 @@ class FakeTypeSafe:
         return False
 
     def system_one(self, state: dict, questions: dict) -> SimpleNamespace:
+        if "read_only" in questions:
+            return SimpleNamespace(answers={"read_only": SimpleNamespace(noul=1.0 if self.read_only else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
         self.states.append(state)
@@ -439,11 +446,13 @@ class FakeTypeSafe:
         confidence = step[2] if len(step) > 2 else DEFAULT_CONFIDENCE
         return SimpleNamespace(answers=self._answers(state, questions, kind, target, confidence))
 
-    def _answers(self, state: dict, questions: dict, kind: str, target, confidence: float) -> dict:
+    def _answers(self, state: dict, questions: dict, kind: str, target, confidence: float | tuple[float, float]) -> dict:
+        """A step's confidence is one figure for every answer, or (kind, item) when the two differ."""
+        confidence, item_confidence = confidence if isinstance(confidence, tuple) else (confidence, confidence)
         answers = {"kind": _answer(kind, confidence), "site": _answer(target if kind == "use_browser" else "none", confidence)}
         if "item" in questions:
             aimed = kind == "click_item" or (kind in ("scroll_down", "scroll_up") and target is not None)
-            answers["item"] = _answer(self._item_key(state, target) if aimed else "0", confidence)
+            answers["item"] = _answer(self._item_key(state, target) if aimed else "0", item_confidence)
         if "offscreen" in questions:
             key = self._offscreen_key(state, target) if kind == "press_offscreen" else "0"
             answers["offscreen"] = _answer(key, confidence)
@@ -497,8 +506,9 @@ class FakeWriter:
 
     `reviews` scripts what the writer makes of each stop, one entry per answer asked for: a dict
     of the reply's fields, or a callable(packet) returning one. {"focus": ...} sends the classifier
-    back, {"question": ...} asks the user, and either says the goal is not reached yet. Once the
-    script is spent, every stop is the goal achieved, as it is with no script at all.
+    back, {"question": ...} asks the user, {"wait": True} has the run wait for the screen, and each
+    says the goal is not reached yet. Once the script is spent, every stop is the goal achieved, as
+    it is with no script at all.
     """
 
     def __init__(self, text: str = "", url: str = "", reviews: list | None = None, submit: bool = False):
@@ -518,7 +528,7 @@ class FakeWriter:
             reply = {"fill": bool(self.text), "text": self.text, "submit": self.submit, "reason": "the goal names what to type"}
         elif asked == {"ok", "url", "reason"}:
             reply = {"ok": bool(self.url), "url": self.url, "reason": "the goal names the site"}
-        elif asked == {"achieved", "answer", "focus", "question"}:
+        elif asked == {"achieved", "answer", "focus", "question", "wait"}:
             self.packets.append(packet)
             earlier = [text for screen in packet.get("earlier_screens", []) for text in screen["text"]]
             scripted = self.reviews.pop(0) if self.reviews else {}
@@ -528,6 +538,7 @@ class FakeWriter:
                 "answer": " ".join(packet["screen_text_in_reading_order"] + earlier),
                 "focus": "",
                 "question": "",
+                "wait": False,
                 **scripted,
             }
         else:
@@ -549,6 +560,7 @@ def drive(
     handoffs: int | None = None,
     events: Events | None = None,
     act: bool = True,
+    read_only: bool = False,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
@@ -557,7 +569,7 @@ def drive(
     With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
-    fake = FakeTypeSafe(policy, noul)
+    fake = FakeTypeSafe(policy, noul, read_only)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
     cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)

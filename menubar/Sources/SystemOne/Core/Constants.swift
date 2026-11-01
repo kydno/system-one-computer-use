@@ -77,6 +77,8 @@ enum K {
         static let actionOpacity: Double = 0.62
         static let actionGap: CGFloat = 2
         static let errorOpacity: Double = 0.85
+        /// The rule between one run and the next.
+        static let runDividerOpacity: Double = 0.5
     }
 
     // MARK: - Settings, in place of the run box
@@ -116,8 +118,6 @@ enum K {
         /// `config.DEFAULT_OPENROUTER_ANSWER_MODEL`, what runs while `.env` names none.
         static let defaultModel = "openai/gpt-6.1-terra"
         static let modelsURL = URL(string: "https://openrouter.ai/api/v1/models")!
-        /// `{id}` is the model's id, author and slug both.
-        static let endpointsURL = "https://openrouter.ai/api/v1/models/{id}/endpoints"
         static let searchPlaceholder = "Search OpenRouter models"
         static let resultCount = 3
         static let secondsPerYear: Double = 365 * 86_400
@@ -144,6 +144,14 @@ enum K {
         static let skeletonPulseDuration: Double = 0.7
         /// Widths of each skeleton row's two lines, as a share of the row.
         static let skeletonWidths: [(CGFloat, CGFloat)] = [(0.52, 0.34), (0.44, 0.40), (0.58, 0.30)]
+
+        /// The effort bars beside the model's name: three, short to tall, lit up to the effort.
+        static let effortBarWidth: CGFloat = 3
+        static let effortBarHeights: [CGFloat] = [5, 8, 11]
+        static let effortBarGap: CGFloat = 1.5
+        static let effortBarRadius: CGFloat = 1
+        static let effortLitOpacity: Double = 1
+        static let effortUnlitOpacity: Double = 0.35
     }
 
     // MARK: - Permissions
@@ -207,5 +215,8 @@ enum K {
         static let stopGrace: TimeInterval = 5
         /// Printed lines kept, to explain a run that ends without an `end` event.
         static let logTailLines = 12
+        /// Earlier runs since the last Clear that each new run is told about.
+        /// `clicker` keeps no more than its own `EARLIER_TASKS` of them either way.
+        static let earlierTasks = 8
     }
 }

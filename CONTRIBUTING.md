@@ -13,8 +13,9 @@ so a stall can be replayed offline with `--image`.
   and handed over as state.
 - Free text only ever comes from `writer.py`, with a structured reply and a
   code-side guard.
-- The writer never picks an action. When the classifier stops it may name a focus
-  or ask the user, and the classifier takes every step from there. Watch the
+- The writer never picks a click. When the classifier stops it may name a focus,
+  ask the user, or have the run wait for a screen still loading, and the classifier
+  takes every step from there. Watch the
   `calls:` line: a change that moves work to the writer should say why.
 - Platform calls live in the adapters, `macos.py` and `windows.py`, only. Everything else
   reaches them through `platform_adapter.desktop`, and a new adapter call goes into the

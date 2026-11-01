@@ -12,7 +12,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 
 from .config import MAX_OPTIONS, MIN_OCR_CONFIDENCE
-from .models import MENU_BAR_PT, AxNode, Box, Item, Screen
+from .models import MENU_BAR_PT, AxNode, Box, Item, Screen, tab_title
 from .platform_adapter import desktop
 from .timing import OCR_AHEAD, OCR_RECTS, OCR_REGION_PCT, phase
 
@@ -587,7 +587,7 @@ def offscreen_controls(nodes: list[AxNode], items: list[Item]) -> list[AxNode]:
     out: list[AxNode] = []
     for node in nodes:
         key = (node.role, node.label)
-        if key in seen or node.label in visible:
+        if key in seen or tab_title(node.label) in visible:
             continue
         seen.add(key)
         out.append(node)
@@ -611,11 +611,12 @@ def in_field(block: Item, screen: Screen) -> bool:
 
 
 def to_ax_items(nodes: list[AxNode], scale: float) -> list[Item]:
-    """Controls as items, converted from screen points to capture pixels."""
+    """Controls as items, converted from screen points to capture pixels. A tab is named by its title
+    alone (see `tab_title`)."""
     return [
         Item(
             index=i,
-            text=node.label,
+            text=tab_title(node.label),
             ocr_confidence=1.0,
             x1=node.x * scale,
             y1=node.y * scale,

@@ -346,3 +346,24 @@ def test_an_app_that_lists_itself_as_a_child_terminates():
     found, _, cap_hit = walk_actionable("app", lambda n: tree[n], attrs, lambda n: ["AXPress"], 1000, 800)
     assert [n.label for n in found] == ["File"]
     assert not cap_hit
+
+
+def test_a_sleeping_tab_is_named_by_its_title_alone():
+    """Memory Saver's suffix read as a tab out of reach, to both models: see `models.TAB_INACTIVE`."""
+    tabs = [
+        AxNode(role="AXRadioButton", label=label, x=40.0 * n, y=40.0, w=36.0, h=30.0, pressable=True, ref=object())
+        for n, label in enumerate(
+            [
+                "FlexCheck - Project settings - Integrations - Firebase console - Inactive tab - 135 MB freed up",
+                "iCloud Photos - Apple iCloud - Inactive tab - 77.2 MB freed up",
+                "Settings - Memory usage - 56.0 MB",
+                "Inactive tab",
+            ]
+        )
+    ]
+    assert [it.text for it in perception.to_ax_items(tabs, 2.0)] == [
+        "FlexCheck - Project settings - Integrations - Firebase console",
+        "iCloud Photos - Apple iCloud",
+        "Settings",
+        "Inactive tab",  # a page of that name keeps it
+    ]

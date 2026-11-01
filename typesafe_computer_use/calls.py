@@ -1,4 +1,4 @@
-"""Count the requests and tokens each model takes, at the two clients every request goes through."""
+"""Count the requests, tokens and cost each model takes, at the two clients every request goes through."""
 
 from __future__ import annotations
 
@@ -19,18 +19,24 @@ class Usage:
 
     `input_tokens` are the uncached ones, including those written to a cache; `cached_input_tokens`
     were read from one. A reply that reports no usage still counts as a request, with zero tokens.
+    `cost` is in USD, summed over the replies that report one (OpenRouter's do), and None until one does.
     """
 
     requests: int = 0
     input_tokens: int = 0
     cached_input_tokens: int = 0
     output_tokens: int = 0
+    cost: float | None = None
 
-    def record(self, input_tokens: int = 0, cached_input_tokens: int = 0, output_tokens: int = 0) -> None:
+    def record(
+        self, input_tokens: int = 0, cached_input_tokens: int = 0, output_tokens: int = 0, cost: float | None = None
+    ) -> None:
         self.requests += 1
         self.input_tokens += input_tokens
         self.cached_input_tokens += cached_input_tokens
         self.output_tokens += output_tokens
+        if cost is not None:
+            self.cost = (self.cost or 0.0) + cost
 
 
 @dataclass
@@ -55,9 +61,19 @@ class Calls:
             self.count[model] += 1
             self.seconds[model] += time.perf_counter() - started
 
-    def used(self, model: str, input_tokens: int = 0, cached_input_tokens: int = 0, output_tokens: int = 0) -> None:
-        """Add one reply's tokens to `model`, the model id it came from."""
-        self.usage.setdefault(model, Usage()).record(input_tokens, cached_input_tokens, output_tokens)
+    def used(
+        self, model: str, input_tokens: int = 0, cached_input_tokens: int = 0, output_tokens: int = 0, cost: float | None = None
+    ) -> None:
+        """Add one reply's tokens and cost to `model`, the model id it came from."""
+        self.usage.setdefault(model, Usage()).record(input_tokens, cached_input_tokens, output_tokens, cost)
+
+    def cost(self) -> float | None:
+        """The USD the run's replies reported costing, over every model; None when none reported one.
+
+        A model whose replies report no cost (TypeSafe's, Anthropic's) adds nothing, so with one of
+        those in the run this is what the rest cost, not the whole bill."""
+        costs = [usage.cost for usage in self.usage.values() if usage.cost is not None]
+        return round(sum(costs), 6) if costs else None
 
     def share(self, model: str) -> float | None:
         """The fraction of all requests that went to `model`, or None before any request."""
@@ -75,12 +91,16 @@ class Calls:
         }
 
     def tokens(self) -> dict:
-        """Tokens per model id, for run.json."""
+        """Tokens and cost per model id, for run.json."""
         return {model: asdict(usage) for model, usage in self.usage.items()}
 
     def line(self) -> str:
-        """One log line: `calls: classifier 12 (86%, 3.1s)  writer 2 (14%, 8.0s)`."""
+        """One log line: `calls: classifier 12 (86%, 3.1s)  writer 2 (14%, 8.0s)  cost $0.0123`, the cost
+        only when a reply reported one."""
         parts = [f"{model} {self.count[model]} ({(self.share(model) or 0):.0%}, {self.seconds[model]:.1f}s)" for model in MODELS]
+        cost = self.cost()
+        if cost is not None:
+            parts.append(f"cost ${cost:.4f}")
         return "calls: " + "  ".join(parts)
 
 
@@ -88,7 +108,7 @@ class MeteredClassifier:
     """The decision client, counting each request. `system_one` is the only call the package makes.
 
     The reply, from OpenRouter or TypeSafe, names its `model` and reports `usage` as `input_tokens`
-    and `output_tokens`, with no cached count.
+    and `output_tokens`, with no cached count, and OpenRouter's a `cost` too.
     """
 
     def __init__(self, client, calls: Calls):
@@ -103,6 +123,7 @@ class MeteredClassifier:
             _model(getattr(reply, "model", None), request.get("model"), CLASSIFIER),
             input_tokens=_tokens(usage, "input_tokens"),
             output_tokens=_tokens(usage, "output_tokens"),
+            cost=_cost(usage),
         )
         return reply
 
@@ -124,6 +145,7 @@ class MeteredWriter:
             input_tokens=_tokens(usage, "input_tokens") + _tokens(usage, "cache_creation_input_tokens"),
             cached_input_tokens=_tokens(usage, "cache_read_input_tokens"),
             output_tokens=_tokens(usage, "output_tokens"),
+            cost=_cost(usage),
         )
         return reply
 
@@ -137,3 +159,9 @@ def _tokens(usage, name: str) -> int:
     """One count from a usage object, or 0 when the reply leaves it out or reports it as None."""
     count = getattr(usage, name, None)
     return count if isinstance(count, int) else 0
+
+
+def _cost(usage) -> float | None:
+    """The USD a reply reports costing, or None when it reports none, as Anthropic's and TypeSafe's do."""
+    cost = getattr(usage, "cost", None)
+    return float(cost) if isinstance(cost, int | float) and not isinstance(cost, bool) else None

@@ -10,9 +10,15 @@ MIN_OCR_CONFIDENCE = 0.3
 MAX_OPTIONS = 255  # the Choice ceiling of TypeSafe's Jev and of Mercury Decide
 ABORT_CORNER_PX = 4
 DEFAULT_MIN_CONFIDENCE = 0.4
+# The floor for a goal that only asks to find something out, where a wrong click opens the wrong
+# page and the next step can leave it. GPT-6 Luna spreads an item's odds over every item on screen:
+# its right click scored 0.11 to 0.24 on three Firebase and Cloud Console runs.
+DEFAULT_READ_ONLY_CONFIDENCE = 0.15
+READ_ONLY_NOUL = 0.8  # how sure the decision model must be that a goal changes nothing before it counts as read-only
 DEFAULT_STEPS = 100
 DEFAULT_DELAY = 2.0
 DEFAULT_HANDOFFS = 10  # each one is a call to the answer model, a few seconds and a few cents
+EARLIER_TASKS = 8  # the earlier tasks of a session the writer reads; the thread, not the whole session
 DEFAULT_WRITER_MODEL = "claude-haiku-4-5"
 DEFAULT_ANSWER_MODEL = "claude-sonnet-5"  # runs only when the classifier stops, on a screenshot: worth a stronger reader
 DEFAULT_BROWSER = "Google Chrome"

@@ -198,6 +198,23 @@ def test_a_focused_element_inside_editable_page_content_is_an_editor(attrs, edit
     assert macos.focused_field().editor is editor
 
 
+@pytest.mark.parametrize(("span", "caret"), [((84, 0), 84), ((80, 4), 84), (None, None)])
+def test_the_caret_is_where_the_selection_ends(span, caret, monkeypatch):
+    names = {"kAXFocusedUIElementAttribute": "AXFocusedUIElement", "kAXRoleAttribute": "AXRole"}
+    ax = SimpleNamespace(
+        AXUIElementCreateSystemWide=lambda: "system",
+        kAXValueCFRangeType=4,
+        AXValueGetValue=lambda value, kind, _: (True, span),  # PyObjC hands a CFRange back as a plain tuple
+        **names,
+    )
+    for name in ("Position", "Size", "Value", "Title", "Description", "PlaceholderValue"):
+        setattr(ax, f"kAX{name}Attribute", f"AX{name}")
+    attrs = {"AXRole": "AXTextArea", **({"AXSelectedTextRange": "range"} if span else {})}
+    monkeypatch.setattr(macos, "AS", ax)
+    monkeypatch.setattr(macos, "_ax_attr", lambda element, name: "focused" if element == "system" else attrs.get(name))
+    assert macos.focused_field().caret == caret
+
+
 def keys_go_to(monkeypatch, pid: int | None, names: dict[int, str]) -> None:
     """Accessibility names the app with `pid` as the one the keyboard goes to, or none at all."""
 

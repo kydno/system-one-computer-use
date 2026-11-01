@@ -82,7 +82,9 @@ class OpenAIWriter:
 
 
 def _usage(usage) -> SimpleNamespace | None:
-    """Chat Completions usage in the Messages API's shape: `prompt_tokens` counts the cached ones too."""
+    """Chat Completions usage in the Messages API's shape: `prompt_tokens` counts the cached ones too.
+
+    OpenRouter adds `cost`, in USD, which the SDK keeps as an extra field; other endpoints leave it out."""
     if usage is None:
         return None
     prompt = getattr(usage, "prompt_tokens", None) or 0
@@ -92,6 +94,7 @@ def _usage(usage) -> SimpleNamespace | None:
         cache_read_input_tokens=cached,
         cache_creation_input_tokens=0,
         output_tokens=getattr(usage, "completion_tokens", None) or 0,
+        cost=getattr(usage, "cost", None),
     )
 
 

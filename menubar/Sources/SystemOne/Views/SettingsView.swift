@@ -90,6 +90,7 @@ struct SettingsView: View {
             ReviewerModelView(
                 model: saved[ReviewerRouting.modelKey],
                 routing: saved[ReviewerRouting.key],
+                effort: saved[ReviewerEffort.key],
                 write: write
             )
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from .config import SITES
 from .dates import date_hints, now_context
-from .decisions import Choice, ChoiceAnswer, DecisionClient, Noul
+from .decisions import Choice, ChoiceAnswer, DecisionClient, DecisionError, Noul, Refusal
 from .models import AxNode, Field, Guidance, Item, Screen
 
 STOP_KINDS = ("done", "none")
@@ -214,6 +214,7 @@ class Decision:
     offscreen: ChoiceAnswer | None = None
     browser: ChoiceAnswer | None = None  # asked only when more than one browser is installed
     app: ChoiceAnswer | None = None  # asked only once open_app is chosen
+    refused: str | None = None  # a question the model refused, so the step was decided without it
 
     @property
     def clicking(self) -> bool:
@@ -262,7 +263,13 @@ def decide(
     apps: Sequence[str] = (),
 ) -> Decision:
     """One request for the step's decision, and a second, small one for the app only when the first
-    chose open_app: the list of installed apps is long, and most steps open none."""
+    chose open_app: the list of installed apps is long, and most steps open none.
+
+    Luna refuses the item question now and then, the one whose labels are text read off the screen,
+    and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
+    IAM roles, a run never got as far as opening the browser the goal named. Most moves need no
+    item, so the step is asked again without it, and only a click is left without a decision.
+    """
     questions = {
         "kind": Choice(
             instructions=(
@@ -311,7 +318,18 @@ def decide(
             ),
             criteria=offscreen_criteria(screen.offscreen),
         )
-    answers = client.system_one(state=base_state(goal, screen, items, history, tried, guidance), questions=questions).answers
+    state = base_state(goal, screen, items, history, tried, guidance)
+    refused = None
+    try:
+        answers = client.system_one(state=state, questions=questions).answers
+    except Refusal as e:
+        if e.question != "item" or "item" not in questions:
+            raise
+        refused = e.question
+        rest = {name: question for name, question in questions.items() if name != refused}
+        answers = client.system_one(state=state, questions=rest).answers
+        if answers["kind"].choice == "click_item":
+            raise DecisionError(f"the model refused 'item', then chose a click without it ({e})") from e
     app = None
     if answers["kind"].choice == "open_app" and apps:
         app = client.system_one(
@@ -325,6 +343,7 @@ def decide(
         offscreen=answers.get("offscreen"),
         browser=answers.get("browser"),
         app=app,
+        refused=refused,
     )
 
 
@@ -338,6 +357,21 @@ def app_question(apps: Sequence[str], frontmost: str) -> Choice:
     )
 
 
+def read_only(client: DecisionClient, goal: str) -> float:
+    """Probability that the goal only asks to find something out, and changes nothing on the way.
+
+    Asked once a run, of the goal alone: a goal that only looks may click with less confidence,
+    since a wrong click opens the wrong page and the next step can leave it.
+    """
+    question = Noul(
+        instructions=(
+            "Does this goal only ask to find something out, check, or confirm it, so that reaching it "
+            "means opening and reading pages without changing, saving, sending, or turning on anything?"
+        )
+    )
+    return client.system_one(state={"goal": goal}, questions={"read_only": question}).answers["read_only"].noul
+
+
 def verify_typed(client: DecisionClient, goal: str, field_before: Field, typed: str, field_after: Field | None) -> float:
     """Probability that the field now holds a sensible value for its purpose.
 
@@ -347,6 +381,10 @@ def verify_typed(client: DecisionClient, goal: str, field_before: Field, typed: 
     typing (see `actions.read_editor`).
     """
     after = field_after.value[:300] if field_after else None
+    if field_after and field_before.multiline:
+        # A text area can hold a whole document, with the typing far past its first lines.
+        at = field_after.value.find(typed[:40])
+        after = field_after.value[max(0, at - 100) : at + 300] if at >= 0 else after
     if field_before.editor:
         seen = {"screen_lines_sharing_words_with_the_typed_text_now": field_after.value[:1000] if field_after else None}
     elif field_before.clicked:

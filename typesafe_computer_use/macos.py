@@ -24,7 +24,7 @@ from .ax_walk import AX_PRESS, AxAttrs, Frame, walk_actionable
 from .config import ABORT_CORNER_PX
 from .models import TEXT_ROLES, Abort, AxNode, Field, KeyboardFocus
 
-KEYCODES = {"return": 36, "tab": 48, "escape": 53, "a": 0, "delete": 51, "[": 33}
+KEYCODES = {"return": 36, "tab": 48, "escape": 53, "a": 0, "delete": 51, "[": 33, "right": 124}
 # Browsers name, on any element inside editable page content, the element its editing belongs to.
 # A focused element with one and no text role is a rich-text editor, such as a Google Doc's hidden
 # key box, which reports itself as a bare AXGroup.
@@ -98,13 +98,16 @@ def click_at(point: tuple[float, float]) -> None:
     _down_then_up(lambda down: Quartz.CGEventCreateMouseEvent(None, kinds[down], point, Quartz.kCGMouseButtonLeft))
 
 
-def press(key: str, command: bool = False) -> None:
+def press(key: str, command: bool = False, shift: bool = False) -> None:
     check_abort()
     code = KEYCODES[key]
+    flags = Quartz.kCGEventFlagMaskCommand if command else 0
+    if shift:
+        flags |= Quartz.kCGEventFlagMaskShift
 
     def event(down: bool):
         e = Quartz.CGEventCreateKeyboardEvent(None, code, down)
-        Quartz.CGEventSetFlags(e, Quartz.kCGEventFlagMaskCommand if command else 0)
+        Quartz.CGEventSetFlags(e, flags)
         return e
 
     _down_then_up(event)
@@ -239,6 +242,67 @@ def browser_url(browser: str) -> str | None:
         return None
 
 
+def _quoted(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def browser_tabs(browser: str) -> list[tuple[str, str]]:
+    """The title and URL of every tab in every window of a running browser, front window first.
+    A browser that is not running has none, and is not started to say so."""
+    script = (
+        f'if application {_quoted(browser)} is not running then return ""\n'
+        "set sep to character id 9\n"
+        f"tell application {_quoted(browser)}\n"
+        '  set out to ""\n'
+        "  repeat with w in windows\n"
+        "    repeat with t in tabs of w\n"
+        "      set out to out & (URL of t) & sep & (title of t) & (character id 10)\n"
+        "    end repeat\n"
+        "  end repeat\n"
+        "  return out\n"
+        "end tell"
+    )
+    try:
+        out = osascript(script)
+    except subprocess.CalledProcessError:
+        return []
+    tabs = []
+    for line in out.splitlines():
+        url, _, title = line.partition("\t")
+        if url:
+            tabs.append((title.strip(), url.strip()))
+    return tabs
+
+
+def show_tab(browser: str, url: str) -> bool:
+    """Make the open tab at `url` the active one, raise its window, and bring the browser forward.
+    False when no tab is at that URL. Arc selects a tab; the other Chromium browsers set the index."""
+    pick = "select t" if browser == "Arc" else "set active tab index of w to i"
+    script = (
+        f"tell application {_quoted(browser)}\n"
+        "  repeat with w in windows\n"
+        "    set i to 0\n"
+        "    repeat with t in tabs of w\n"
+        "      set i to i + 1\n"
+        f"      if (URL of t) is {_quoted(url)} then\n"
+        f"        {pick}\n"
+        "        set index of w to 1\n"
+        '        return "found"\n'
+        "      end if\n"
+        "    end repeat\n"
+        "  end repeat\n"
+        '  return ""\n'
+        "end tell"
+    )
+    check_abort()
+    try:
+        if osascript(script) != "found":
+            return False
+    except subprocess.CalledProcessError:
+        return False
+    return activate(browser)
+
+
 def open_path(path: Path, as_text: bool = False) -> None:
     """Show a file to the user; `as_text` opens it in the default text editor."""
     subprocess.run(["open", *(["-t"] if as_text else []), str(path)], check=False)
@@ -362,6 +426,11 @@ def focused_field(pid: int | None = None) -> Field | None:
     value = _ax_attr(element, AS.kAXValueAttribute)
     label = _ax_attr(element, AS.kAXTitleAttribute) or _ax_attr(element, AS.kAXDescriptionAttribute) or ""
     role = str(_ax_attr(element, AS.kAXRoleAttribute) or "")
+    selected = _ax_attr(element, "AXSelectedTextRange")
+    caret = None
+    if selected is not None:
+        _, span = AS.AXValueGetValue(selected, AS.kAXValueCFRangeType, None)  # PyObjC: (location, length)
+        caret = sum(span) if span is not None else None
     return Field(
         role=role,
         label=str(label),
@@ -372,6 +441,7 @@ def focused_field(pid: int | None = None) -> Field | None:
         w=w,
         h=h,
         ref=element,
+        caret=caret,
         editor=role not in TEXT_ROLES
         and (
             _ax_attr(element, EDITABLE_ANCESTOR) is not None

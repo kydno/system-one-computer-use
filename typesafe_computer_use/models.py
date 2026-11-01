@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 
 from PIL import Image
 
@@ -50,17 +50,30 @@ class Exchange:
 
 
 @dataclass(frozen=True)
+class EarlierTask:
+    """A goal the user gave before this one in the same session, and what came of it."""
+
+    goal: str
+    answer: str = ""
+    achieved: bool | None = None
+    outcome: str = ""
+
+
+@dataclass(frozen=True)
 class Guidance:
-    """What the run has learned about its goal since it began.
+    """What the run knows about its goal beyond the goal itself.
 
     The goal is one sentence and never changes. `focus` is the sub-goal the writer sent the
     classifier back to work on the last time the classifier stopped, until it acts on it, and `exchanges` are the
     questions the user answered on the way. Every model call reads both, so the classifier
-    steers by them and the writer types by them.
+    steers by them and the writer types by them. `earlier` are the tasks the user gave before
+    this one in the same session, oldest first: a goal such as "search for it" leans on them. Only
+    the writer reads those, since the classifier would act on an old goal as readily as this one.
     """
 
     focus: str | None = None
     exchanges: tuple[Exchange, ...] = ()
+    earlier: tuple[EarlierTask, ...] = ()
 
     def focused(self, focus: str) -> Guidance:
         return replace(self, focus=focus)
@@ -80,6 +93,11 @@ class Guidance:
             **({"user_said": [{"asked": e.question, "replied": e.reply} for e in self.exchanges]} if self.exchanges else {}),
         }
 
+    def writer_state(self) -> dict:
+        """`state`, and the earlier tasks, which only the writer reads."""
+        earlier = [{k: v for k, v in asdict(t).items() if v not in ("", None)} for t in self.earlier]
+        return {**self.state(), **({"earlier_tasks": earlier} if earlier else {})}
+
 
 Signature = tuple[
     str, str | None, str | None, tuple[tuple[str, int], ...]
@@ -91,6 +109,16 @@ ROW_PT = 20.0  # the row a line sits in, in screen points: coarse enough to surv
 # "Settings - Memory usage - 56.0 MB", or "High memory usage". The figure drifts between two
 # captures of one screen, and with the clock it makes two changed lines, so it is left out.
 TAB_MEMORY = re.compile(r" - (?:high )?memory usage - [\d.,]+ ?[kmgt]?b$", re.IGNORECASE)
+# Memory Saver, in Brave and Chrome, names a tab it has put to sleep "<title> - Inactive tab - 135 MB
+# freed up". Both models read that as a tab out of reach: on a strip of 45 such tabs, the classifier
+# picked the one the goal named at 0.24, and the writer sent it to Tab search instead. A sleeping
+# tab wakes when clicked like any other, so the suffix is dropped where the tab becomes an item.
+TAB_INACTIVE = re.compile(r" - inactive tab(?: - [\d.,]+ ?[kmgt]?b freed up)?$", re.IGNORECASE)
+
+
+def tab_title(label: str) -> str:
+    """A label without what the browser adds to a tab's name about its memory: the title alone."""
+    return TAB_INACTIVE.sub("", TAB_MEMORY.sub("", label))
 
 
 def signature(screen: Screen, items: list[Item]) -> Signature:
@@ -100,12 +128,12 @@ def signature(screen: Screen, items: list[Item]) -> Signature:
     A click that only moves the focus changes no text, but it changes what the next action can do,
     so it counts. A scroll on a dense page keeps nine tenths of the text and moves all of it, so the
     row counts too: the same line lower down is a different line. A tab's memory figure is no part
-    of the screen (see TAB_MEMORY). A stand-in field is no part of it either: it is the last click,
+    of the screen (see `tab_title`). A stand-in field is no part of it either: it is the last click,
     not something the screen showed, and with it every click would count as a change.
     """
     focused = f"{screen.field.role}:{screen.field.label}" if screen.field and not screen.field.clicked else None
     row = ROW_PT * screen.scale
-    return (screen.app, screen.url, focused, tuple((TAB_MEMORY.sub("", it.text), round(it.center[1] / row)) for it in items))
+    return (screen.app, screen.url, focused, tuple((tab_title(it.text), round(it.center[1] / row)) for it in items))
 
 
 def same_screen(a: Signature, b: Signature) -> bool:
@@ -237,6 +265,7 @@ class Field:
     ref: object | None = field(default=None, compare=False, repr=False)
     clicked: bool = False
     editor: bool = False
+    caret: int | None = None  # where the insertion point sits in `value`, when the element says
 
     @property
     def is_text(self) -> bool:

@@ -2,13 +2,15 @@ import SwiftUI
 
 /// The settings box's reviewer section: the model `clicker` hands the screen to
 /// whenever the decision model stops (`CLICKER_ANSWER_MODEL`), found by
-/// searching OpenRouter, and how OpenRouter picks its provider
-/// (`CLICKER_ANSWER_SORT`). Writes go through the settings box, which owns `.env`.
+/// searching OpenRouter, how hard it thinks (`CLICKER_ANSWER_REASONING`), and how
+/// OpenRouter picks its provider (`CLICKER_ANSWER_SORT`). Writes go through the
+/// settings box, which owns `.env`.
 struct ReviewerModelView: View {
 
     /// What `.env` names, nil for none.
     let model: String?
     let routing: String?
+    let effort: String?
     let write: (String, String) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -18,7 +20,6 @@ struct ReviewerModelView: View {
     @State private var query = ""
     @State private var phase = Phase.idle
     @State private var catalog: [OpenRouter.Model] = []
-    @State private var cheapest: OpenRouter.Endpoint?
 
     private enum Phase: Equatable {
         case idle
@@ -39,13 +40,8 @@ struct ReviewerModelView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
             routingPicker
-            if let routingCaption {
-                caption(routingCaption)
-                    .transition(.opacity)
-            }
         }
         .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: phase)
-        .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: currentRouting)
         .onChange(of: query) { _, _ in phase = query.trimmed.isEmpty ? .idle : .loading }
         // Restarts on every keystroke, so only the last pause in typing searches.
         .task(id: query) { await search() }
@@ -60,6 +56,9 @@ struct ReviewerModelView: View {
                 .font(.system(size: K.RunBox.bodyFontSize, weight: .medium))
                 .foregroundStyle(.primary)
             Spacer(minLength: 0)
+            EffortBars(effort: ReviewerEffort.named(effort), isDefaultModel: model == nil) {
+                write(ReviewerEffort.key, $0.rawValue)
+            }
             Text(displayName(current))
                 .font(.system(size: K.Settings.captionSize))
                 .foregroundStyle(.secondary)
@@ -185,20 +184,6 @@ struct ReviewerModelView: View {
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    /// What Cheapest and Fastest do; Auto has nothing to say.
-    private var routingCaption: String? {
-        switch currentRouting {
-        case .cheapest:
-            guard let cheapest else { return "Cheapest provider first, the next one if it fails" }
-            let price = OpenRouter.price(prompt: cheapest.prompt, completion: cheapest.completion)
-            return "Cheapest first: \(cheapest.title) now, \(price) per M tokens"
-        case .fastest:
-            return "Fastest provider first, by OpenRouter's live throughput"
-        default:
-            return nil
-        }
-    }
-
     private func caption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: K.Settings.captionSize))
@@ -230,17 +215,64 @@ struct ReviewerModelView: View {
         }
     }
 
-    /// The current model's name, and its cheapest provider for the caption.
+    /// The current model's name, from the catalog.
     private func loadCurrent() async {
-        cheapest = nil
         if catalog.isEmpty, let models = try? await OpenRouter.models() { catalog = models }
-        cheapest = try? await OpenRouter.endpoints(for: current).first
     }
 
     private func choose(_ option: OpenRouter.Model) {
         write(ReviewerRouting.modelKey, option.id == K.Reviewer.defaultModel ? "" : option.id)
         isSearchFocused = false
         query = ""
+    }
+}
+
+// MARK: - Effort
+
+/// Three bars, short to tall, lit up to the reviewer's reasoning effort. A click
+/// steps it up, and past high back to unset.
+private struct EffortBars: View {
+
+    let effort: ReviewerEffort
+    let isDefaultModel: Bool
+    let choose: (ReviewerEffort) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Plain white, or black in light mode: `Color.primary` is the label color,
+    /// which is itself partly see-through and reads as grey over the glass.
+    private var litColor: Color { colorScheme == .dark ? .white : .black }
+
+    var body: some View {
+        let lit = effort.level(isDefaultModel: isDefaultModel)
+        let title = effort.title(isDefaultModel: isDefaultModel)
+        Button { choose(effort.next) } label: {
+            HStack(alignment: .bottom, spacing: K.Reviewer.effortBarGap) {
+                ForEach(Array(K.Reviewer.effortBarHeights.enumerated()), id: \.offset) { index, height in
+                    RoundedRectangle(cornerRadius: K.Reviewer.effortBarRadius, style: .continuous)
+                        .fill(index < lit ? litColor : Color.primary)
+                        .opacity(index < lit ? K.Reviewer.effortLitOpacity : K.Reviewer.effortUnlitOpacity)
+                        .frame(width: K.Reviewer.effortBarWidth, height: height)
+                }
+            }
+            .frame(height: K.Reviewer.effortBarHeights.last, alignment: .bottom)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Reasoning effort: \(title). Click for more.")
+        .houseAnimation(K.Motion.buttonHover, reduceMotion: reduceMotion, value: lit)
+        .accessibilityLabel("Reasoning effort")
+        .accessibilityValue(title)
+        .accessibilityAdjustableAction { direction in
+            let all = ReviewerEffort.allCases
+            let index = all.firstIndex(of: effort)!
+            switch direction {
+            case .increment where index + 1 < all.count: choose(all[index + 1])
+            case .decrement where index > 0: choose(all[index - 1])
+            default: break
+            }
+        }
     }
 }
 

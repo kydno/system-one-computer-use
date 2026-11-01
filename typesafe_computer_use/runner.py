@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 import json
+import re
 import time
+import traceback
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
-from .actions import Context, moved, perform
+from .actions import Context, moved, perform, wait
 from .calls import Calls, MeteredClassifier, MeteredWriter
-from .config import DEFAULT_DELAY, DEFAULT_HANDOFFS, DEFAULT_MIN_CONFIDENCE, DEFAULT_STEPS, MAX_OPTIONS
-from .decide import Decision, browser_names, decide, offscreen_records
+from .config import (
+    DEFAULT_DELAY,
+    DEFAULT_HANDOFFS,
+    DEFAULT_MIN_CONFIDENCE,
+    DEFAULT_READ_ONLY_CONFIDENCE,
+    DEFAULT_STEPS,
+    MAX_OPTIONS,
+    READ_ONLY_NOUL,
+    answer_model,
+    writer_model,
+)
+from .decide import Decision, browser_names, decide, offscreen_records, read_only
 from .decisions import DecisionClient, DecisionError
 from .events import Events
-from .models import Abort, Field, Guidance, Item, Screen, Signature, same_screen, signature
+from .models import Abort, EarlierTask, Field, Guidance, Item, Screen, Signature, same_screen, signature
 from .perception import OcrCache, capture, perceive
 from .platform_adapter import desktop
 from .report import Log, annotate, ax_count, render_payload, top
@@ -28,6 +40,10 @@ MAX_STALLS = 3  # stalls with no new page between them; the last is final, since
 SETTLE_LOOK = 0.25  # between two looks at a screen that may still be moving; each look is a capture of its own
 EARLIER_LINES = 600  # lines of text from the screens before the last one that the answer may also be read from
 MAX_QUESTIONS = 3  # questions the writer may put to the user in one run; an empty reply ends the asking sooner
+FOCUS_LEAD = 2.0  # how many times likelier the item a focus names must be than another item of the same text
+# The text a focus quotes: in curly or straight quotes, but not an apostrophe ("the browser's 'Tab search'").
+QUOTED = re.compile(r"\u201c(.+?)\u201d|\"(.+?)\"|\u2018(.+?)\u2019|(?<!\w)'(.+?)'(?!\w)")
+WAITING = "wait for the screen to finish loading"  # the focus a handoff records when the writer called for a wait
 
 # The outcomes the writer is handed, each in words it can pass on. A dry run took no action and
 # an abort is the user's own stop, so neither has anything to report.
@@ -52,11 +68,13 @@ class RunConfig:
     act: bool = False
     steps: int = DEFAULT_STEPS
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
+    read_only_confidence: float = DEFAULT_READ_ONLY_CONFIDENCE  # the floor instead, for a goal that only looks
     delay: float = DEFAULT_DELAY
     handoffs: int = DEFAULT_HANDOFFS  # stops the writer may send the classifier back from; 0 makes every stop final
     image: Path | None = None  # replay a saved capture (never acts)
     app: str | None = None  # frontmost app to report during replay
     url: str | None = None  # browser URL to report during replay
+    earlier: tuple[EarlierTask, ...] = ()  # the tasks given before this one in the same session, for the writer
     # Start each capture's OCR on a thread of its own while the capture asks for the app, window,
     # field, and URL (see `OcrCache.read_ahead`). Worth it where those questions are slow, as over an
     # OSWorld VM; off for this machine, whose own are quick.
@@ -96,10 +114,12 @@ class RunState:
     ocr_cache: OcrCache = field(default_factory=OcrCache)  # carries one step's OCR into the next
     view: tuple[Screen, list[Item]] | None = None  # the latest capture, until an action makes it stale
     answer: Answer | None = None  # the writer's latest; the last one is the run's answer
+    answered: Signature | None = None  # the screen the writer's latest answer was read from
     guidance: Guidance = field(default_factory=Guidance)  # the writer's focus and the user's replies, as they stand
     handoffs: list[Handoff] = field(default_factory=list)
     calls: Calls = field(default_factory=Calls)  # requests to each model, over the whole run
     clicked: Clicked | None = None  # the last action's click on page text, for the screen right after it
+    read_only: bool = False  # the goal only asks to find something out, so the lower floor applies
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -114,11 +134,15 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
     if cfg.act:
         log(f"driving the machine. abort: {desktop.abort_hint()}.")
 
-    state = RunState()
+    state = RunState(guidance=Guidance(earlier=cfg.earlier))
     started = time.time()
+    models: dict[str, str | None] = {}
     try:
         with DecisionClient() as typesafe:
             ctx = metered(ctx_factory(typesafe, state.history), state.calls)
+            models = configured_models(typesafe, ctx)
+            log(f"models: decisions {models['decisions']}, writer {models['writer']}, answer {models['answer']}")
+            state.read_only = goal_only_looks(ctx, cfg.goal, log)
             for step in range(1, cfg.steps + 1):
                 ctx = replace(ctx, guidance=state.guidance)  # a handoff sets the focus, and the action it asked for spends it
                 if run_step(cfg, ctx, state, step, log):
@@ -132,6 +156,10 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
     except (KeyboardInterrupt, Abort) as e:
         state.outcome = f"aborted ({str(e) or 'Ctrl-C'})"  # a bare KeyboardInterrupt is truthy but prints as ""
         log(f"\n{state.outcome} after {len(state.history)} actions")
+    except Exception:
+        # The menu bar app shows stderr only for a run that never began, so the folder keeps why.
+        log(f"\ncrashed after {len(state.history)} actions:\n{traceback.format_exc().rstrip()}")
+        raise
     finally:
         summary = {
             "goal": cfg.goal,
@@ -141,10 +169,14 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "answer": state.answer.text if state.answer else None,
             "goal_achieved": state.answer.achieved if state.answer else None,
             "seconds": round(time.time() - started, 1),
+            "models": models,
+            "read_only": state.read_only,
             "calls": state.calls.summary(),
             "usage": state.calls.tokens(),
+            "cost": state.calls.cost(),
             "handoffs": [asdict(h) for h in state.handoffs],
             "questions": [asdict(e) for e in state.guidance.exchanges],
+            "earlier_tasks": [asdict(t) for t in cfg.earlier],
             "timing": summarize(state.timings),
             "history": state.history,
             "config": {k: str(v) for k, v in asdict(cfg).items()},
@@ -154,6 +186,30 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
         log(f"run folder: {cfg.out}")
         log.event("end", folder=str(cfg.out), why=STOPPED.get(state.outcome), **summary)
     return state
+
+
+def configured_models(typesafe: DecisionClient, ctx: Context) -> dict[str, str | None]:
+    """The models this run asks, for its folder. The CLI prints them, but a front end shows those
+    lines nowhere, and the token count names only models that replied: a run whose every decision
+    was refused showed no decision model at all."""
+    return {
+        "decisions": typesafe.endpoint.model,
+        "writer": writer_model() if ctx.writer is not None else None,
+        "answer": answer_model() if ctx.writer is not None else None,
+    }
+
+
+def goal_only_looks(ctx: Context, goal: str, log: Log) -> bool:
+    """Whether the goal only asks to find something out, by the decision model. Unsure, or no
+    answer, is a goal that may change something: the higher floor is the safe one."""
+    try:
+        p = read_only(ctx.typesafe, goal)
+    except DecisionError as e:
+        log(f"read-only: unknown ({e}), so the floor stays")
+        return False
+    looks = p >= READ_ONLY_NOUL
+    log(f"read-only: {'yes' if looks else 'no'} ({p:.2f})")
+    return looks
 
 
 def metered(ctx: Context, calls: Calls) -> Context:
@@ -175,7 +231,13 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     a question, which goes to the user first; the writer then reads the same screen again with the
     reply. Each reply is new information and each focus must lead to an action, so the exchange
     cannot go round on itself: a focus the classifier could not act on leaves the answer that came
-    with it standing, and a stall with no new page since the last two is final (see `stuck`).
+    with it standing while the screen is the one that answer was read from, and a stall with no new
+    page since the last two is final (see `stuck`). A screen that changed on its own, as a page
+    still loading does, is read again: the last answer describes a screen that is gone.
+
+    The writer may also find the screen still loading. The classifier ranks a click on what has
+    already drawn over waiting for the rest, so the run waits itself, as a wait the classifier
+    chose would, and the classifier reads the screen once it has loaded.
     """
     stuck(state, log)
     stopped = STOPPED.get(state.outcome)
@@ -184,7 +246,14 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     if ctx.writer is None:
         log("\nno answer: the writer is disabled (set OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL)")
         return False
-    if state.handoffs and state.handoffs[-1].actions == len(state.history) and state.answer is not None:
+    if (
+        state.handoffs
+        and state.handoffs[-1].actions == len(state.history)
+        and state.answer is not None
+        and state.answered is not None
+        and state.view is not None
+        and same_screen(state.answered, signature(*state.view))
+    ):
         log(f"\nanswer ({verdict(state.answer)}; the focus led to no action, so the last answer stands):\n  {state.answer.text}")
         log.event("answer", text=state.answer.text, achieved=state.answer.achieved)
         return False
@@ -217,6 +286,16 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 if cfg.act and not cfg.replay and state.view is not None:
                     desktop.activate(state.view[0].app)  # answering took the terminal to the front; put the work back there
                 continue
+            if resuming and answer.wait:
+                log(f"\nreview ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}\n  the screen is still loading; waiting")
+                log.event("focus", text=answer.text, focus=WAITING)
+                record["handed_back"] = True
+                state.handoffs.append(Handoff(step, state.outcome, WAITING, len(state.history)))
+                state.guidance = state.guidance.followed()  # a focus given before the screen had loaded
+                state.idle = state.repeats = 0
+                if cfg.act and not cfg.replay:
+                    wait_for_screen(cfg, ctx, state, log)
+                return True
             if resuming and answer.focus:
                 log(
                     f"\nreview ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}\n  back to the classifier, focus: {answer.focus}"
@@ -232,6 +311,19 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
             return False
         finally:
             (cfg.out / f"step-{step:03d}-review.json").write_text(json.dumps(reviews, indent=2), encoding="utf-8")
+
+
+def wait_for_screen(cfg: RunConfig, ctx: Context, state: RunState, log: Log) -> None:
+    """Take the wait the writer called for as a wait the classifier chose is taken: an action in the
+    history, never one to repeat (see `repeating`), and settled before the next step reads the screen."""
+    screen, items = state.view
+    what = wait(screen, items, ctx)
+    state.view = None
+    state.history.append(what)
+    state.seen.append((state.last, None))
+    log(f"  did: {what}")
+    log.event("action", text=what, actions=len(state.history))
+    settle(screen, cfg.delay)
 
 
 def stuck(state: RunState, log: Log) -> None:
@@ -268,7 +360,8 @@ def review(cfg: RunConfig, ctx: Context, state: RunState, stopped: str, can_ask:
         screen.image.save(cfg.out / "answer-raw.png")
         state.view = (screen, perceive(screen, MAX_OPTIONS, cfg.goal))
     screen, items = state.view
-    earlier = earlier_screens(state, signature(screen, items))
+    state.answered = signature(screen, items)
+    earlier = earlier_screens(state, state.answered)
     earlier_stops = [{"after_action": h.actions, "why": STOPPED[h.outcome], "focus_given": h.focus} for h in state.handoffs]
     return compose_answer(
         ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask
@@ -353,6 +446,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         f"site={decision.site.choice}"
         + (f" browser={decision.browser.choice!r} ({decision.browser.confidence:.2f})" if decision.browser is not None else "")
         + (f" open={decision.app.choice!r} ({decision.app.confidence:.2f})" if decision.app is not None else "")
+        + (f" refused={decision.refused}, asked again without it" if decision.refused else "")
     )
     for key, p in top(decision.kind, 4):
         log(f"  {p:5.2f}  {key}")
@@ -418,10 +512,14 @@ def resolve(
         log(f"  model says {decision.kind.choice!r}; stopping")
         state.outcome = "done" if decision.kind.choice == "done" else "nothing helps"
         return False
-    if decision.confidence < cfg.min_confidence:
-        log(f"  confidence {decision.confidence:.2f} below {cfg.min_confidence}; stopping")
-        state.outcome = "low confidence"
-        return False
+    floor = cfg.read_only_confidence if state.read_only else cfg.min_confidence
+    if decision.confidence < floor:
+        named = named_by_focus(decision, items, state.guidance.focus)
+        if named is None or decision.kind.confidence < floor:
+            log(f"  confidence {decision.confidence:.2f} below {floor}; stopping")
+            state.outcome = "low confidence"
+            return False
+        log(f"  confidence {decision.confidence:.2f} below {floor}, but the focus names {named!r}; going ahead")
     if not cfg.act or cfg.replay:
         log(f"  would do: {decision.chosen}. dry run (pass --act without --image to drive the machine)")
         log.event("would", text=intended(decision, screen, items))
@@ -442,6 +540,32 @@ def resolve(
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
     return not repeating(state, what, decision.kind.choice == "wait", log)
+
+
+def named_by_focus(decision: Decision, items: list[Item], focus: str | None) -> str | None:
+    """The text of the item the classifier would click, when the writer's focus quotes it, else None.
+
+    A decision model that spreads an item's odds over every item on screen gives the right one
+    0.2 and stops short of it; the writer, reading the same screen, named it in its focus. Two
+    models agreeing on one item is the confidence the floor stands for. The quote must name
+    that item and not its twin: a Firebase page shows a "Manage →" on two cards, so the one
+    clicked must be FOCUS_LEAD times likelier than any other item of the same text.
+    """
+    if not focus or not decision.clicking:
+        return None
+    by_index = {str(it.index): it for it in items}
+    top = by_index.get(decision.item.choice)
+    quotes = {_bare(next(g for g in m.groups() if g)) for m in QUOTED.finditer(focus)}
+    if top is None or _bare(top.text) not in quotes:
+        return None
+    twins = [key for key, it in by_index.items() if key != decision.item.choice and _bare(it.text) == _bare(top.text)]
+    rival = max((decision.item.probabilities.get(key, 0.0) for key in twins), default=0.0)
+    return top.text if decision.item.confidence >= FOCUS_LEAD * rival else None
+
+
+def _bare(text: str) -> str:
+    """Text as a focus quotes it: no arrow, icon, or punctuation at either end, and no case."""
+    return re.sub(r"^\W+|\W+$", "", text).casefold()
 
 
 def keys_desc(screen: Screen) -> str:
@@ -562,6 +686,7 @@ def answers(
         "kind": decision.kind.choice,
         "kind_confidence": decision.kind.confidence,
         "kind_probabilities": decision.kind.probabilities,
+        "refused": decision.refused,
         "item": decision.item.choice if decision.item else None,
         "item_confidence": decision.item.confidence if decision.item else None,
         "item_probabilities": decision.item.probabilities if decision.item else None,

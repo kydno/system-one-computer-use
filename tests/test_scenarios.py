@@ -11,9 +11,9 @@ from __future__ import annotations
 import json
 
 import pytest
-from world import FakeWriter, Page, World, drive, scripted
+from world import LOADING, FakeWriter, Page, World, drive, scripted
 
-from typesafe_computer_use.runner import MAX_REPEATS, MAX_STALLS, STOPPED
+from typesafe_computer_use.runner import MAX_REPEATS, MAX_STALLS, STOPPED, WAITING
 
 GOAL = "buy a ticket to the next show"
 
@@ -1695,12 +1695,13 @@ def test_l52_the_run_counts_the_requests_each_model_took(monkeypatch, tmp_path):
     )
 
     assert world.page.name == "checkout"
-    # Five decisions and the check of what was typed; the typed text and two readings of a stopped screen.
-    assert state.calls.count == {"classifier": 6, "writer": 3}
+    # Whether the goal only looks, five decisions, and the check of what was typed; the typed text
+    # and two readings of a stopped screen.
+    assert state.calls.count == {"classifier": 7, "writer": 3}
     summary = json.loads((tmp_path / "run" / "run.json").read_text())
-    assert summary["calls"]["classifier"]["calls"] == 6 and summary["calls"]["classifier"]["share"] == 0.667
-    assert summary["calls"]["writer"]["calls"] == 3 and summary["calls"]["writer"]["share"] == 0.333
-    assert "calls: classifier 6 (67%, " in (tmp_path / "run" / "run.log").read_text()
+    assert summary["calls"]["classifier"]["calls"] == 7 and summary["calls"]["classifier"]["share"] == 0.7
+    assert summary["calls"]["writer"]["calls"] == 3 and summary["calls"]["writer"]["share"] == 0.3
+    assert "calls: classifier 7 (70%, " in (tmp_path / "run" / "run.log").read_text()
 
 
 def test_l53_unverified_keystrokes_stay_when_the_field_will_not_take_a_value(monkeypatch, tmp_path):
@@ -1815,7 +1816,7 @@ def test_l56_a_name_the_writer_submits_is_typed_and_saved_in_one_step(monkeypatc
     assert state.outcome == "done" and world.page.name == "saved"
     assert state.history == ["typed 'Favorites' into 'Name' via accessibility and pressed Return"]
     assert world.log == ["type:Favorites", "enter"]
-    assert state.calls.count == {"classifier": 2, "writer": 2}  # two decisions and no check; the name and the answer
+    assert state.calls.count == {"classifier": 3, "writer": 2}  # the goal, two decisions and no check; the name and the answer
 
 
 def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_step(monkeypatch, tmp_path):
@@ -1852,7 +1853,7 @@ def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_s
     (organise,) = [it for it in world.fake.states[0]["screen_items_in_reading_order"] if it["text"] == "Organise"]
     assert organise["under"] == "'Restore pages?'"
     assert "under 'Restore pages?'" in world.fake.asked[0]["item"].criteria[str(organise["i"])]
-    assert state.calls.count["classifier"] == 2  # one decision to open the menu, one to stop
+    assert state.calls.count["classifier"] == 3  # the goal, one decision to open the menu, one to stop
 
 
 CREDITS = "https://openrouter.ai/settings/credits"
@@ -1986,3 +1987,119 @@ def test_l60_a_focus_is_spent_once_acted_on_and_what_was_read_on_the_way_reaches
         ][-1]["text"]
     )
     assert any("$676 TAP Air Portugal 5:25 PM" in s["text"] for s in fill["earlier_screens"])
+
+
+def test_a_crash_leaves_its_traceback_in_the_run_folder(monkeypatch, tmp_path):
+    """The menu bar app shows stderr only for a run that never began: a run that crashed on its
+    first screen ended "Crashed" with nothing anywhere to say why."""
+    world = World([Page(name="home", items=["Home"], url="https://example.com/")])
+
+    def broken(*a, **k):
+        raise AttributeError("'tuple' object has no attribute 'location'")
+
+    world.capture = broken
+
+    with pytest.raises(AttributeError):
+        drive(world, scripted(("done", None)), monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    log = (tmp_path / "run" / "run.log").read_text()
+    assert "crashed after 0 actions:" in log and "Traceback" in log and "has no attribute 'location'" in log
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["outcome"] == "crashed"
+
+
+IAM = "https://console.example.com/iam"
+
+
+def test_l61_a_screen_the_writer_finds_still_loading_is_waited_for_by_the_run(monkeypatch, tmp_path):
+    """The classifier ranks a click on what has drawn over a wait; the writer sees the page loading."""
+    world = World(
+        [
+            Page(name="iam", items=["IAM", "Grant access"], url=IAM, loads_in=1, on={"click:Grant access": "granted"}),
+            Page(name="granted", items=["Access granted"], url=IAM + "/granted"),
+        ]
+    )
+    writer = FakeWriter(reviews=[{"wait": True, "answer": "The IAM page is still loading."}])
+
+    def policy(state: dict, questions: dict) -> tuple:
+        texts = [it["text"] for it in state["screen_items_in_reading_order"]]
+        if LOADING in texts:
+            return ("click_item", LOADING, 0.32)
+        return ("done", None) if "Access granted" in texts else ("click_item", "Grant access")
+
+    state = drive(world, policy, goal="grant access", monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer)
+
+    assert world.log == ["wait", "click:Grant access"]
+    assert state.history[0] == "waited"
+    assert [(h.step, h.outcome, h.focus, h.actions) for h in state.handoffs] == [(1, "low confidence", WAITING, 0)]
+    assert "current_focus" not in world.fake.states[1]  # the classifier reads the loaded screen under the goal alone
+    assert state.outcome == "done" and state.answer.achieved
+
+
+def test_l62_a_screen_that_changed_since_the_last_answer_is_read_again(monkeypatch, tmp_path):
+    """The page finishes loading on its own between two stops, with no action between them."""
+    world = World([Page(name="iam", items=lambda w: ["Loading IAM"] if w.ticks < 2 else ["IAM", "Grant access"], url=IAM)])
+    writer = FakeWriter(reviews=[{"focus": "Click 'IAM'", "answer": "The IAM page is still loading."}])
+    unsure = scripted(("click_item", "Loading IAM", 0.32), ("click_item", "Grant access", 0.36))
+
+    state = drive(world, unsure, goal="grant access", monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer)
+
+    assert world.log == []
+    assert len(writer.packets) == 2  # no action since the focus, but not the screen its answer was read from
+    assert writer.packets[1]["screen_text_in_reading_order"] == ["IAM", "Grant access"]
+    assert "still loading" not in state.answer.text
+
+
+FIREBASE = "https://console.firebase.google.com/project/flexcheck/settings/integrations"
+
+
+def integrations() -> World:
+    """Two cards, each with its own Manage: the second is BigQuery's."""
+    return World(
+        [
+            Page(
+                name="integrations",
+                items=["Google Analytics", "Manage →", "BigQuery", "Manage →"],
+                url=FIREBASE,
+                on={"click:Manage →@3": "bigquery"},
+            ),
+            Page(name="bigquery", items=["BigQuery export", "Google Analytics: on"], url=FIREBASE + "/bigquery"),
+        ]
+    )
+
+
+def test_l63_a_goal_that_only_looks_clicks_under_the_lower_floor(monkeypatch, tmp_path):
+    world = integrations()
+    policy = scripted(("click_item", 3, 0.2), ("done", None))
+
+    state = drive(
+        world, policy, goal="confirm the BigQuery export is on", monkeypatch=monkeypatch, tmp_path=tmp_path, read_only=True
+    )
+
+    assert state.read_only and world.log == ["click:Manage →@3"]
+    assert state.outcome == "done"
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["read_only"] is True
+    assert "read-only: yes (1.00)" in (tmp_path / "run" / "run.log").read_text()
+
+
+def test_l64_a_goal_that_may_change_something_keeps_the_floor(monkeypatch, tmp_path):
+    world = integrations()
+
+    state = drive(
+        world, scripted(("click_item", 3, 0.2)), goal="turn the BigQuery export on", monkeypatch=monkeypatch, tmp_path=tmp_path
+    )
+
+    assert not state.read_only and world.log == []
+    assert state.outcome == "low confidence"
+
+
+def test_l65_a_click_the_writers_focus_quotes_goes_ahead_under_the_floor(monkeypatch, tmp_path):
+    world = integrations()
+    writer = FakeWriter(reviews=[{"focus": "Click \u201cManage\u201d on the BigQuery card."}])
+    unsure = scripted(("click_item", 3, (0.93, 0.18)), ("click_item", 3, (0.93, 0.18)), ("done", None))
+
+    state = drive(world, unsure, goal="turn the BigQuery export on", monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer)
+
+    assert world.log == ["click:Manage →@3"]  # stopped once on its own, then agreed with the writer
+    assert [h.outcome for h in state.handoffs] == ["low confidence"]
+    assert state.outcome == "done"
+    assert "below 0.4, but the focus names 'Manage →'; going ahead" in (tmp_path / "run" / "run.log").read_text()

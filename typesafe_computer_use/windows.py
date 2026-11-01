@@ -74,10 +74,11 @@ BROWSER_EXES = {"Google Chrome": "chrome", "Microsoft Edge": "msedge", "Firefox"
 
 # Virtual keys for the keys the actions press. macOS's Command becomes Control, except Command-[,
 # a browser's Back, which is Alt-Left on Windows.
-VK = {"return": 0x0D, "tab": 0x09, "escape": 0x1B, "a": 0x41, "delete": 0x2E, "[": 0xDB, "left": 0x25}
+VK = {"return": 0x0D, "tab": 0x09, "escape": 0x1B, "a": 0x41, "delete": 0x2E, "[": 0xDB, "left": 0x25, "right": 0x27}
 VK_CONTROL = 0x11
+VK_SHIFT = 0x10
 VK_ALT = 0x12
-EXTENDED_KEYS = {0x2E, 0x25}  # Delete and the arrows live on the extended keypad
+EXTENDED_KEYS = {0x2E, 0x25, 0x27}  # Delete and the arrows live on the extended keypad
 COMMAND_CHORDS = {"[": (VK_ALT, VK["left"])}
 
 INPUT_MOUSE = 0
@@ -125,9 +126,10 @@ def display_name(process_name: str) -> str:
     return next((name for name, exe in BROWSER_EXES.items() if exe == stem), process_name)
 
 
-def key_events(key: str, command: bool = False) -> list[tuple[int, int]]:
+def key_events(key: str, command: bool = False, shift: bool = False) -> list[tuple[int, int]]:
     """(virtual key, flags) for pressing a key, with its modifiers held around it."""
     keys = COMMAND_CHORDS.get(key, (VK_CONTROL, VK[key])) if command else (VK[key],)
+    keys = (VK_SHIFT, *keys) if shift else keys
     down = [(vk, KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_KEYS else 0) for vk in keys]
     up = [(vk, flags | KEYEVENTF_KEYUP) for vk, flags in reversed(down)]
     return down + up
@@ -277,8 +279,8 @@ def click_at(point: tuple[float, float]) -> None:
     _send(_mouse(MOUSEEVENTF_LEFTUP))
 
 
-def press(key: str, command: bool = False) -> None:
-    for vk, flags in key_events(key, command):
+def press(key: str, command: bool = False, shift: bool = False) -> None:
+    for vk, flags in key_events(key, command, shift):
         _send(_key(vk=vk, flags=flags))
 
 
@@ -383,6 +385,16 @@ def default_browser() -> str | None:
     """None: Windows keeps its link handler in the registry, which nothing here reads yet, so
     CLICKER_BROWSER or Chrome stands in."""
     return None
+
+
+def browser_tabs(browser: str) -> list[tuple[str, str]]:
+    """None: UI Automation shows each tab's title but not its URL, so no tab can be named by address."""
+    return []
+
+
+def show_tab(browser: str, url: str) -> bool:
+    """False: with no tab named by address (see `browser_tabs`), use_browser opens the URL instead."""
+    return False
 
 
 def browser_url(browser: str) -> str | None:

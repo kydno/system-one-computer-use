@@ -1,3 +1,4 @@
+import argparse
 import base64
 import io
 import json
@@ -8,9 +9,12 @@ import anthropic
 import pytest
 from PIL import Image
 
-from typesafe_computer_use import runner, writer
+from typesafe_computer_use import actions, runner, writer
 from typesafe_computer_use.actions import Context
-from typesafe_computer_use.models import Field, Guidance, Popup
+from typesafe_computer_use.cli import earlier_tasks
+from typesafe_computer_use.config import EARLIER_TASKS
+from typesafe_computer_use.decide import base_state
+from typesafe_computer_use.models import EarlierTask, Field, Guidance, Popup
 from typesafe_computer_use.runner import RunConfig, RunState, hand_off, resolve
 from typesafe_computer_use.writer import ANSWER_IMAGE_EDGE, Answer, Fill, compose_answer
 
@@ -23,7 +27,7 @@ class FakeWriter:
     def __init__(self, reply: dict):
         self.requests: list[dict] = []
         self.messages = SimpleNamespace(create=self._create)
-        self._reply = {"focus": "", "question": "", **reply} if "answer" in reply else reply
+        self._reply = {"focus": "", "question": "", "wait": False, **reply} if "answer" in reply else reply
 
     def _create(self, **request):
         self.requests.append(request)
@@ -88,7 +92,7 @@ def test_the_answer_request_carries_what_the_run_has_learned_and_offers_both_way
 
     assert answer == Answer(text="Two sizes.", achieved=False, focus="Click '15 inch'", question="")
     request = fake.requests[0]
-    assert set(request["output_config"]["format"]["schema"]["required"]) == {"achieved", "answer", "focus", "question"}
+    assert set(request["output_config"]["format"]["schema"]["required"]) == {"achieved", "answer", "focus", "question", "wait"}
     packet = json.loads(request["messages"][0]["content"][1]["text"])
     assert packet["current_focus"] == "Open the size menu"
     assert packet["user_said"] == [{"asked": "13 or 15 inch?", "replied": "15"}]
@@ -108,19 +112,30 @@ def test_the_typed_text_and_the_proposed_url_are_composed_under_the_guidance(scr
         ]
 
 
+REASON = "the goal names the folder"
+
+
 @pytest.mark.parametrize(
     ("role", "reply", "expected"),
     [
-        ("AXTextField", {"fill": True, "text": " Favorites ", "submit": True}, Fill("Favorites", submit=True)),
-        ("AXTextField", {"fill": True, "text": "Favorites", "submit": False}, Fill("Favorites")),
-        ("AXTextArea", {"fill": True, "text": "Favorites", "submit": True}, Fill("Favorites")),  # Return adds a line there
-        ("AXTextField", {"fill": False, "text": "Favorites", "submit": True}, Fill("")),  # nothing typed, nothing sent
+        ("AXTextField", {"fill": True, "text": " Favorites ", "submit": True}, Fill("Favorites", submit=True, reason=REASON)),
+        ("AXTextField", {"fill": True, "text": "Favorites", "submit": False}, Fill("Favorites", reason=REASON)),
+        (
+            "AXTextArea",
+            {"fill": True, "text": "Favorites", "submit": True},
+            Fill("Favorites", reason=REASON),
+        ),  # Return adds a line there
+        (
+            "AXTextField",
+            {"fill": False, "text": "Favorites", "submit": True},
+            Fill("", reason=REASON),
+        ),  # nothing typed, nothing sent
     ],
     ids=["submitted", "left", "text-area", "declined"],
 )
 def test_the_writer_says_whether_return_follows_the_text(screen, role, reply, expected):
     field = Field(role=role, label="Name", placeholder="", value="", x=0, y=0, w=100, h=20)
-    fake = FakeWriter({**reply, "reason": "the goal names the folder"})
+    fake = FakeWriter({**reply, "reason": REASON})
 
     assert writer.compose_text(fake, GOAL, replace(screen, field=field), [], []) == expected
     schema = fake.requests[0]["output_config"]["format"]["schema"]
@@ -270,3 +285,40 @@ def test_the_typed_text_may_come_from_the_screens_before_this_one(screen):
     sent = [json.loads(r["messages"][0]["content"][-1]["text"]) for r in fake.requests]
     assert sent[0]["earlier_screens"] == earlier
     assert "earlier_screens" not in sent[1]
+
+
+def test_the_writer_reads_the_earlier_tasks_of_the_session_and_the_classifier_does_not(screen):
+    """'use search in brave' right after 'what is a BigQuery dataset needed for?' was declined: the
+    writer saw only the second goal, which names nothing to search for."""
+    earlier = (EarlierTask("what is a BigQuery dataset needed for?", outcome="no decision"),)
+    guided = Guidance(earlier=earlier)
+    fake = FakeWriter({"fill": True, "text": "what is a BigQuery dataset needed for", "reason": "", "submit": True})
+
+    writer.compose_text(fake, "use search in brave", screen, [], [], guided)
+
+    packet = json.loads(fake.requests[0]["messages"][0]["content"][0]["text"])
+    assert packet["earlier_tasks"] == [{"goal": "what is a BigQuery dataset needed for?", "outcome": "no decision"}]
+    assert "earlier_tasks" not in base_state("use search in brave", screen, [], [], None, guided)
+    assert "earlier_tasks" not in Guidance().writer_state()
+
+
+def test_a_declined_field_says_why_in_the_history(screen, monkeypatch):
+    field = Field(role="AXTextArea", label="Search", placeholder="", value="", x=0, y=0, w=100, h=20)
+    monkeypatch.setattr(actions, "compose_text", lambda *a: Fill("", reason="the goal does not say what to search for"))
+
+    result = actions._type_text(None, replace(screen, field=field), [], context(object()))
+
+    assert result == "type_text refused: writer declined to fill this field (the goal does not say what to search for)"
+
+
+def test_the_earlier_tasks_come_in_on_the_command_line_and_only_the_last_few_are_kept():
+    tasks = [{"goal": f"goal {i}", "answer": "", "achieved": None} for i in range(EARLIER_TASKS + 2)]
+
+    read = earlier_tasks(json.dumps(tasks))
+
+    assert [t.goal for t in read] == [f"goal {i}" for i in range(2, EARLIER_TASKS + 2)]
+    assert earlier_tasks('[{"goal": "a", "achieved": true, "outcome": "done"}]') == (
+        EarlierTask("a", achieved=True, outcome="done"),
+    )
+    with pytest.raises(argparse.ArgumentTypeError):
+        earlier_tasks('[{"answer": "no goal"}]')

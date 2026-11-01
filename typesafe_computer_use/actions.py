@@ -26,6 +26,8 @@ PIXEL_STEP = 24
 CHANGED_PIXELS = 100
 SCROLL_REACH = (160, 200)  # half the width and height, in points, of the box around the pointer a scroll must change
 OPEN_SECONDS = 10.0  # for an app that was not running to start and come to the front; Photos takes a few seconds cold
+CARET_SECONDS = 0.2  # for a document to report where arrow keys left its caret
+CARET_WALK = 600  # the most Right presses that take the caret to its paragraph's end; past that it is refused
 
 
 @dataclass(frozen=True)
@@ -178,9 +180,12 @@ def fill_field(field: Field, text: str) -> str:
     emptied first. Returns which path ran, for the history.
 
     An editor holds a document, which Select All and Delete would wipe and a value would replace,
-    so text goes in at its caret by keystrokes alone.
+    so text goes in at its caret by keystrokes alone. So does a text area: once a page is in
+    accessibility, a Google Doc's whole body is one AXTextArea named "Document content", and a
+    run asked to answer a question in the doc replaced the document with the answer. A text area
+    that is a form's comment box loses nothing by it, since an empty one types the same either way.
     """
-    if field.editor:
+    if field.multiline:
         desktop.type_text(text)
         return "at the caret via keystrokes"
     ref = field.ref
@@ -193,6 +198,44 @@ def fill_field(field: Field, text: str) -> str:
     desktop.clear_field()
     desktop.type_text(text)
     return "via keystrokes"
+
+
+def paragraph_end(value: str, caret: int) -> int | None:
+    """Where the paragraph holding `caret` ends in `value`, or None when that paragraph is blank."""
+    start = value.rfind("\n", 0, caret) + 1
+    end = value.find("\n", caret)
+    end = len(value) if end < 0 else end
+    return end if value[start:end].strip() else None
+
+
+def make_line(field: Field, pid: int | None) -> bool | None:
+    """Put the caret on a line of its own after the paragraph it sits in, when that paragraph has text.
+
+    A click on a document's text leaves the caret inside it: answering question 1 of a reading
+    guide wrote the answer into the middle of the question. So the caret walks to the end of its
+    paragraph by Right presses, which every editor moves by, and the element's own report says
+    whether it got there before Shift-Return opens the line. Shift-Return, not Return: Return in a
+    numbered list starts a new item and renumbers every question after it, and in a chat box it
+    sends. True when a line was made, False when the caret was already where text belongs (a blank
+    line, an empty field, or an editor that reports no caret), and None when the caret could not
+    be brought to the paragraph's end, which leaves it there and types nothing.
+    """
+    if field.caret is None or not field.value.strip():
+        return False
+    end = paragraph_end(field.value, field.caret)
+    if end is None:
+        return False
+    steps = end - field.caret
+    if steps > CARET_WALK:
+        return None
+    for _ in range(steps):
+        desktop.press("right")
+    desktop.sleep_watching(CARET_SECONDS)
+    now = desktop.focused_field(pid)
+    if now is None or now.caret != end:
+        return None
+    desktop.press("return", shift=True)
+    return True
 
 
 def read_back(field: Field) -> Field:
@@ -246,8 +289,10 @@ def _use_browser(decision: Decision, screen, items, ctx: Context) -> str:
 
     No browser answer means one browser to work in, the configured one. `none` is the page already
     open there, so bringing the browser forward is the whole action. A catalog key is its URL, and
-    `other` is a site outside the catalog, which only the writer can name. Opening a URL activates
-    the browser too, so the three cases differ only in the page.
+    `other` is a site outside the catalog, which only the writer can name. The writer reads the
+    browser's open tabs too, since the page a goal is about is often one the user already has open
+    behind another tab, and a URL it names from them is shown in its own tab, not opened again.
+    Opening a URL activates the browser too, so the three cases differ only in the page.
     """
     browser = decision.browser.choice if decision.browser is not None else ctx.browser
     site = decision.site.choice
@@ -256,15 +301,19 @@ def _use_browser(decision: Decision, screen, items, ctx: Context) -> str:
             return f"activated {browser}"
         return f"use_browser failed: {browser} did not come to the front"
     url = SITES.get(site)
+    tabs: list[tuple[str, str]] = []
     if url is None:
         if ctx.writer is None:
             return "use_browser refused: the site is outside the catalog and no writer is available to propose a URL"
+        tabs = desktop.browser_tabs(browser)
         try:
-            url = compose_url(ctx.writer, ctx.goal, ctx.history, ctx.guidance)
+            url = compose_url(ctx.writer, ctx.goal, ctx.history, ctx.guidance, tabs)
         except WriterError as e:
             return f"use_browser refused: the writer failed ({e})"
     if not url:
         return "use_browser refused: the writer proposed no usable URL for this goal"
+    if any(open_url == url for _, open_url in tabs) and desktop.show_tab(browser, url):
+        return f"switched to the open tab {url}" + ("" if browser == ctx.browser else f" in {browser}")
     if desktop.open_url(browser, url):
         return f"opened {url}" if browser == ctx.browser else f"opened {url} in {browser}"
     return f"use_browser failed: opened {url} but {browser} did not come to the front"
@@ -310,8 +359,12 @@ def _type_text(decision, screen: Screen, items, ctx: Context) -> str:
         return f"type_text refused: the writer failed ({e})"
     text = fill.text
     if not text:
-        return "type_text refused: writer declined to fill this field"
-    how = fill_field(screen.field, text)
+        why = f" ({fill.reason})" if fill.reason else ""
+        return f"type_text refused: writer declined to fill this field{why}"
+    line = make_line(screen.field, screen.pid) if screen.field.multiline else False
+    if line is None:
+        return "type_text refused: the caret is inside text and could not be moved to the end of its paragraph"
+    how = ("on a new line " if line else "") + fill_field(screen.field, text)
     if fill.submit:
         desktop.press("return")
         return f"typed {text!r} into {screen.field.label!r} {how} and pressed Return"
@@ -395,6 +448,12 @@ def _wait(decision, screen, items, ctx) -> str:
     """Give a loading page time. The step's own settle follows, and holds out while the page still moves."""
     desktop.sleep_watching(WAIT_SECONDS)
     return "waited"
+
+
+def wait(screen: Screen, items: list[Item], ctx: Context) -> str:
+    """The classifier's own wait, for a stop the writer reads as a screen still loading. Taken from
+    the table like any chosen action, so the two are one action."""
+    return _HANDLERS["wait"](None, screen, items, ctx)
 
 
 _HANDLERS = {

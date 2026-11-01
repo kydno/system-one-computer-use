@@ -112,6 +112,10 @@ def test_delete_is_an_extended_key():
     assert key_events("delete") == [(0x2E, KEYEVENTF_EXTENDEDKEY), (0x2E, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)]
 
 
+def test_shift_is_held_around_a_key():
+    assert key_events("return", shift=True) == [(0x10, 0), (0x0D, 0), (0x0D, KEYEVENTF_KEYUP), (0x10, KEYEVENTF_KEYUP)]
+
+
 def test_text_is_typed_as_unicode_characters_not_keys():
     down, up = KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
     assert unicode_events("aé") == [(ord("a"), down), (ord("a"), up), (0xE9, down), (0xE9, up)]

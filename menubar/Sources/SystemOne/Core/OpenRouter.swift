@@ -14,19 +14,6 @@ enum OpenRouter {
         let completion: Double
     }
 
-    struct Endpoint: Equatable, Sendable {
-        let provider: String
-        let tag: String
-        let prompt: Double
-        let completion: Double
-
-        /// "OpenAI · flex" for the tag `openai/flex`, the provider alone otherwise.
-        var title: String {
-            guard let slash = tag.firstIndex(of: "/") else { return provider }
-            return "\(provider) · \(tag[tag.index(after: slash)...])"
-        }
-    }
-
     /// The models a reviewer can be: they read a screenshot and write text back.
     /// Fetched once per launch; a failure is not kept, so the next search tries again.
     static func models() async throws -> [Model] {
@@ -48,25 +35,6 @@ enum OpenRouter {
         }
         await Cache.shared.store(models)
         return models
-    }
-
-    /// The providers serving `model` now, cheapest first: input price, then output.
-    static func endpoints(for model: String) async throws -> [Endpoint] {
-        let path = K.Reviewer.endpointsURL.replacingOccurrences(of: "{id}", with: model)
-        guard let url = URL(string: path) else { return [] }
-        let data = try await get(url)
-        let list = try JSONDecoder().decode(EndpointList.self, from: data).data.endpoints
-        return list
-            .filter { ($0.status ?? 0) == 0 }
-            .map {
-                Endpoint(
-                    provider: $0.provider_name,
-                    tag: $0.tag ?? $0.provider_name,
-                    prompt: Double($0.pricing.prompt) ?? 0,
-                    completion: Double($0.pricing.completion) ?? 0
-                )
-            }
-            .sorted { ($0.prompt, $0.completion) < ($1.prompt, $1.completion) }
     }
 
     /// The best `count` matches for what was typed. Every word has to appear in
@@ -157,21 +125,6 @@ enum OpenRouter {
         let prompt: String
         let completion: String
     }
-
-    private struct EndpointList: Decodable {
-        let data: EndpointData
-    }
-
-    private struct EndpointData: Decodable {
-        let endpoints: [RawEndpoint]
-    }
-
-    private struct RawEndpoint: Decodable {
-        let provider_name: String
-        let tag: String?
-        let status: Int?
-        let pricing: Pricing
-    }
 }
 
 /// How OpenRouter orders the reviewer's providers (`CLICKER_ANSWER_SORT`).
@@ -189,5 +142,43 @@ struct ReviewerRouting: Identifiable, Equatable {
 
     static func named(_ value: String?) -> ReviewerRouting {
         all.first { $0.id == (value ?? "") } ?? auto
+    }
+}
+
+/// How hard the reviewer thinks (`CLICKER_ANSWER_REASONING`). Unset leaves it to
+/// the model, except on the default reviewer, which `clicker` asks for low.
+enum ReviewerEffort: String, CaseIterable {
+    case unset = ""
+    case low
+    case medium
+    case high
+
+    static let key = "CLICKER_ANSWER_REASONING"
+
+    static func named(_ value: String?) -> ReviewerEffort {
+        ReviewerEffort(rawValue: (value ?? "").lowercased()) ?? .unset
+    }
+
+    /// The next one a click on the bars moves to: up to high, then back to unset.
+    var next: ReviewerEffort {
+        let all = Self.allCases
+        return all[(all.firstIndex(of: self)! + 1) % all.count]
+    }
+
+    /// Bars lit, 0 to 3, as the run will ask for it with `model` reviewing.
+    func level(isDefaultModel: Bool) -> Int {
+        switch self {
+        case .unset: return isDefaultModel ? 1 : 0
+        case .low: return 1
+        case .medium: return 2
+        case .high: return 3
+        }
+    }
+
+    func title(isDefaultModel: Bool) -> String {
+        switch self {
+        case .unset: return isDefaultModel ? "low, the default" : "the model's own"
+        default: return rawValue
+        }
     }
 }

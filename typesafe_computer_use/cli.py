@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -11,6 +12,7 @@ from . import config
 from .actions import Context
 from .decisions import Endpoint, endpoint
 from .events import Events
+from .models import EarlierTask
 from .perception import capture, perceive
 from .platform_adapter import desktop
 from .report import annotate, ax_count, render_payload
@@ -41,6 +43,23 @@ def ask_user(question: str) -> str:
         return ""
 
 
+def earlier_tasks(text: str) -> tuple[EarlierTask, ...]:
+    """`--earlier-tasks`, read. Only the last few are kept: the writer needs the thread, not the session."""
+    try:
+        tasks = tuple(
+            EarlierTask(
+                goal=str(t["goal"]),
+                answer=str(t.get("answer") or ""),
+                achieved=t["achieved"] if isinstance(t.get("achieved"), bool) else None,
+                outcome=str(t.get("outcome") or ""),
+            )
+            for t in json.loads(text)
+        )
+    except (ValueError, TypeError, KeyError) as e:
+        raise argparse.ArgumentTypeError(f"not a JSON list of tasks with a goal each: {e}") from e
+    return tasks[-config.EARLIER_TASKS :]
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="clicker",
@@ -50,6 +69,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--act", action="store_true", help="actually click and type (default: dry run, one step)")
     parser.add_argument("--steps", type=int, default=config.DEFAULT_STEPS, help="max actions before stopping")
     parser.add_argument("--min-confidence", type=float, default=config.DEFAULT_MIN_CONFIDENCE, help="stop below this confidence")
+    parser.add_argument(
+        "--read-only-confidence",
+        type=float,
+        default=config.DEFAULT_READ_ONLY_CONFIDENCE,
+        help="stop below this confidence when the goal only asks to find something out",
+    )
     parser.add_argument(
         "--delay",
         type=float,
@@ -66,6 +91,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--image", type=Path, help="replay a saved capture instead of the live screen (never acts)")
     parser.add_argument("--app", help="frontmost app to report during replay")
     parser.add_argument("--url", help="browser URL to report during replay")
+    parser.add_argument(
+        "--earlier-tasks",
+        type=earlier_tasks,
+        default=(),
+        help='the goals given before this one in the same session, as JSON: [{"goal", "answer", "achieved", "outcome"}], oldest first',
+    )
     parser.add_argument(
         "--events",
         action="store_true",
@@ -100,11 +131,13 @@ def main(argv: list[str] | None = None) -> None:
         act=args.act,
         steps=args.steps,
         min_confidence=args.min_confidence,
+        read_only_confidence=args.read_only_confidence,
         delay=args.delay,
         handoffs=args.handoffs,
         image=args.image,
         app=args.app,
         url=args.url,
+        earlier=args.earlier_tasks,
     )
 
     # A front end can always answer; a terminal only when someone is at it.

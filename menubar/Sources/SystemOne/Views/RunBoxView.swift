@@ -1,9 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// The second box, from Menu-Bar-Chat's answer box: what the run was asked,
-/// what it did, and what it found or wants to know. Only exists once there is
-/// something to show; grows to fit, capped at `K.RunBox.maxHeight`.
+/// The second box, from Menu-Bar-Chat's answer box: for each run since the last
+/// Clear, what it was asked, what it did, and what it found or wants to know,
+/// oldest first. Only exists once there is something to show; grows to fit,
+/// capped at `K.RunBox.maxHeight`.
 struct RunBoxView: View {
 
     @ObservedObject var model: RunModel
@@ -21,72 +22,96 @@ struct RunBoxView: View {
                 .background { SizeReader { intrinsicHeight = $0.height } }
         }
         .scrollIndicators(.automatic)
+        // The newest run is at the bottom: open on it, and stay on it as it grows.
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .frame(height: min(max(intrinsicHeight, 0), K.RunBox.maxHeight))
         .frame(width: K.Panel.width)
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: K.RunBox.sectionGap) {
-            if let goal = model.goal {
-                section("Goal") {
-                    bodyText(goal).opacity(K.RunBox.goalOpacity)
-                }
+            ForEach(model.past) { run in
+                turn(run, live: false)
+                Divider().opacity(K.RunBox.runDividerOpacity)
             }
-
-            if !model.actions.isEmpty {
-                section("Did", trailing: model.actions.count == 1 ? "1 action" : "\(model.actions.count) actions") {
-                    VStack(alignment: .leading, spacing: K.RunBox.actionGap) {
-                        ForEach(Array(model.actions.enumerated()), id: \.offset) { _, action in
-                            Text(action)
-                                .font(.system(size: K.RunBox.actionFontSize))
-                                .foregroundStyle(.primary)
-                                .opacity(K.RunBox.actionOpacity)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            }
-
-            if let question = model.question {
-                section("System One asks") { bodyText(question) }
-            } else if let answer = model.answer {
-                section("Answer", trailing: verdict) { bodyText(answer) }
-            } else if let note = model.note {
-                section(model.noteTitle) { bodyText(note) }
-            }
-
-            if model.answer == nil, !model.isAsking, let outcome = model.outcome {
-                section("Ended") { bodyText(outcome.prefix(1).uppercased() + String(outcome.dropFirst())) }
-            }
-
-            if let error = model.errorText {
-                bodyText(error)
-                    .foregroundStyle(Color.red)
-                    .opacity(K.RunBox.errorOpacity)
-            }
-
-            if model.phase == .finished, model.runFolder != nil {
-                footer
+            if let current = model.current {
+                turn(current, live: true)
             }
         }
     }
 
-    private var verdict: String? {
-        guard let achieved = model.achieved else { return nil }
+    /// One run's goal, actions and answer. Only the live one, the last, can be
+    /// asking or carry a note, and its footer waits for it to finish.
+    @ViewBuilder
+    private func turn(_ run: RunRecord, live: Bool) -> some View {
+        if let goal = run.goal {
+            section("Goal") {
+                bodyText(goal).opacity(K.RunBox.goalOpacity)
+            }
+        }
+
+        if !run.actions.isEmpty {
+            section("Did", trailing: run.actions.count == 1 ? "1 action" : "\(run.actions.count) actions") {
+                VStack(alignment: .leading, spacing: K.RunBox.actionGap) {
+                    ForEach(Array(run.actions.enumerated()), id: \.offset) { _, action in
+                        Text(action)
+                            .font(.system(size: K.RunBox.actionFontSize))
+                            .foregroundStyle(.primary)
+                            .opacity(K.RunBox.actionOpacity)
+                            .lineLimit(2)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+
+        let asking = live ? model.question : nil
+        if let asking {
+            section("System One asks") { bodyText(asking) }
+        } else if let answer = run.answer {
+            section("Answer", trailing: verdict(run.achieved)) { bodyText(answer) }
+        } else if live, let note = model.note {
+            section(model.noteTitle) { bodyText(note) }
+        }
+
+        if run.answer == nil, asking == nil, let outcome = run.outcome {
+            section("Ended") { bodyText(outcome.prefix(1).uppercased() + String(outcome.dropFirst())) }
+        }
+
+        if let error = run.errorText {
+            bodyText(error)
+                .foregroundStyle(Color.red)
+                .opacity(K.RunBox.errorOpacity)
+        }
+
+        if !live || model.phase == .finished, run.runFolder != nil {
+            footer(run)
+        }
+    }
+
+    private func verdict(_ achieved: Bool?) -> String? {
+        guard let achieved else { return nil }
         return achieved ? "goal achieved" : "goal not achieved"
     }
 
-    private var footer: some View {
+    private func footer(_ run: RunRecord) -> some View {
         HStack(spacing: K.InputBar.elementGap) {
-            if let seconds = model.seconds {
+            if let seconds = run.seconds {
                 Text(String(format: "%.0f s", seconds))
                     .monospacedDigit()
                     .modifier(LabelStyle())
             }
             Spacer(minLength: 0)
+            if let cost = run.cost {
+                Text(String(format: "$%.4f", cost))
+                    .monospacedDigit()
+                    .modifier(LabelStyle())
+                    .help("What the run cost, as OpenRouter reported it")
+                Text("·").modifier(LabelStyle())
+            }
             HoverButton(systemName: "folder", help: "Open the run folder") {
-                model.openRunFolder()
+                model.openRunFolder(run.runFolder)
             }
         }
     }
