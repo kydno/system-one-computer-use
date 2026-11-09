@@ -7,9 +7,10 @@ import re
 import time
 import traceback
 from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 
-from .actions import Context, moved, perform, wait
+from .actions import Context, moved, perform, wait, writer_scroll
 from .calls import Calls, MeteredClassifier, MeteredWriter
 from .config import (
     DEFAULT_DELAY,
@@ -56,9 +57,24 @@ STOPPED = {
         "the agent is stuck: its last actions changed nothing, as they did twice before on these same pages, "
         "and the focus given each time did not help, so the run ends with this answer"
     ),
+    "unfollowed": (
+        "the classifier could not act on the focus you gave last time, and the screen has not changed since, "
+        "so the run ends with this answer"
+    ),
     "step limit": "the run used every step it was allowed",
     "no decision": "the decision model gave no usable answer for this screen: it refused, failed, or was unreachable",
 }
+
+
+def goal_achieved(state) -> bool | None:
+    """The writer's verdict, else False for a run that stopped on its own without one.
+
+    An abort, a dry run and a crash reached no verdict either way. A "done" is the classifier's
+    own verdict that the goal was met, which only the writer's answer can carry.
+    """
+    if state.answer:
+        return state.answer.achieved
+    return False if state.outcome in STOPPED and state.outcome != "done" else None
 
 
 @dataclass
@@ -93,6 +109,7 @@ class Handoff:
     outcome: str  # why the classifier stopped
     focus: str  # what the writer sent it back to do
     actions: int  # how many actions the run had taken by then, so a focus that led to none can be told
+    said: str = ""  # what the writer told the user then, which may quote a screen since dropped from earlier_screens
 
 
 Clicked = tuple[str, str | None, Field]  # app, URL, and the box a click on page text landed in
@@ -167,13 +184,15 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "steps_taken": len(state.history),
             "outcome": state.outcome,
             "answer": state.answer.text if state.answer else None,
-            "goal_achieved": state.answer.achieved if state.answer else None,
+            "goal_achieved": goal_achieved(state),
             "seconds": round(time.time() - started, 1),
             "models": models,
             "read_only": state.read_only,
             "calls": state.calls.summary(),
             "usage": state.calls.tokens(),
+            "usage_by_role": state.calls.by_role(),
             "cost": state.calls.cost(),
+            "ended_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "handoffs": [asdict(h) for h in state.handoffs],
             "questions": [asdict(e) for e in state.guidance.exchanges],
             "earlier_tasks": [asdict(t) for t in cfg.earlier],
@@ -230,35 +249,29 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     name a focus, which sends the classifier back to work with `state.guidance` saying what on, or
     a question, which goes to the user first; the writer then reads the same screen again with the
     reply. Each reply is new information and each focus must lead to an action, so the exchange
-    cannot go round on itself: a focus the classifier could not act on leaves the answer that came
-    with it standing while the screen is the one that answer was read from, and a stall with no new
-    page since the last two is final (see `stuck`). A screen that changed on its own, as a page
-    still loading does, is read again: the last answer describes a screen that is gone.
+    cannot go round on itself: a focus the classifier could not act on, on the screen the answer
+    that gave it was read from, ends the run, and a stall with no new page since the last two is
+    final (see `stuck`). The writer reads that screen once more for the last answer, since the one
+    that gave the focus was written to send the run on ("I'll open it") and told the user nothing
+    about where it ended. A screen that changed on its own, as a page still loading does, is read
+    again as any stop is: the last answer describes a screen that is gone.
 
     The writer may also find the screen still loading. The classifier ranks a click on what has
     already drawn over waiting for the rest, so the run waits itself, as a wait the classifier
     chose would, and the classifier reads the screen once it has loaded.
     """
     stuck(state, log)
+    if state.outcome in STOPPED and unfollowed(state):
+        log(f"  the focus led to no action: {state.handoffs[-1].focus}")
+        state.outcome = "unfollowed"
     stopped = STOPPED.get(state.outcome)
     if stopped is None:
         return False
     if ctx.writer is None:
         log("\nno answer: the writer is disabled (set OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL)")
         return False
-    if (
-        state.handoffs
-        and state.handoffs[-1].actions == len(state.history)
-        and state.answer is not None
-        and state.answered is not None
-        and state.view is not None
-        and same_screen(state.answered, signature(*state.view))
-    ):
-        log(f"\nanswer ({verdict(state.answer)}; the focus led to no action, so the last answer stands):\n  {state.answer.text}")
-        log.event("answer", text=state.answer.text, achieved=state.answer.achieved)
-        return False
 
-    may_resume = step < cfg.steps and len(state.handoffs) < cfg.handoffs and state.outcome != "stuck"
+    may_resume = step < cfg.steps and len(state.handoffs) < cfg.handoffs and state.outcome not in ("stuck", "unfollowed")
     reviews: list[dict] = []
     while True:
         can_ask = may_resume and ctx.ask is not None and len(state.guidance.exchanges) < MAX_QUESTIONS
@@ -290,11 +303,26 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 log(f"\nreview ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}\n  the screen is still loading; waiting")
                 log.event("focus", text=answer.text, focus=WAITING)
                 record["handed_back"] = True
-                state.handoffs.append(Handoff(step, state.outcome, WAITING, len(state.history)))
+                state.handoffs.append(Handoff(step, state.outcome, WAITING, len(state.history), answer.text))
                 state.guidance = state.guidance.followed()  # a focus given before the screen had loaded
                 state.idle = state.repeats = 0
                 if cfg.act and not cfg.replay:
                     wait_for_screen(cfg, ctx, state, log)
+                return True
+            if resuming and answer.scroll:
+                where = f" over {answer.scroll_over!r}" if answer.scroll_over else ""
+                log(
+                    f"\nreview ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}\n  the writer scrolls {answer.scroll}{where}"
+                )
+                log.event("focus", text=answer.text, focus=f"Scroll {answer.scroll}{where}")
+                record["handed_back"] = True
+                state.handoffs.append(
+                    Handoff(step, state.outcome, f"scroll {answer.scroll}{where}", len(state.history), answer.text)
+                )
+                state.guidance = state.guidance.followed()  # a focus from before the scroll is about the old screen
+                state.idle = state.repeats = 0
+                if cfg.act and not cfg.replay:
+                    scroll_for_writer(cfg, state, answer, log)
                 return True
             if resuming and answer.focus:
                 log(
@@ -302,7 +330,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 )
                 log.event("focus", text=answer.text, focus=answer.focus)
                 record["handed_back"] = True
-                state.handoffs.append(Handoff(step, state.outcome, answer.focus, len(state.history)))
+                state.handoffs.append(Handoff(step, state.outcome, answer.focus, len(state.history), answer.text))
                 state.guidance = state.guidance.focused(answer.focus)
                 state.idle = state.repeats = 0  # the stall was under the old focus; the new one starts clean
                 return True
@@ -313,11 +341,35 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
             (cfg.out / f"step-{step:03d}-review.json").write_text(json.dumps(reviews, indent=2), encoding="utf-8")
 
 
+def unfollowed(state: RunState) -> bool:
+    """The writer's last focus led to no action, on the screen the answer that gave it was read from."""
+    return bool(
+        state.handoffs
+        and state.handoffs[-1].actions == len(state.history)
+        and state.answered is not None
+        and state.view is not None
+        and same_screen(state.answered, signature(*state.view))
+    )
+
+
 def wait_for_screen(cfg: RunConfig, ctx: Context, state: RunState, log: Log) -> None:
     """Take the wait the writer called for as a wait the classifier chose is taken: an action in the
     history, never one to repeat (see `repeating`), and settled before the next step reads the screen."""
     screen, items = state.view
     what = wait(screen, items, ctx)
+    state.view = None
+    state.history.append(what)
+    state.seen.append((state.last, None))
+    log(f"  did: {what}")
+    log.event("action", text=what, actions=len(state.history))
+    settle(screen, cfg.delay)
+
+
+def scroll_for_writer(cfg: RunConfig, state: RunState, answer: Answer, log: Log) -> None:
+    """Take the scroll the writer called for as an action of the run's own, as `wait_for_screen`
+    takes its wait, and settle before the next step reads the screen it ends on."""
+    screen, items = state.view
+    what = writer_scroll(answer.scroll, answer.scroll_over, screen, items)
     state.view = None
     state.history.append(what)
     state.seen.append((state.last, None))
@@ -362,7 +414,9 @@ def review(cfg: RunConfig, ctx: Context, state: RunState, stopped: str, can_ask:
     screen, items = state.view
     state.answered = signature(screen, items)
     earlier = earlier_screens(state, state.answered)
-    earlier_stops = [{"after_action": h.actions, "why": STOPPED[h.outcome], "focus_given": h.focus} for h in state.handoffs]
+    earlier_stops = [
+        {"after_action": h.actions, "why": STOPPED[h.outcome], "you_said": h.said, "focus_given": h.focus} for h in state.handoffs
+    ]
     return compose_answer(
         ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask
     )

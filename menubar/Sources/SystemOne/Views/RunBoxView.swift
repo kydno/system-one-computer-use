@@ -86,7 +86,7 @@ struct RunBoxView: View {
         }
 
         if !live || model.phase == .finished, run.runFolder != nil {
-            footer(run)
+            footer(run, session: live ? model.sessionCost : nil)
         }
     }
 
@@ -95,7 +95,8 @@ struct RunBoxView: View {
         return achieved ? "goal achieved" : "goal not achieved"
     }
 
-    private func footer(_ run: RunRecord) -> some View {
+    /// `session` is what every run in the box cost together, shown under the latest one.
+    private func footer(_ run: RunRecord, session: Double? = nil) -> some View {
         HStack(spacing: K.InputBar.elementGap) {
             if let seconds = run.seconds {
                 Text(String(format: "%.0f s", seconds))
@@ -107,7 +108,14 @@ struct RunBoxView: View {
                 Text(String(format: "$%.4f", cost))
                     .monospacedDigit()
                     .modifier(LabelStyle())
-                    .help("What the run cost, as OpenRouter reported it")
+                    .help("What this run cost, as OpenRouter reported it")
+                Text("·").modifier(LabelStyle())
+            }
+            if let session {
+                Text(String(format: "Session $%.4f", session))
+                    .monospacedDigit()
+                    .modifier(LabelStyle())
+                    .help("What every run in the box has cost together, since the last Clear")
                 Text("·").modifier(LabelStyle())
             }
             HoverButton(systemName: "folder", help: "Open the run folder") {

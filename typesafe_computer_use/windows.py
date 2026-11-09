@@ -303,6 +303,11 @@ def scroll(lines: int, at: tuple[float, float] | None = None) -> None:
     _send(_mouse(MOUSEEVENTF_WHEEL, wheel_delta(lines)))
 
 
+def hover(at: tuple[float, float]) -> None:
+    """Park the cursor at `at` and press nothing, so what reacts to it there shows before a scroll."""
+    _move((round(at[0]), round(at[1])))
+
+
 # ------------------------------------------------------------------ apps and windows
 
 

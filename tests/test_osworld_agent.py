@@ -641,6 +641,12 @@ def test_a_scroll_aimed_at_a_point_goes_there_and_not_to_the_window_center():
     assert desktop.actions == ["pyautogui.scroll(-10, x=40, y=301)"]
 
 
+def test_a_hover_moves_the_pointer_and_presses_nothing():
+    desktop = over(obs())
+    desktop.hover((40.4, 300.6))
+    assert desktop.actions == ["pyautogui.moveTo(40, 301)"]
+
+
 def test_nothing_can_be_pressed_through_the_tree_and_nothing_opens_here():
     desktop = over(obs())
     assert desktop.ax_press(object()) is False

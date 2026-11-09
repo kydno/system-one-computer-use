@@ -20,7 +20,7 @@ import os
 import re
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -40,7 +40,12 @@ MAX_RETRY_WAIT = 8.0  # seconds; a longer Retry-After fails the step instead of 
 
 
 class DecisionError(Exception):
-    """The decision model could not be reached, or did not answer every question it was asked."""
+    """The decision model could not be reached, or did not answer every question it was asked.
+
+    `reply` is the reply when one came back, with its usage and no answers: it was billed all the same.
+    """
+
+    reply: Reply | None = None
 
 
 class Refusal(DecisionError):
@@ -132,6 +137,16 @@ class Reply:
     answers: dict[str, Answer]
 
 
+def is_settled(question: Question) -> bool:
+    """A choice with a single label: there is nothing to choose."""
+    return isinstance(question, Choice) and len(question.criteria) == 1
+
+
+def only_answer(question: Choice) -> ChoiceAnswer:
+    (label,) = question.criteria
+    return ChoiceAnswer(choice=label, confidence=1.0, probabilities={label: 1.0})
+
+
 @dataclass(frozen=True)
 class Endpoint:
     """Where decisions go: the service, its full request URL, its key, and the model asked."""
@@ -187,27 +202,46 @@ class DecisionClient:
         )
 
     def system_one(self, state: Any, questions: Mapping[str, Question], model: str | None = None) -> Reply:
+        """Ask the questions about `state`.
+
+        A choice with one label has one answer, so it is answered here and not sent: OpenAI Decisions
+        refuses the whole request over it, as it did a step's lone off-screen control, and the step
+        then had no decision at all.
+        """
         if not questions:
             raise ValueError("a decision needs at least one question")
+        settled = {name: only_answer(question) for name, question in questions.items() if is_settled(question)}
+        asked = {name: question for name, question in questions.items() if name not in settled}
         body = {
             "model": model or self.endpoint.model,
             "state": state,
-            "questions": {name: question.wire() for name, question in questions.items()},
+            "questions": {name: question.wire() for name, question in asked.items()},
         }
+        if not asked:
+            return Reply(model=body["model"], usage=Usage(), answers=settled)
         data = self._post(body)
-        raw = data.get("answers")
-        if not isinstance(raw, dict):
-            raise DecisionError(f"the reply has no answers: {str(data)[:300]}")
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-        return Reply(
+        billed = Reply(
             model=str(data.get("model") or body["model"]),
             usage=Usage(
                 input_tokens=_int(usage.get("input_tokens")),
                 output_tokens=_int(usage.get("output_tokens")),
                 cost=usage.get("cost") if isinstance(usage.get("cost"), int | float) else None,
             ),
-            answers={name: _answer(name, question, raw.get(name)) for name, question in questions.items()},
+            answers={},
         )
+        try:
+            raw = data.get("answers")
+            if not isinstance(raw, dict):
+                raise DecisionError(f"the reply has no answers: {str(data)[:300]}")
+            answers = {
+                name: settled[name] if name in settled else _answer(name, question, raw.get(name))
+                for name, question in questions.items()
+            }
+        except DecisionError as e:
+            e.reply = billed  # the reply was billed all the same; the metered client counts it
+            raise
+        return replace(billed, answers=answers)
 
     def _post(self, body: dict) -> dict:
         for attempt in range(MAX_RETRIES + 1):

@@ -101,6 +101,19 @@ def test_a_scroll_parks_the_pointer_at_the_point_it_was_given(input_events, monk
     assert input_events == [("move", (175.0, 590.0)), ("scroll", -10)]
 
 
+def test_a_hover_parks_the_pointer_and_presses_nothing(input_events, monkeypatch):
+    monkeypatch.setattr(macos, "mouse_location", lambda: (500, 500))
+    macos.hover((175.0, 590.0))
+    assert input_events == [("move", (175.0, 590.0))]
+
+
+def test_corner_abort_stops_a_hover_before_the_pointer_moves(input_events, monkeypatch):
+    monkeypatch.setattr(macos, "mouse_location", lambda: (0, 0))
+    with pytest.raises(Abort):
+        macos.hover((175.0, 590.0))
+    assert input_events == []
+
+
 def test_a_scroll_with_no_point_parks_the_pointer_over_the_window_center(input_events, monkeypatch):
     monkeypatch.setattr(macos, "frontmost_window_center", lambda: (300.0, 300.0))
     monkeypatch.setattr(macos, "mouse_location", lambda: (500, 500))
@@ -115,6 +128,27 @@ def test_corner_abort_stops_an_app_switch_before_any_applescript(action, monkeyp
     monkeypatch.setattr(macos, "mouse_location", lambda: (0, 0))
     with pytest.raises(Abort):
         action()
+
+
+def activating(monkeypatch, windows: list) -> list[str]:
+    """macos.activate against an app that is frontmost at once and shows `windows` in turn."""
+    scripts: list[str] = []
+    monkeypatch.setattr(macos, "osascript", lambda script: scripts.append(script) or "")
+    monkeypatch.setattr(macos, "frontmost_app_and_pid", lambda: ("Claude", 42))
+    monkeypatch.setattr(macos, "frontmost_window_bounds", lambda pid=None: windows.pop(0) if len(windows) > 1 else windows[0])
+    monkeypatch.setattr(macos.time, "sleep", lambda s: None)
+    return scripts
+
+
+def test_an_app_brought_to_the_front_is_asked_for_a_window_as_a_dock_click_does(monkeypatch):
+    scripts = activating(monkeypatch, [None, (0.0, 0.0, 800.0, 600.0)])
+    assert macos.activate("Claude") is True
+    assert scripts == ['tell application "Claude"\nreopen\nactivate\nend tell']
+
+
+def test_an_app_in_front_with_no_window_on_screen_is_not_activated(monkeypatch):
+    activating(monkeypatch, [None])
+    assert macos.activate("Claude", timeout=0.05) is False
 
 
 def test_pending_abort_after_a_decision_prevents_dispatch(screen, monkeypatch):

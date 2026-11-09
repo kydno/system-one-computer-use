@@ -63,6 +63,20 @@ def test_a_tabs_memory_figure_does_not_make_a_new_screen(screen, make_item):
     assert signature(screen, [make_item(0, "Memory usage - 56.0 MB")])[3][0][0] == "Memory usage - 56.0 MB"  # page text stays
 
 
+def test_the_menu_bar_does_not_make_a_new_screen(screen, make_item):
+    """The menu bar app shows the step beside the clock, so each capture had two changed lines there, and
+    a run that went back and forth between two tabs never saw a screen twice."""
+
+    def capture(step: str, clock: str):
+        bar = [make_item(0, step, x1=1700, y1=10, x2=1730, y2=40), make_item(1, clock, x1=1750, y1=10, x2=1950, y2=40)]
+        page = [make_item(n, f"Flight {n}", y1=100 + 40 * n, y2=130 + 40 * n) for n in range(2, 5)]
+        return signature(screen, bar + page)
+
+    before = capture("13", "Thu Oct 29 4:20 PM")
+    assert same_screen(before, capture("16", "Thu Oct 29 4:21 PM"))
+    assert [text for text, _ in before[3]] == ["Flight 2", "Flight 3", "Flight 4"]
+
+
 def test_a_small_modal_on_a_dense_page_is_a_new_screen():
     lines = [f"Row {n}" for n in range(40)]
     page = ("Google Chrome", None, None, texts(*lines))

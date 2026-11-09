@@ -19,8 +19,8 @@ and no other endpoint is named. These variables change the model or send it to a
 
 ## OpenRouter
 
-With `OPENROUTER_API_KEY` set, and neither `CLICKER_WRITER_BASE_URL` nor `ANTHROPIC_BASE_URL`, the
-writer goes to `https://openrouter.ai/api/v1` over OpenAI's Chat Completions API, with that key and
+With `OPENROUTER_API_KEY` set, and neither `CLICKER_WRITER_BASE_URL` nor `ANTHROPIC_BASE_URL`
+with an Anthropic key, token or profile beside it, the writer goes to `https://openrouter.ai/api/v1` over OpenAI's Chat Completions API, with that key and
 no other. Any chat model OpenRouter serves can write or answer, by its OpenRouter id:
 `typesafe/jev-router` picks a model and effort per request, and other vendors' models work as
 well as Claude. The answer model reads a screenshot, so pick one

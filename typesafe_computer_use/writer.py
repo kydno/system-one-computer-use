@@ -7,6 +7,7 @@ import io
 import json
 import os
 from collections.abc import Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -14,6 +15,7 @@ import anthropic
 import openai
 from PIL import Image
 
+from .calls import reviewing
 from .config import (
     answer_model,
     answer_reasoning,
@@ -34,6 +36,7 @@ from .openai_writer import OpenAIWriter
 ANSWER_IMAGE_EDGE = 1568  # the longest edge a vision model reads without shrinking the image itself
 MAX_TABS = 60  # the open tabs a URL proposal reads; past that, a list costs more than it helps
 PLACEHOLDER_KEY = "not-needed"  # an endpoint you host yourself does not check a key
+SCROLLS = ("up", "down", "top", "bottom")  # the scrolls an answer may call for
 # Tokens a reasoning model may think with on top of a call's own limit, by effort. The thinking
 # comes out of max_tokens ahead of the reply: at medium effort a 256-token call spent it all and
 # came back with no text. An effort not listed gets medium's.
@@ -122,14 +125,15 @@ def _structured(
     # runs longer on some calls than others, is asked for once more with twice the room.
     for limit in (max_tokens, max_tokens * 2):
         try:
-            response = writer.messages.create(
-                model=answer_model() if answering else writer_model(),
-                max_tokens=limit,
-                system=system,
-                messages=[{"role": "user", "content": content}],
-                output_config={"format": {"type": "json_schema", "schema": schema}},
-                **extra,
-            )
+            with reviewing() if answering else nullcontext():
+                response = writer.messages.create(
+                    model=answer_model() if answering else writer_model(),
+                    max_tokens=limit,
+                    system=system,
+                    messages=[{"role": "user", "content": content}],
+                    output_config={"format": {"type": "json_schema", "schema": schema}},
+                    **extra,
+                )
         except (anthropic.APIError, openai.APIError) as e:
             raise WriterError(f"the request failed: {e}") from e
         text = "".join(b.text for b in response.content if b.type == "text")
@@ -379,9 +383,10 @@ def compose_url(
 class Answer:
     """What the writer made of a stop: the words for the user, and how the run goes on when it can.
 
-    At most one of `focus`, `question`, and `wait` is acted on. A focus sends the classifier back to
-    work, a question goes to the user first, a wait gives a screen still loading time before the
-    classifier reads it again, and none of them means the run is over.
+    At most one of `focus`, `question`, `wait`, and `scroll` is acted on. A focus sends the classifier
+    back to work, a question goes to the user first, a wait gives a screen still loading time before
+    the classifier reads it again, a scroll moves the page before it does, and none of them means the
+    run is over.
     """
 
     text: str
@@ -389,6 +394,8 @@ class Answer:
     focus: str = ""  # the next sub-goal for the classifier, in terms of the screen
     question: str = ""  # what only the user can say
     wait: bool = False  # the screen is still loading, so the run waits for it instead of asking the classifier to
+    scroll: str = ""  # "up" or "down" once, "top" or "bottom" until nothing moves; the run scrolls itself
+    scroll_over: str = ""  # the text of the item to scroll over; empty for the window's center
 
 
 ANSWER_SYSTEM = (
@@ -396,9 +403,12 @@ ANSWER_SYSTEM = (
     "action, and it has stopped and handed the run to you. You receive the goal, the actions taken, "
     "why the classifier stopped, a capture of the screen as it is now, the text read from that "
     "screen, and the text of the screens it passed through on the way, oldest first. You may also "
-    "receive the focus the classifier was working on, the earlier times it stopped with the focus "
-    "you gave each time, what the user said when asked, and the tasks the user gave before this one "
-    "in the same session with what came of each, which a short goal may lean on.\n\n"
+    "receive the focus the classifier was working on, the earlier times it stopped with what you "
+    "said and the focus you gave each time, what the user said when asked, and the tasks the user "
+    "gave before this one in the same session with what came of each, which a short goal may lean "
+    "on. What you said earlier was read from screens of this run, some of which may have since "
+    "dropped out of earlier_screens: count it as read, and do not send the agent back to a screen "
+    "only to read again what you already said it holds.\n\n"
     "Tell the user the result. When the goal asks for information, lead with that information, "
     "taken only from those screens and from what the user said: never from memory, and never a "
     "guess. When the goal asks for something to be done, say whether the screen shows it done. "
@@ -408,10 +418,20 @@ ANSWER_SYSTEM = (
     "itself shows the goal reached, every part of it: check each thing the goal names, such as "
     "which item, where it goes, and what value it takes, and when the screen shows something done "
     "but not one of those parts, the goal is not reached.\n\n"
-    "When the goal is not reached you may keep the run going, in one of three ways and never more "
+    "When the goal is not reached you may keep the run going, in one of four ways and never more "
     "than one. Set wait to true when the screen is still loading: a spinner, a progress bar, or a "
     "page whose frame is drawn and whose content is not; the agent then waits for it itself and the "
     "classifier reads the loaded screen. "
+    "Set scroll when what the goal needs is further up or down the page: the agent scrolls itself, "
+    "then the classifier reads the screen it ends on. 'up' or 'down' moves a screen or so; 'top' or "
+    "'bottom' keeps going until nothing more moves, for a section that may be several screens away. "
+    "Set scroll_over to the exact text of an item inside the part of the screen that should move, "
+    "taken from screen_text_in_reading_order, such as a line of the page's own content; leave it "
+    "empty to scroll the middle of the window. Never name a sidebar or menu entry: the wheel moves "
+    "whatever is under it. When the last actions scrolled and the screen still starts or ends "
+    "partway through a card, list, or section, more lies that way: scroll the same way again, and "
+    "turn back only once a scroll that way says nothing moved. Use scroll, not focus, for any "
+    "scroll. "
     "Set focus to send the classifier back to work: one short imperative sentence naming the next "
     "step in terms of what this screen shows, quoting the text of the item to use when there is "
     "one. A tab in the browser's tab strip is such an item: to reach a page already open in a tab, "
@@ -430,8 +450,8 @@ ANSWER_SYSTEM = (
     "the screens cannot tell you, the goal leaves open, and earlier_tasks do not settle: a choice "
     "between options the user would care about, a fact only the user has, or the text to type when "
     "the writer declined a field because nothing says what goes in it. One short question. Never ask for a password or any "
-    "other credential, and never ask what user_said already answers. Leave focus and question "
-    "empty and wait false when the goal is reached, when no action of the agent's would help, or "
+    "other credential, and never ask what user_said already answers. Leave focus, question, and "
+    "scroll empty and wait false when the goal is reached, when no action of the agent's would help, or "
     "when the next step is one only the user should take, such as a login or a payment. When the "
     "run ends short of the goal, because you keep it going in none of these ways or because "
     "why_the_run_stopped says it ends, say plainly what the agent could not do."
@@ -456,7 +476,10 @@ def compose_answer(
     capture itself as well as its text, since OCR misreads a letter here and there and drops layout.
     `earlier` is the text of the screens before this one, for a goal whose answer was on the way.
     `earlier_stops` are the times the classifier stopped before, each with the focus it was sent
-    back with, so a focus that led nowhere is not given twice.
+    back with, so a focus that led nowhere is not given twice, and what the writer said then, so
+    what it read on a screen since dropped from `earlier` is not lost. A run that read Claude's
+    instructions in a chat tab and then scrolled a settings page for ten screens forgot them,
+    and spent its last handoffs going back to the chat to read them again.
     """
     packet = {
         "goal": goal,
@@ -483,6 +506,8 @@ def compose_answer(
             "focus": {"type": "string"},
             "question": {"type": "string"},
             "wait": {"type": "boolean"},
+            "scroll": {"type": "string"},
+            "scroll_over": {"type": "string"},
         },
         max_tokens=1024,
         answering=True,
@@ -494,4 +519,6 @@ def compose_answer(
         focus=data["focus"].strip(),
         question=data["question"].strip(),
         wait=data["wait"],
+        scroll=scroll if (scroll := data["scroll"].strip().lower()) in SCROLLS else "",
+        scroll_over=data["scroll_over"].strip() if scroll in SCROLLS else "",
     )

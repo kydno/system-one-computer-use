@@ -118,10 +118,12 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as e:
         sys.exit(str(e))
     if writer is None:
-        say(
-            "writer disabled: no OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL; "
-            "type_text, writer-proposed URLs and the final answer need one"
+        why = (
+            "CLICKER_WRITER_API=anthropic keeps it off OpenRouter, and there is no ANTHROPIC_API_KEY"
+            if config.openrouter_key()
+            else "no OPENROUTER_API_KEY, ANTHROPIC_API_KEY or CLICKER_WRITER_BASE_URL"
         )
+        say(f"writer disabled: {why}; type_text, writer-proposed URLs and the final answer need one")
     else:
         say(f"writer: {provider(writer)}")
 

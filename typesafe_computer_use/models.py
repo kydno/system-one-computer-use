@@ -130,10 +130,15 @@ def signature(screen: Screen, items: list[Item]) -> Signature:
     row counts too: the same line lower down is a different line. A tab's memory figure is no part
     of the screen (see `tab_title`). A stand-in field is no part of it either: it is the last click,
     not something the screen showed, and with it every click would count as a change.
+
+    The menu bar is no part of it, as it is none of `moved`: its clock moves on its own, and the
+    menu bar app shows the step the run is on beside it. With the two, every capture read as a new
+    screen, and a run went back and forth between two tabs for 25 steps, its repeats never counted.
     """
     focused = f"{screen.field.role}:{screen.field.label}" if screen.field and not screen.field.clicked else None
     row = ROW_PT * screen.scale
-    return (screen.app, screen.url, focused, tuple((tab_title(it.text), round(it.center[1] / row)) for it in items))
+    lines = tuple((tab_title(it.text), round(it.center[1] / row)) for it in items if not screen.in_menu_bar(it))
+    return (screen.app, screen.url, focused, lines)
 
 
 def same_screen(a: Signature, b: Signature) -> bool:

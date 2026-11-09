@@ -5,12 +5,31 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from types import SimpleNamespace
 
 CLASSIFIER = "classifier"
 WRITER = "writer"
 MODELS = (CLASSIFIER, WRITER)
+
+# What each model does in the run, for what it cost: the classifier decides, the answer model
+# reviews each stop, and the writer's own model fills fields and proposes URLs. The writer client
+# carries both of the last two, so a review says which it is with `reviewing`.
+DECISION = "decision"
+REVIEWER = "reviewer"
+ROLES = (DECISION, REVIEWER, WRITER)
+_writer_role: ContextVar[str] = ContextVar("writer_role", default=WRITER)
+
+
+@contextmanager
+def reviewing() -> Iterator[None]:
+    """Count the writer client's requests inside as the reviewer's, the answer model's."""
+    token = _writer_role.set(REVIEWER)
+    try:
+        yield
+    finally:
+        _writer_role.reset(token)
 
 
 @dataclass
@@ -50,6 +69,7 @@ class Calls:
     count: dict[str, int] = field(default_factory=lambda: dict.fromkeys(MODELS, 0))
     seconds: dict[str, float] = field(default_factory=lambda: dict.fromkeys(MODELS, 0.0))
     usage: dict[str, Usage] = field(default_factory=dict)  # keyed by the model id each reply names
+    roles: dict[str, dict[str, Usage]] = field(default_factory=dict)  # the same, under the role that asked
 
     @contextmanager
     def record(self, model: str) -> Iterator[None]:
@@ -62,10 +82,19 @@ class Calls:
             self.seconds[model] += time.perf_counter() - started
 
     def used(
-        self, model: str, input_tokens: int = 0, cached_input_tokens: int = 0, output_tokens: int = 0, cost: float | None = None
+        self,
+        model: str,
+        input_tokens: int = 0,
+        cached_input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost: float | None = None,
+        role: str | None = None,
     ) -> None:
-        """Add one reply's tokens and cost to `model`, the model id it came from."""
+        """Add one reply's tokens and cost to `model`, the model id it came from, and to `role` when given."""
         self.usage.setdefault(model, Usage()).record(input_tokens, cached_input_tokens, output_tokens, cost)
+        if role is not None:
+            by_model = self.roles.setdefault(role, {})
+            by_model.setdefault(model, Usage()).record(input_tokens, cached_input_tokens, output_tokens, cost)
 
     def cost(self) -> float | None:
         """The USD the run's replies reported costing, over every model; None when none reported one.
@@ -94,6 +123,11 @@ class Calls:
         """Tokens and cost per model id, for run.json."""
         return {model: asdict(usage) for model, usage in self.usage.items()}
 
+    def by_role(self) -> dict:
+        """Tokens and cost per model id under each role that used one, for run.json: what the menu
+        bar's usage breakdown splits the bill by."""
+        return {role: {model: asdict(usage) for model, usage in self.roles[role].items()} for role in ROLES if role in self.roles}
+
     def line(self) -> str:
         """One log line: `calls: classifier 12 (86%, 3.1s)  writer 2 (14%, 8.0s)  cost $0.0123`, the cost
         only when a reply reported one."""
@@ -117,15 +151,27 @@ class MeteredClassifier:
 
     def system_one(self, **request):
         with self._calls.record(CLASSIFIER):
-            reply = self._client.system_one(**request)
+            try:
+                reply = self._client.system_one(**request)
+            except Exception as e:
+                # A reply that came back and was billed, then refused a question or broke its
+                # schema, is still on the bill: the client hands it over on the error.
+                billed = getattr(e, "reply", None)
+                if billed is not None:
+                    self._record(billed, request)
+                raise
+        self._record(reply, request)
+        return reply
+
+    def _record(self, reply, request: dict) -> None:
         usage = getattr(reply, "usage", None)
         self._calls.used(
             _model(getattr(reply, "model", None), request.get("model"), CLASSIFIER),
             input_tokens=_tokens(usage, "input_tokens"),
             output_tokens=_tokens(usage, "output_tokens"),
             cost=_cost(usage),
+            role=DECISION,
         )
-        return reply
 
 
 class MeteredWriter:
@@ -146,6 +192,7 @@ class MeteredWriter:
             cached_input_tokens=_tokens(usage, "cache_read_input_tokens"),
             output_tokens=_tokens(usage, "output_tokens"),
             cost=_cost(usage),
+            role=_writer_role.get(),
         )
         return reply
 

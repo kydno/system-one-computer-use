@@ -357,7 +357,9 @@ def test_open_app_refuses_the_app_already_in_front(screen, opened):
 def test_an_app_that_does_not_come_to_the_front_is_a_no_op(screen, monkeypatch):
     monkeypatch.setattr(desktop, "activate", lambda app, timeout=3.0: False)
     ctx = replace(context(), apps=("Photos",))
-    assert actions.perform(opening("Photos"), screen, [], ctx) == "open_app failed: Photos did not come to the front"
+    assert (
+        actions.perform(opening("Photos"), screen, [], ctx) == "open_app failed: Photos did not come to the front with a window"
+    )
 
 
 def test_typing_sets_the_value_when_the_field_reads_it_back(calls, monkeypatch):
@@ -421,12 +423,23 @@ def scrolling(item: Item | None) -> SimpleNamespace:
 
 @pytest.fixture
 def wheel(screen, monkeypatch):
-    """Where each scroll parked the pointer, and `shown`, what the display shows after it."""
+    """Where each hover and scroll parked the pointer, and `shown`: what the display shows with the
+    pointer parked ("hovered") and after the scroll ("image")."""
     log: list = []
-    shown = {"image": screen.image.copy()}
+    shown = {"image": screen.image.copy(), "hovered": screen.image.copy(), "next": "image"}
+
+    def hover(at):
+        log.append(("hover", at))
+        shown["next"] = "hovered"
+
+    def screenshot():
+        which, shown["next"] = shown["next"], "image"
+        return shown[which]
+
+    monkeypatch.setattr(desktop, "hover", hover)
     monkeypatch.setattr(desktop, "scroll", lambda lines, at=None: log.append((lines, at)))
     monkeypatch.setattr(desktop, "sleep_watching", lambda seconds: None)
-    monkeypatch.setattr(desktop, "screenshot", lambda: shown["image"])
+    monkeypatch.setattr(desktop, "screenshot", screenshot)
     return log, shown
 
 
@@ -437,7 +450,18 @@ def test_a_scroll_goes_over_the_item_the_classifier_picked(screen, wheel):
     shown["image"].paste((255, 255, 255), (0, 900, 700, 1200))  # the list moved up under the pointer
     what = actions.perform(scrolling(LISTING), screen, [LISTING, MAP_LABEL], None)
     assert what == 'scrolled down over "Angelo\'s Pizza Pasta and Deli 4.5"'
-    assert log == [(-10, (175.0, 590.0))]
+    assert log == [("hover", (175.0, 590.0)), (-10, (175.0, 590.0))]
+
+
+def test_a_menu_the_pointer_opened_is_not_a_scroll(screen, wheel):
+    """Aimed at a sidebar's 'Analytics' link on the Firebase console, the pointer opened the link's
+    flyout menu and the page never moved. The menu was there before the wheel turned, so it is
+    not what the scroll showed."""
+    _, shown = wheel
+    shown["hovered"].paste((255, 255, 255), (0, 900, 700, 1200))  # the flyout, open once the pointer is there
+    shown["image"] = shown["hovered"].copy()  # and still open, with nothing scrolled, after the wheel
+    what = actions.perform(scrolling(LISTING), screen, [LISTING, MAP_LABEL], None)
+    assert what == 'scrolled down over "Angelo\'s Pizza Pasta and Deli 4.5" (nothing there moved)'
 
 
 def test_a_scroll_that_moved_nothing_under_the_pointer_says_so(screen, wheel):
@@ -467,6 +491,21 @@ def test_a_scroll_with_no_item_to_aim_at_goes_to_the_window_center(screen, wheel
 def test_a_scroll_at_the_window_center_that_changed_nothing_says_so(screen, wheel):
     what = actions.perform(scrolling(None), screen, [], None)
     assert what == "scrolled down (nothing there moved)"
+
+
+def test_the_writers_scroll_to_the_bottom_stops_once_nothing_moves(screen, wheel):
+    """Named by its text, the listing is where the wheel goes; at the list's end the scrolls stop."""
+    log, shown = wheel
+    shown["image"].paste((255, 255, 255), (0, 900, 700, 1200))  # every scroll leaves the same screen: one moved
+    what = actions.writer_scroll("bottom", "Angelo's Pizza Pasta and Deli 4.5", screen, [LISTING, MAP_LABEL])
+    assert what == 'scrolled to the bottom over "Angelo\'s Pizza Pasta and Deli 4.5" (1 scroll)'
+    assert log == [("hover", (175.0, 590.0)), (-10, (175.0, 590.0)), (-10, (175.0, 590.0))]
+
+
+def test_the_writers_scroll_over_nothing_on_screen_goes_to_the_window_center(screen, wheel):
+    log, _ = wheel
+    assert actions.writer_scroll("up", "Google Analytics", screen, [LISTING, MAP_LABEL]) == "scrolled up (nothing there moved)"
+    assert log == [(10, None)]
 
 
 def test_clicking_a_duplicated_label_says_which_row(screen, calls):

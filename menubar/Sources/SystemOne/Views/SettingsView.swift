@@ -96,6 +96,10 @@ struct SettingsView: View {
 
             Divider()
 
+            UsageBreakdownView(decisionModel: decisionModel.id, write: write)
+
+            Divider()
+
             permissionsRow
 
             Divider()

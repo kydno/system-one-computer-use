@@ -5,6 +5,7 @@ import pytest
 from typesafe_computer_use import config
 from typesafe_computer_use.calls import Calls, MeteredWriter
 from typesafe_computer_use.config import writer_api, writer_base_url
+from typesafe_computer_use.openai_writer import OpenAIWriter
 from typesafe_computer_use.writer import WriterError, compose_answer, compose_url, make_writer, parse_json
 
 ANSWER = '{"achieved": true, "answer": "Sep 19 in Miami.", "focus": "", "question": "", "wait": false}'
@@ -272,18 +273,30 @@ def test_an_unknown_answer_sort_is_an_error(openrouter_env):
 
 
 @pytest.mark.parametrize(
-    ("name", "value"),
+    "env",
     [
-        ("CLICKER_WRITER_BASE_URL", "http://localhost:1234"),
-        ("ANTHROPIC_BASE_URL", "https://proxy.example"),
-        ("CLICKER_WRITER_API", "anthropic"),
+        {"CLICKER_WRITER_BASE_URL": "http://localhost:1234"},
+        {"ANTHROPIC_BASE_URL": "https://proxy.example", "ANTHROPIC_API_KEY": "sk-ant-test"},
+        {"ANTHROPIC_BASE_URL": "https://proxy.example", "ANTHROPIC_AUTH_TOKEN": "oauth-test"},
+        {"CLICKER_WRITER_API": "anthropic"},
     ],
 )
-def test_a_named_writer_endpoint_wins_over_openrouter(openrouter_env, name, value):
-    openrouter_env.setenv(name, value)
+def test_a_named_writer_endpoint_wins_over_openrouter(openrouter_env, env):
+    for name, value in env.items():
+        openrouter_env.setenv(name, value)
 
     assert not config.openrouter_writer()
     assert config.writer_model() == config.DEFAULT_WRITER_MODEL
+
+
+def test_an_anthropic_base_url_with_no_credential_leaves_the_writer_on_openrouter(openrouter_env):
+    # A coding agent's shell sets ANTHROPIC_BASE_URL for itself; the menu bar app started from there
+    # inherited it, and with .env's empty ANTHROPIC_API_KEY every run went without a writer.
+    openrouter_env.setenv("ANTHROPIC_BASE_URL", "https://proxy.example")
+    openrouter_env.setenv("ANTHROPIC_API_KEY", "")
+
+    assert config.openrouter_writer()
+    assert isinstance(make_writer(), OpenAIWriter)
 
 
 def test_a_reply_cut_off_at_its_token_limit_is_asked_for_again_with_twice_the_room(openai_env, endpoint):

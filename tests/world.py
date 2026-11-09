@@ -386,6 +386,7 @@ class World:
         monkeypatch.setattr(desktop, "ax_press", self.ax_press)
         monkeypatch.setattr(desktop, "press", self.press)
         monkeypatch.setattr(desktop, "scroll", self.scroll)
+        monkeypatch.setattr(desktop, "hover", lambda at: None)  # nothing in the world reacts to the pointer
         monkeypatch.setattr(desktop, "type_text", self.type_text)
         monkeypatch.setattr(desktop, "ax_focus", lambda ref: True)
         monkeypatch.setattr(desktop, "ax_set_value", self.ax_set_value)
@@ -506,7 +507,7 @@ class FakeWriter:
 
     `reviews` scripts what the writer makes of each stop, one entry per answer asked for: a dict
     of the reply's fields, or a callable(packet) returning one. {"focus": ...} sends the classifier
-    back, {"question": ...} asks the user, {"wait": True} has the run wait for the screen, and each
+    back, {"question": ...} asks the user, {"wait": True} has the run wait for the screen, {"scroll": "top"} has it scroll, and each
     says the goal is not reached yet. Once the script is spent, every stop is the goal achieved, as
     it is with no script at all.
     """
@@ -528,7 +529,7 @@ class FakeWriter:
             reply = {"fill": bool(self.text), "text": self.text, "submit": self.submit, "reason": "the goal names what to type"}
         elif asked == {"ok", "url", "reason"}:
             reply = {"ok": bool(self.url), "url": self.url, "reason": "the goal names the site"}
-        elif asked == {"achieved", "answer", "focus", "question", "wait"}:
+        elif asked == {"achieved", "answer", "focus", "question", "wait", "scroll", "scroll_over"}:
             self.packets.append(packet)
             earlier = [text for screen in packet.get("earlier_screens", []) for text in screen["text"]]
             scripted = self.reviews.pop(0) if self.reviews else {}
@@ -539,6 +540,8 @@ class FakeWriter:
                 "focus": "",
                 "question": "",
                 "wait": False,
+                "scroll": "",
+                "scroll_over": "",
                 **scripted,
             }
         else:
