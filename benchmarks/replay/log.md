@@ -130,3 +130,33 @@ picks `copy` 6 of 6 at 1.00, where the live runs picked `select_all` 6 of 6. For
 which is right on this evidence: the selected text was not the line or word the goal named, so the model could not
 tell the goal was met; that needs the aiming above. Not measured: a copy-and-paste carried through on hardware with
 this change, which needs another supervised run.
+
+## 2026-11-10: iteration 2 of batch2, each item goes out once (issue 12, kept)
+
+Cluster: cost, not a failure. A request holds every item twice, in the state's `screen_items_in_reading_order`
+and in the item question's criteria, 85% of the body on 827 saved requests (23.2 KB a request, the two lists
+10.4 KB and 8.5 KB). Three variants on the 107 silver cases x 3 repeats on `~typesafe/jev-latest`, against the
+current code (agreement 0.598, 63 cases mostly right, 32 confident and wrong, 10,661 input tokens an ask):
+
+| variant | request bytes | input tokens an ask | cost an ask | silver agreement | confident and wrong |
+|---|---|---|---|---|---|
+| the state's list dropped | -44.7% | 5,548 | $0.000233 | 0.446 | 80 |
+| criteria "Item N in screen_items_in_reading_order." | -11.0% | 9,707 | $0.000408 | 0.604 | 28 |
+| criteria "Item N." (kept) | -26.2% | 8,836 | $0.000371 | 0.598 | 28 |
+
+- The state's list cannot go: the kind question reads the screen from it. Without it `scroll_down` is picked 124
+  times in 321 against 67, `click_item` 50 against 108, and 48 cases are mostly right instead of 63.
+- The criteria can: they only repeated what the list holds (text, region, the role the app declared, a date, the row
+  a duplicate shares, a popup over it). The short pointer picks the same items: agreement is identical, the kinds
+  picked differ by two, and confident-and-wrong picks fall from 32 to 28 (right-but-below-the-floor 27 to 24).
+  Same pick in all three repeats 0.860 against 0.869, inside the noise band.
+- The item question's instruction is unchanged, so the pass measured the code that is kept. It still says items are
+  "marked with a role"; the role is in the state's rows. Rewording it is a separate pass.
+- Only Jev was measured. Another decision model (see `docs/decision-models.md`) may read the pointer worse, and
+  would need its own pass before it runs on this.
+- Every saved case's item criteria now differ from what it was sent with (`clicker-eval check`: 0 of 827 exact; the
+  state matches), as the wording changed on purpose. The old baseline row compares on bytes only through `size`.
+- The drag target question uses the same pointers; no saved step needs a drag, so only the scenario test covers it.
+- Issue 13 (cap long item text) now acts on one copy, so its gain is about half of what it was; issue 14 is unchanged.
+
+Spent in batch2 so far: $0.33 of $1.00, two of two iterations.
