@@ -55,8 +55,10 @@ def decision_at(folder: Path, step: int) -> dict | None:
     return None
 
 
-def digest(home: Home) -> dict:
-    """The runs of `runs/` that drove the machine, summarised."""
+def digest(home: Home, since: str | None = None) -> dict:
+    """The runs of `runs/` that drove the machine, summarised. `since` is a run folder name, or the start of
+    one such as `20261030-16`: runs before it are left out, because a failure from before a fix is no
+    failure of the code as it is now."""
     outcomes: Counter = Counter()
     stops: Counter = Counter()
     sent_back: Counter = Counter()
@@ -66,7 +68,7 @@ def digest(home: Home) -> dict:
     apps: Counter = Counter()
     apps_failed: Counter = Counter()
     candidates = []
-    for folder in sorted(p for p in home.runs.glob("*") if p.is_dir()):
+    for folder in sorted(p for p in home.runs.glob("*") if p.is_dir() and (not since or p.name >= since)):
         try:
             summary = json.loads((folder / "run.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):

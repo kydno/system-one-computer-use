@@ -214,3 +214,18 @@ def test_the_digest_counts_runs_by_outcome_and_lists_the_first_stop_of_each_that
     text = digest.render(result)
     assert "r2/001  low_confidence  click_item (kind 0.90, item 0.20) -> 'Buy'" in text
     assert "BY DECISION MODEL" in text and "vendor/model: 3 runs, 1 of 2 judged achieved" in text
+
+
+def test_the_digest_can_leave_out_runs_from_before_the_last_change_to_the_loop(tmp_path, capsys):
+    home = Home(tmp_path)
+    models = {"decisions": "vendor/model"}
+    old = {"act": True, "outcome": "stopped", "goal_achieved": False, "models": models, "steps_taken": 2, "seconds": 5.0}
+    hand_run(home, "20261029-100000", old, reviews={1: [{"outcome": "nothing helps"}]})
+    hand_run(home, "20261101-100000", old, reviews={1: [{"outcome": "low_confidence"}]})
+
+    assert digest.digest(home)["stops"] == {"nothing helps": 1, "low_confidence": 1}
+    assert digest.digest(home, since="20261030-16")["stops"] == {"low_confidence": 1}
+    assert digest.digest(home, since="20261101-100000")["models"]["vendor/model"]["runs"] == 1
+
+    assert cli.main(["--home", str(tmp_path), "digest", "--since", "20261101"]) == 0
+    assert "20261029" not in capsys.readouterr().out
