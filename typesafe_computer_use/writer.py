@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import os
+import re
 from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -258,6 +259,21 @@ def compose_text(
 def valid_url(url: str) -> bool:
     parsed = urlparse(url)
     return parsed.scheme == "https" and "." in parsed.netloc and not any(ch.isspace() for ch in url)
+
+
+URL_IN_TEXT = re.compile("https://[^\\s<>\"'`\u201c\u201d\u2018\u2019]+")
+
+
+def url_named_in(text: str | None) -> str:
+    """The one https URL a piece of text names, or "" when it names none or more than one.
+
+    The writer's focus often says exactly which page to open ("Open https://example.com/create in
+    the address bar"). Code reads that URL out, so a URL the writer guessed from the goal, or an open
+    tab that looks like the goal's page, cannot take its place.
+    """
+    named = {u.rstrip(".,;:!?)]}") for u in URL_IN_TEXT.findall(text or "")}
+    found = {u for u in named if valid_url(u)}
+    return found.pop() if len(found) == 1 else ""
 
 
 # --------------------------------------------------------------------------- #

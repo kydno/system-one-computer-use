@@ -2166,3 +2166,49 @@ def test_l66_the_writer_scrolls_the_page_itself_when_the_classifier_would_not(mo
     assert world.wheel[0] is not None and world.wheel[0] == world.wheel[1]
     assert state.history == ["scrolled to the top over 'Cloud Messaging' (1 scroll)", "clicked 'Google Analytics'"]
     assert [(h.focus, h.said) for h in state.handoffs] == [("scroll top over '“Cloud Messaging”'", "The export is further up.")]
+
+
+DOCS = "https://docs.example.com/"
+
+
+def lost_then_told_the_url(state: dict, questions: dict) -> tuple:
+    """Jev opens the editor from the writer's guess, finds a dead page, and is unsure what to do
+    about it until the writer's focus names the page to open."""
+    texts = [it["text"] for it in state["screen_items_in_reading_order"]]
+    if "Untitled document" in texts:
+        return ("done", None)
+    if state.get("current_focus") or "Page Not Found" not in texts:
+        return ("use_browser", "other")
+    return ("use_browser", "other", 0.3)
+
+
+def test_l67_a_url_the_writers_focus_names_is_the_one_opened(monkeypatch, tmp_path):
+    world = World(
+        [
+            Page(
+                name="desktop",
+                items=["Documents"],
+                url=None,
+                app="Finder",
+                on={f"open:{DOCS}new": "missing", f"open:{DOCS}create": "editor"},
+            ),
+            Page(
+                name="missing",
+                items=["Page Not Found", "Learn more"],
+                url=f"{DOCS}new",
+                on={f"open:{DOCS}new": "missing", f"open:{DOCS}create": "editor"},
+            ),
+            Page(name="editor", items=["Untitled document", "Share"], url=f"{DOCS}create"),
+        ]
+    )
+    # The writer's own proposal is the dead page every time it is asked; only its focus knows better.
+    writer = FakeWriter(url=f"{DOCS}new", reviews=[{"focus": f"Open {DOCS}create in the address bar."}])
+
+    state = drive(
+        world, lost_then_told_the_url, goal="open a new document", monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer
+    )
+
+    assert state.outcome == "done" and world.page.name == "editor"
+    assert world.log == [f"open:{DOCS}new", f"open:{DOCS}create"]
+    assert state.history == [f"opened {DOCS}new", f"opened {DOCS}create"]
+    assert [h.focus for h in state.handoffs] == [f"Open {DOCS}create in the address bar."]

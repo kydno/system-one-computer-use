@@ -6,7 +6,7 @@ import pytest
 from typesafe_computer_use import config
 from typesafe_computer_use.calls import Calls, MeteredWriter
 from typesafe_computer_use.config import custom_writer_endpoint, load_dotenv, writer_base_url
-from typesafe_computer_use.writer import WriterError, compose_url, make_writer, parse_json, provider, valid_url
+from typesafe_computer_use.writer import WriterError, compose_url, make_writer, parse_json, provider, url_named_in, valid_url
 
 
 def test_dotenv_sets_only_missing_keys(tmp_path, monkeypatch):
@@ -156,3 +156,22 @@ def test_the_browser_is_the_setting_then_the_system_default_then_chrome(monkeypa
     assert config.browser("Brave Browser") == "Brave Browser"
     monkeypatch.setenv("CLICKER_BROWSER", "Arc")
     assert config.browser("Brave Browser") == "Arc"
+
+
+def test_url_named_in_reads_the_one_https_url_a_focus_names():
+    assert (
+        url_named_in("Open https://docs.google.com/document/create in the address bar.")
+        == "https://docs.google.com/document/create"
+    )
+    assert url_named_in("Open \u201chttps://example.com/a?b=1\u201d, then wait.") == "https://example.com/a?b=1"
+    assert url_named_in("Go to (https://example.com/x).") == "https://example.com/x"
+    assert url_named_in("Open https://example.com/x and then https://example.com/x again") == "https://example.com/x"
+
+
+def test_url_named_in_gives_nothing_when_the_text_names_none_or_more_than_one_or_an_unsafe_one():
+    assert url_named_in(None) == "" and url_named_in("") == ""
+    assert url_named_in("Click the Address and search bar") == ""
+    assert url_named_in("Compare https://a.example.com/ with https://b.example.com/") == ""
+    assert url_named_in("Open http://example.com/insecure") == ""
+    assert url_named_in("Open javascript:alert(1) or file:///etc/passwd") == ""
+    assert url_named_in("Open https://localhost/") == ""

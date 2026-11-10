@@ -14,7 +14,7 @@ from .decide import OFFSCREEN_PREFIX, Decision, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
-from .writer import Writer, WriterError, compose_text, compose_url
+from .writer import Writer, WriterError, compose_text, compose_url, url_named_in
 
 VERIFY_THRESHOLD = 0.5
 WAIT_SECONDS = 3.0  # what a wait adds to the settle every step already gets; three of them cover a slow page
@@ -292,7 +292,8 @@ def _use_browser(decision: Decision, screen, items, ctx: Context) -> str:
 
     No browser answer means one browser to work in, the configured one. `none` is the page already
     open there, so bringing the browser forward is the whole action. A catalog key is its URL, and
-    `other` is a site outside the catalog, which only the writer can name. The writer reads the
+    `other` is a site outside the catalog, which only the writer can name: the URL its focus names when
+    it names one, else the one it proposes from the goal. The writer reads the
     browser's open tabs too, since the page a goal is about is often one the user already has open
     behind another tab, and a URL it names from them is shown in its own tab, not opened again.
     Opening a URL activates the browser too, so the three cases differ only in the page.
@@ -306,13 +307,19 @@ def _use_browser(decision: Decision, screen, items, ctx: Context) -> str:
     url = SITES.get(site)
     tabs: list[tuple[str, str]] = []
     if url is None:
-        if ctx.writer is None:
+        # A URL the writer's focus names is the page to open: the writer already read this screen and
+        # said where to go, so its guess from the goal alone cannot be allowed to take its place.
+        url = url_named_in(ctx.guidance.focus if ctx.guidance else None)
+        if url:
+            tabs = desktop.browser_tabs(browser)
+        elif ctx.writer is None:
             return "use_browser refused: the site is outside the catalog and no writer is available to propose a URL"
-        tabs = desktop.browser_tabs(browser)
-        try:
-            url = compose_url(ctx.writer, ctx.goal, ctx.history, ctx.guidance, tabs)
-        except WriterError as e:
-            return f"use_browser refused: the writer failed ({e})"
+        else:
+            tabs = desktop.browser_tabs(browser)
+            try:
+                url = compose_url(ctx.writer, ctx.goal, ctx.history, ctx.guidance, tabs)
+            except WriterError as e:
+                return f"use_browser refused: the writer failed ({e})"
     if not url:
         return "use_browser refused: the writer proposed no usable URL for this goal"
     if any(open_url == url for _, open_url in tabs) and desktop.show_tab(browser, url):
