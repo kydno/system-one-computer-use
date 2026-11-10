@@ -54,4 +54,40 @@ Verdict: nothing to change on this evidence, and a change made on it would be a 
 to come from fresh runs of specific goals on the current code. Added `digest --since` so the next look leaves
 out runs from before the last change to the loop.
 
+## 2026-11-10: iteration 3 of batch1, moves beyond clicking and typing (kept behind a gate)
+
+Cluster: not a failure cluster but a gap in what the agent can do. It has no keyboard shortcut, right click,
+double click, text selection or drag (issues #7 to #10), so a copy-and-paste, a context menu, a file moved
+between folders or a reordered tab is out of reach. Built: `press_shortcut` (a catalog of fifteen),
+`right_click_item`, `double_click_item`, `select_item_text` (a triple click), `drag_item`.
+
+Offline numbers (`~typesafe/jev-latest`, silver cases, none of which needs such a move, so a pick of a new kind
+can only count against it):
+
+- Offered on every step, `press_shortcut` alone, 6 repeats against 6 repeats: silver agreement 0.601 (sd 0.014
+  between repeats) to 0.575 (sd 0.010). Not noise: the drop is as large in the cases from after 2026-11-01
+  (0.476 to 0.405 over 21 cases). Of the 14 pairs lost in the first three repeats only 2 went to a shortcut;
+  the rest were the model reshuffling when the kind question grew (`scroll_down` picks 134 to 108, mostly to
+  `click_item` and `press_escape`). The 12 shortcut picks came from two steps of one run; the follow-up
+  question answered `none` each time, at 0.3 to 0.4.
+- Every step was paying for a move almost none of them needed, so the moves are offered only to a run whose goal
+  needs them: once, before the first step, the decision model is asked of the goal alone (a Noul, like the
+  read-only question). A probe: 20 goals written to need a move scored 0.58 to 0.98 (median 0.93), 16 that do
+  not 0.05 to 0.36. Of the 69 distinct goals in the saved runs, 13 score 0.5 or more (threshold `MOVES_NOUL`);
+  by eye these are mostly tab and drawing tasks. $0.002.
+- Gate closed (any other run): `clicker-eval size` reads +0.0% in every part, and all 642 requests of a
+  six-repeat pass are already cached, so the baseline is reproduced exactly for $0.
+- Gate open, all four kinds offered: request bytes +7.0% (kind question +72%, item question +1%), input tokens
+  an ask +3.8%. Silver agreement 0.564 against the baseline's 0.598 on the same three repeats; the only new
+  kind picked was `select_item_text`, 6 of 321. Row: `20261110T220134Z.jsonl`. That is the cost to a run the
+  gate opens for, and about 3.4 points on steps that needed none of the moves.
+
+Not measured, and it cannot be offline: whether the moves work. The saved screens do not react, no saved step needs
+a shortcut or a drag, and the Quartz right-button, click-state and drag paths have never run on hardware. The
+proof is supervised runs, which are the maintainer's to approve one command at a time.
+
+Verdict: kept behind the gate. If the supervised runs show the gate opening on goals that do not need a move, or
+staying shut on ones that do, `MOVES_NOUL` and the question's wording are the two things to move.
+Spent so far in batch1: $0.73 of $4.00, three of three iterations.
+
 Nothing else logged yet.
