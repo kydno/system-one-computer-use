@@ -980,7 +980,7 @@ def test_l33_duplicate_labels_are_told_apart_by_their_row(monkeypatch, tmp_path)
     listing = world.fake.states[0]["screen_items_in_reading_order"]
     chosen = next(it for it in listing if it["text"] == "Buy" and "Coldplay" in it.get("beside", []))
     assert chosen["beside"] == ["Coldplay", "Oct 2"]
-    assert "in the row of 'Coldplay', 'Oct 2'" in world.fake.asked[0]["item"].criteria[str(chosen["i"])]
+    assert world.fake.asked[0]["item"].criteria[str(chosen["i"])] == f"Item {chosen['i']}."  # the row is told once, in the state
     unique = next(it for it in listing if it["text"] == "Coldplay")
     assert "beside" not in unique  # nothing else on screen reads 'Coldplay', so the row says nothing new
 
@@ -1868,7 +1868,7 @@ def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_s
     assert world.log == ["click:Close", "click:Organise"]
     (organise,) = [it for it in world.fake.states[0]["screen_items_in_reading_order"] if it["text"] == "Organise"]
     assert organise["under"] == "'Restore pages?'"
-    assert "under 'Restore pages?'" in world.fake.asked[0]["item"].criteria[str(organise["i"])]
+    assert world.fake.asked[0]["item"].criteria[str(organise["i"])] == f"Item {organise['i']}."  # told once, in the state
     assert state.calls.count["classifier"] == 4  # the goal twice, one decision to open the menu, one to stop
 
 
@@ -2384,7 +2384,10 @@ def test_l78_a_file_is_dragged_onto_a_folder_with_the_target_asked_in_its_own_re
     assert state.outcome == "done" and world.page.name == "filed" and world.log == ["drag:Invoice.pdf>Taxes"]
     assert state.history == ["dragged 'Invoice.pdf' onto 'Taxes'"]
     (follow_up,) = [q for q in world.fake.asked if set(q) == {"target"}]
-    assert next(iter(follow_up["target"].criteria.values())).startswith("'Taxes'")  # the dragged file is not a choice
+    listing = world.fake.states[0]["screen_items_in_reading_order"]
+    dragged = next(it["i"] for it in listing if it["text"] == "Invoice.pdf")
+    assert str(dragged) not in follow_up["target"].criteria  # the dragged file is not a choice
+    assert len(follow_up["target"].criteria) == len(listing) - 1
     assert len(world.fake.states) == 2  # the drag and the stop; the target is not a decision of its own
 
 

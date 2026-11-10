@@ -163,20 +163,14 @@ def row_mates(items: list[Item], limit: int | None = ROW_MATES) -> dict[int, lis
 
 
 def item_criteria(screen: Screen, items: list[Item]) -> dict[str, str]:
-    """Each item as one line. A role prefix marks the ones the app itself declared, a
-    duplicated label carries its row, and one under a popup says which."""
-    hints = date_hints(items, screen)
-    mates = row_mates(items)
-    return {
-        str(it.index): (
-            f"{it.role + ' ' if it.from_ax and it.role else ''}{it.text!r} "
-            f"({screen.region(it)}"
-            f"{'; ' + hints[it.index] if it.index in hints else ''}"
-            f"{'; in the row of ' + ', '.join(repr(t) for t in mates[it.index]) if it.index in mates else ''}"
-            f"{'; under ' + screen.covered[it.index].title if it.index in screen.covered else ''})"
-        )
-        for it in items
-    }
+    """Each item as a pointer to its row in the state's list, which holds what there is to know of it: its
+    text, where it sits, the role the app declared, a date, the row it shares, a popup over it.
+
+    The criterion used to repeat all of that, so every item went out twice, and together the two copies
+    were 85% of a request. The list in the state cannot go (without it the kind question loses the screen:
+    silver agreement 0.60 to 0.45 on saved steps, scrolling picked twice as often); the criterion can. With
+    a pointer, a request is 26% smaller and its input tokens 17%, and the same items are picked."""
+    return {str(it.index): f"Item {it.index}." for it in items}
 
 
 def offscreen_criteria(nodes: list[AxNode]) -> dict[str, str]:

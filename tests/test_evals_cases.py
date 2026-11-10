@@ -60,7 +60,7 @@ def test_the_request_counts_dates_from_the_steps_own_clock_not_the_machines(monk
     (dated,) = [i for i in state["screen_items_in_reading_order"] if "Oct 13" in i["text"]]
     assert dated["when"] == "dated 2030-10-13 (in 12 days)"
     assert state["now"]["today"] == "2030-10-01"
-    assert "in 12 days" in questions["item"].criteria[str(dated["i"])]
+    assert questions["item"].criteria[str(dated["i"])] == f"Item {dated['i']}."  # the date is told once, in the state
 
 
 def test_a_case_the_current_code_builds_differently_says_which_part(monkeypatch, tmp_path):
