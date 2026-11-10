@@ -252,28 +252,18 @@ class Decision:
         return self.kind.choice in STOP_KINDS
 
 
-def decide(
-    client: DecisionClient,
-    goal: str,
+def build_questions(
     screen: Screen,
     items: list[Item],
-    history: list[str],
     browser: str,
     email: str | None,
-    tried: list[str] | None = None,
     guidance: Guidance | None = None,
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
-) -> Decision:
-    """One request for the step's decision, and a second, small one for the app only when the first
-    chose open_app: the list of installed apps is long, and most steps open none.
-
-    Luna refuses the item question now and then, the one whose labels are text read off the screen,
-    and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
-    IAM roles, a run never got as far as opening the browser the goal named. Most moves need no
-    item, so the step is asked again without it, and only a click is left without a decision. It
-    refuses the off-screen question the same way, and only pressing one of those controls needs it.
-    """
+) -> dict[str, Choice]:
+    """The questions one step asks, apart from the app question, which a request of its own follows
+    only once open_app is chosen. `decide` sends them, and the eval kit builds them the same way to
+    measure a request without sending it."""
     questions = {
         "kind": Choice(
             instructions=(
@@ -325,6 +315,32 @@ def decide(
             ),
             criteria=offscreen_criteria(screen.offscreen),
         )
+    return questions
+
+
+def decide(
+    client: DecisionClient,
+    goal: str,
+    screen: Screen,
+    items: list[Item],
+    history: list[str],
+    browser: str,
+    email: str | None,
+    tried: list[str] | None = None,
+    guidance: Guidance | None = None,
+    browsers: Sequence[str] = (),
+    apps: Sequence[str] = (),
+) -> Decision:
+    """One request for the step's decision, and a second, small one for the app only when the first
+    chose open_app: the list of installed apps is long, and most steps open none.
+
+    Luna refuses the item question now and then, the one whose labels are text read off the screen,
+    and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
+    IAM roles, a run never got as far as opening the browser the goal named. Most moves need no
+    item, so the step is asked again without it, and only a click is left without a decision. It
+    refuses the off-screen question the same way, and only pressing one of those controls needs it.
+    """
+    questions = build_questions(screen, items, browser, email, guidance, browsers, apps)
     state = base_state(goal, screen, items, history, tried, guidance)
     refused = None
     try:

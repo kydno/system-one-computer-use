@@ -32,6 +32,15 @@ typesafe_computer_use/
     a11y.py       the Ubuntu accessibility tree OSWorld returns, in AX terms
     ocr.py        the OCR backends a run names
     results.py    each task's score, steps, time, and tokens, for `scripts/osworld results`
+  evals/          `clicker-eval`: the offline eval kit (see [improvement loop](improvement-loop.md))
+    store.py      where the kit keeps things: `runs/`, `.private/evals/`, `benchmarks/replay/`
+    cases.py      freeze each saved step into a case, rebuild its request with the current code, score it
+    decisions.py  ask the decision model about the cases again, with a reply cache and the budget in front
+    budget.py     the batch ledger: a dollar cap and an iteration count, checked before every request
+    digest.py     where real runs failed, in a table small enough to read
+    size.py       request bytes by part, against a baseline
+    report.py     the aggregate rows a pass leaves in `benchmarks/replay/`
+    cli.py        `clicker-eval`
   browser/        the browser backend (see [browser backend](browser-backend.md)), opt-in and independent of macos.py
     cdp.py        the only module that touches the browser        (platform adapter)
     perceive.py   DOM collection: ordered elements, click points, occlusion
