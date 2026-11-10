@@ -99,3 +99,34 @@ proof is supervised runs, which are the maintainer's to approve one command at a
 Verdict: kept behind the gate. If the supervised runs show the gate opening on goals that do not need a move, or
 staying shut on ones that do, `MOVES_NOUL` and the question's wording are the two things to move.
 Spent so far in batch1: $0.73 of $4.00, three of three iterations.
+
+## 2026-11-10: iteration 1 of batch2, the first supervised runs of the moves (kept)
+
+Four runs on this Mac, each approved by the maintainer (a copy-and-paste in a plain-text document, a right
+click, a triple click, a double click; the drag run was not approved and has not been run). Run folders
+`20261110-171443`, `-171546`, `-171626`, `-171713`.
+
+What worked on hardware, for the first time: the goal gate opened on all four (0.82 to 0.98), a Command chord
+reached the app (the text shows selected in the next capture), the Quartz right button opened a context menu
+(items 18 to 29) and Escape closed it (judged achieved), a triple click selected one line and a double click one
+word, so the click-state counts are honored.
+
+What did not:
+
+- Select all was pressed six times over two runs (steps 1 to 4, then 6 and 7 after a hand-off). The shortcut
+  follow-up was sent the goal and the app and nothing else, so its answer could not change after the first press,
+  and a selection leaves no trace on the screen the request reads. The repeat rule stopped each run; nothing was
+  lost, but the goal was never reached. Triple and double click repeated the same way, three or four times.
+- Both clicks land on the centre of the item picked, and the item was one block of three lines, so the line and
+  the word that were selected were the ones at its centre, not the ones the goal named. Aiming inside an item (a
+  word, a line) is a gap the moves leave open.
+
+Change: the shortcut follow-up now carries `previous_actions` and the focused field, and a field for a run offered
+the moves reports the text selected in it (`selected_text`, from the field's accessibility value; absent when
+nothing is selected, so a run without the moves sends the request it always did). The shortcut question tells the
+model that a goal can take several in turn and to choose the next one still to press. Offline, on the saved steps
+with the selection put back as the screenshot shows it, 3 repeats each: after one or two select-alls the follow-up
+picks `copy` 6 of 6 at 1.00, where the live runs picked `select_all` 6 of 6. For the clicks the pick stays the same,
+which is right on this evidence: the selected text was not the line or word the goal named, so the model could not
+tell the goal was met; that needs the aiming above. Not measured: a copy-and-paste carried through on hardware with
+this change, which needs another supervised run.

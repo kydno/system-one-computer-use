@@ -331,7 +331,7 @@ def request(case: Case, moves: bool | None = None) -> tuple[dict, dict[str, Choi
     r = rebuild(case)
     moves = r.moves if moves is None else moves
     with frozen_clock(case.state):
-        state = decide.base_state(r.goal, r.screen, r.items, r.history, r.tried, r.guidance)
+        state = decide.base_state(r.goal, r.screen, r.items, r.history, r.tried, r.guidance, moves)
         questions = decide.build_questions(r.screen, r.items, r.browser, r.email, r.guidance, r.browsers, r.apps, moves)
     return state, questions
 
