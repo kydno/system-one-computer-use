@@ -51,6 +51,7 @@ DRAG = (
     "for a slider or a map, and not when a menu or a button on screen does the same."
 )
 SPARED = {"item": ("click_item", *POINTING, "drag_item"), "offscreen": ("press_offscreen",)}
+GATED_KINDS = frozenset({"press_shortcut", *POINTING, "drag_item"})  # offered only to a run whose goal needs the moves
 PRESS_OFFSCREEN = (
     "Activate a labelled control that the app exposes but that is not currently visible on screen "
     "(chosen in the offscreen question). Use when the needed control is known to exist but is "

@@ -51,7 +51,13 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("size", help="request bytes by part under the current code; no model call")
     s.add_argument("--save-baseline", action="store_true", help="keep this measurement as the baseline later ones compare with")
     s.add_argument("--runs", nargs="*", help="only these run folders")
-    s.add_argument("--moves", action="store_true", help="as a run whose goal needs the moves beyond clicking and typing is asked")
+    s.add_argument(
+        "--moves",
+        action="store_const",
+        const=True,
+        default=None,
+        help="offer the moves beyond clicking and typing in every case; by default each case is asked as its own run was",
+    )
 
     s = sub.add_parser("decisions", help="ask the decision model about the labelled cases and score its picks")
     s.add_argument("--only", choices=("gold", "silver", "labeled", "all"), default="labeled")
@@ -60,7 +66,13 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--runs", nargs="*", help="only these run folders")
     s.add_argument("--plan", action="store_true", help="count the requests a pass would send, and how many are already cached")
     s.add_argument("--misses", type=int, default=10, help="how many wrong picks to list")
-    s.add_argument("--moves", action="store_true", help="as a run whose goal needs the moves beyond clicking and typing is asked")
+    s.add_argument(
+        "--moves",
+        action="store_const",
+        const=True,
+        default=None,
+        help="offer the moves beyond clicking and typing in every case; by default each case is asked as its own run was",
+    )
 
     s = sub.add_parser("batch", help="open, inspect, advance, or close the budget the user approved")
     s.add_argument("action", choices=("open", "status", "iteration", "close"))
@@ -257,7 +269,7 @@ def do_decisions(home: Home, args: argparse.Namespace) -> None:
         )
     summary = decisions.summarize(rows, args.repeats, float(settings["floor"]))
     summary.update(
-        requests_sent=used["sent"], requests_cached=used["cached"], cost_spent=round(used["spent"], 6), moves=args.moves
+        requests_sent=used["sent"], requests_cached=used["cached"], cost_spent=round(used["spent"], 6), moves=args.moves is True
     )
     summary["stopped_early"] = stopped
     models = {"configured": settings["decisions"], "named_by_replies": used["models"]}

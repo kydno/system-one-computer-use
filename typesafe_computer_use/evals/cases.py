@@ -245,6 +245,7 @@ class Rebuilt:
     browsers: tuple[str, ...]
     email: str | None
     apps: tuple[str, ...]
+    moves: bool = False  # the run was offered the moves beyond clicking and typing
 
 
 def _popup(under: str) -> Popup:
@@ -256,9 +257,9 @@ def _popup(under: str) -> Popup:
     return Popup(str(name) if isinstance(name, str) else "", 0.0, 0.0, 0.0, 0.0)
 
 
-def _environment(case: Case) -> tuple[str, tuple[str, ...], tuple[str, ...], str | None]:
-    """The browser, the other browsers, the apps, and the email the step was asked about, read back
-    from the criteria it sent."""
+def _environment(case: Case) -> tuple[str, tuple[str, ...], tuple[str, ...], str | None, bool]:
+    """The browser, the other browsers, the apps, the email, and whether the run was offered the moves
+    beyond clicking and typing, read back from the criteria the step sent."""
     kind = case.criteria["kind"]
     which = case.criteria.get("browser")
     if which:
@@ -271,7 +272,7 @@ def _environment(case: Case) -> tuple[str, tuple[str, ...], tuple[str, ...], str
     apps = tuple(name for name in (case.app_criteria or {}) if name != "none") or (
         ("(unknown app)",) if "open_app" in kind else ()
     )
-    return browser, browsers, apps, PLACEHOLDER_EMAIL if "type_email" in kind else None
+    return browser, browsers, apps, PLACEHOLDER_EMAIL if "type_email" in kind else None, bool(decide.GATED_KINDS & set(kind))
 
 
 def rebuild(case: Case) -> Rebuilt:
@@ -294,7 +295,7 @@ def rebuild(case: Case) -> Rebuilt:
         focus=state.get("current_focus"),
         exchanges=tuple(Exchange(e["asked"], e["replied"]) for e in state.get("user_said", [])),
     )
-    browser, browsers, apps, email = _environment(case)
+    browser, browsers, apps, email, moves = _environment(case)
     return Rebuilt(
         screen=screen,
         items=items,
@@ -306,6 +307,7 @@ def rebuild(case: Case) -> Rebuilt:
         browsers=browsers,
         email=email,
         apps=apps,
+        moves=moves,
     )
 
 
@@ -322,10 +324,12 @@ def frozen_clock(state: dict) -> Iterator[None]:
         yield
 
 
-def request(case: Case, moves: bool = False) -> tuple[dict, dict[str, Choice]]:
-    """The state and questions the current code would send for this case. `moves` is a run whose goal
-    needs the moves beyond clicking and typing; the saved runs were asked for none, so it is off."""
+def request(case: Case, moves: bool | None = None) -> tuple[dict, dict[str, Choice]]:
+    """The state and questions the current code would send for this case. The run is offered the moves
+    beyond clicking and typing when its own step was (the kinds are in the criteria it sent); `moves`
+    forces that on or off for the case."""
     r = rebuild(case)
+    moves = r.moves if moves is None else moves
     with frozen_clock(case.state):
         state = decide.base_state(r.goal, r.screen, r.items, r.history, r.tried, r.guidance)
         questions = decide.build_questions(r.screen, r.items, r.browser, r.email, r.guidance, r.browsers, r.apps, moves)
