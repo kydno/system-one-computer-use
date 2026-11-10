@@ -433,7 +433,8 @@ class FakeTypeSafe:
 
     A policy returns (kind, target) and this maps the target to whatever key the question wants:
     the item's index for click_item and for a scroll aimed at an item, the off-screen control's key
-    for press_offscreen, the site key for use_browser. So a scenario never writes an index, and renumbering the page cannot break it.
+    for press_offscreen, the site key for use_browser, the catalog name for press_shortcut (answered in
+    its own request, with the step's second confidence). So a scenario never writes an index, and renumbering the page cannot break it.
 
     Every decision state lands in `states`, so a test can assert what the model was shown. The
     `verify_typed` Noul that `actions._type_text` makes is a different question about a different
@@ -448,6 +449,7 @@ class FakeTypeSafe:
         self.read_only = read_only  # how the goal question at the start of a run is answered
         self.states: list[dict] = []
         self.asked: list[dict] = []  # the questions each decision was asked, so a test can read the criteria offered
+        self.pending: tuple = (None, DEFAULT_CONFIDENCE)  # the last step's target and second confidence, for a follow-up question
 
     def __enter__(self) -> FakeTypeSafe:
         return self
@@ -460,11 +462,17 @@ class FakeTypeSafe:
             return SimpleNamespace(answers={"read_only": SimpleNamespace(noul=1.0 if self.read_only else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
+        if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
+            self.asked.append(questions)
+            target, confidence = self.pending
+            return SimpleNamespace(answers={"shortcut": _answer(target, confidence)})
         self.states.append(state)
         self.asked.append(questions)
         step = self.policy(state, questions)
         kind, target = step[0], step[1]
         confidence = step[2] if len(step) > 2 else DEFAULT_CONFIDENCE
+        asked_again = confidence[1] if isinstance(confidence, tuple) else confidence
+        self.pending = (target, asked_again)
         return SimpleNamespace(answers=self._answers(state, questions, kind, target, confidence))
 
     def _answers(self, state: dict, questions: dict, kind: str, target, confidence: float | tuple[float, float]) -> dict:

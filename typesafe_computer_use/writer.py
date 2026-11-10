@@ -17,6 +17,7 @@ from PIL import Image
 
 from .calls import reviewing
 from .config import (
+    SHORTCUTS,
     answer_model,
     answer_reasoning,
     answer_sort,
@@ -398,6 +399,7 @@ class Answer:
     scroll_over: str = ""  # the text of the item to scroll over; empty for the window's center
 
 
+SHORTCUT_NAMES = ", ".join(name.replace("_", " ") for name in SHORTCUTS)
 ANSWER_SYSTEM = (
     "An agent is driving a user's computer toward the user's goal. A small classifier picks each "
     "action, and it has stopped and handed the run to you. You receive the goal, the actions taken, "
@@ -439,8 +441,9 @@ ANSWER_SYSTEM = (
     "click an on-screen item, type into a focused field, replacing what the field holds, press "
     "Return or Escape, scroll, go back, open a website by its "
     "https address, and open an app installed on this computer by its name; it cannot read, "
-    "compare, or remember, so a focus is one move, not a plan. It has no other key or shortcut and "
-    "cannot right-click, double-click, or select text, so a focus that needs one of those is "
+    "compare, or remember, so a focus is one move, not a plan. It can press one keyboard shortcut "
+    f"from a short list ({SHORTCUT_NAMES}) and no other key. It cannot right-click, double-click, "
+    "or select text, so a focus that needs one of those is "
     "refused: name the button, menu, or link on screen that does the same. Never conclude from "
     "memory that a setting, feature, or page does not exist: apps move and rename them between "
     "versions. While the screen still shows a place to look, such as a search result, a row "

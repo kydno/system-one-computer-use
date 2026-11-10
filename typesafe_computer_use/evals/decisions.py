@@ -117,6 +117,7 @@ def pick_of(decision: decide.Decision, case: Case) -> dict:
         "kind": kind,
         **({"item": decision.item.choice, "item_text": text} if clicked else {}),
         **({"site": decision.site.choice} if kind == "use_browser" else {}),
+        **({"shortcut": decision.shortcut.choice} if decision.shortcut is not None else {}),
     }
 
 

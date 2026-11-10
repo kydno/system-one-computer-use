@@ -2166,3 +2166,53 @@ def test_l66_the_writer_scrolls_the_page_itself_when_the_classifier_would_not(mo
     assert world.wheel[0] is not None and world.wheel[0] == world.wheel[1]
     assert state.history == ["scrolled to the top over 'Cloud Messaging' (1 scroll)", "clicked 'Google Analytics'"]
     assert [(h.focus, h.said) for h in state.handoffs] == [("scroll top over '“Cloud Messaging”'", "The export is further up.")]
+
+
+def copy_world() -> World:
+    return World(
+        [
+            Page(
+                name="doc",
+                items=["Quarterly figures", "Total 4,210"],
+                app="Notes",
+                on={"key:cmd+a": "all", "key:cmd+c": "doc"},
+            ),
+            Page(name="all", items=["Quarterly figures", "Total 4,210", "(selected)"], app="Notes", on={"key:cmd+c": "copied"}),
+            Page(name="copied", items=["Quarterly figures", "Total 4,210", "(selected)", "Copied"], app="Notes"),
+        ]
+    )
+
+
+def test_l68_a_shortcut_is_asked_for_in_its_own_request_and_pressed_with_its_modifiers(monkeypatch, tmp_path):
+    world = copy_world()
+    policy = scripted(("press_shortcut", "select_all"), ("press_shortcut", "copy"))
+
+    state = drive(world, policy, goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.outcome == "done" and world.page.name == "copied"
+    assert world.log == ["key:cmd+a", "key:cmd+c"]
+    assert state.history == ["pressed the select all shortcut", "pressed the copy shortcut"]
+    assert "press_shortcut" in world.fake.asked[0]["kind"].criteria
+    follow_ups = [q for q in world.fake.asked if set(q) == {"shortcut"}]
+    assert len(follow_ups) == 2 and list(follow_ups[0]["shortcut"].criteria)[-1] == "none"
+    assert len(world.fake.states) == 3  # the two decisions and the final done; the follow-ups are not decisions
+
+
+def test_l69_a_shortcut_the_classifier_is_unsure_of_stops_the_run_before_any_key_is_pressed(monkeypatch, tmp_path):
+    world = copy_world()
+    policy = scripted(("press_shortcut", "copy", (0.9, 0.2)))
+
+    state = drive(world, policy, goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.outcome == "low confidence" and world.log == []
+
+
+def test_l70_a_shortcut_with_nothing_in_the_list_to_press_is_refused_and_not_asked_for_again(monkeypatch, tmp_path):
+    world = copy_world()
+    policy = scripted(*[("press_shortcut", "none")] * 6)
+
+    state = drive(world, policy, goal="quit the app", monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert world.log == []
+    assert state.history[0] == "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    assert state.outcome == "stalled"  # the same refusal on the same screen is a repeat, as any refused action is

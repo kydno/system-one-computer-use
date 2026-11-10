@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -53,6 +54,41 @@ SITES: dict[str, str] = {
     "notion": "https://www.notion.so/",
     "slack": "https://app.slack.com/",
     "typesafe_console": "https://console.typesafe.ai/",
+}
+
+
+@dataclass(frozen=True)
+class Shortcut:
+    """A keyboard shortcut the agent may press, written for a Mac: Command is the key that the other
+    platforms' adapters turn into Control, and Control the key that stays Control (see `Desktop.press`)."""
+
+    key: str
+    says: str  # what it does, the line the classifier reads
+    command: bool = False
+    shift: bool = False
+    option: bool = False
+    control: bool = False
+
+
+# The shortcuts the classifier can pick by name, the kind of move that has no control on screen or
+# whose control a shortcut reaches in one step. Kept short: each one can split the vote with a button
+# that does the same. Nothing that quits, force-quits, logs out, or types text.
+SHORTCUTS: dict[str, Shortcut] = {
+    "copy": Shortcut("c", "Copy the current selection to the clipboard.", command=True),
+    "cut": Shortcut("x", "Cut the current selection to the clipboard.", command=True),
+    "paste": Shortcut("v", "Paste the clipboard where the focus is.", command=True),
+    "select_all": Shortcut("a", "Select everything in the focused field, document, or page.", command=True),
+    "undo": Shortcut("z", "Undo the last change in the app.", command=True),
+    "redo": Shortcut("z", "Redo the change that was just undone.", command=True, shift=True),
+    "save": Shortcut("s", "Save the document that is open.", command=True),
+    "find": Shortcut("f", "Open the find bar to search the page or document for text.", command=True),
+    "new_tab": Shortcut("t", "Open a new, empty tab in the browser.", command=True),
+    "close_tab": Shortcut("w", "Close the current tab or window.", command=True),
+    "next_tab": Shortcut("tab", "Switch to the next tab in the browser.", control=True),
+    "previous_tab": Shortcut("tab", "Switch to the previous tab in the browser.", control=True, shift=True),
+    "reload": Shortcut("r", "Reload the page.", command=True),
+    "zoom_in": Shortcut("=", "Make the page or document larger.", command=True),
+    "zoom_out": Shortcut("-", "Make the page or document smaller.", command=True),
 }
 
 

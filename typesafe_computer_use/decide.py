@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .config import SITES
+from .config import SHORTCUTS, SITES
 from .dates import date_hints, now_context
 from .decisions import Choice, ChoiceAnswer, DecisionClient, DecisionError, Noul, Refusal
 from .models import AxNode, Field, Guidance, Item, Screen
@@ -55,6 +55,13 @@ def fixed_actions(browser: str, email: str | None, browsers: Sequence[str] = (),
             "goal and the field's label. Only valid when a text field is focused and needs content. "
             "Where the browser hides its focus, the focused field is the item the last click landed "
             "on: valid when that item is a text box."
+        ),
+        "press_shortcut": (
+            "Press a keyboard shortcut from a short list: the shortcut question that follows says which. "
+            "Use it for a command the goal needs that no control on screen does, or that the keys do "
+            "in one step: copy or paste a selection, select all, undo, find on the page, switch tabs. "
+            "Not for Return, Escape, or going back, which have actions of their own, and not when a "
+            "button on screen does the same thing."
         ),
         "press_enter": "Press Return to submit the focused form or field.",
         "press_escape": "Press Escape to dismiss a dialog, menu, or popup.",
@@ -171,6 +178,14 @@ def app_criteria(apps: Sequence[str], frontmost: str) -> dict[str, str]:
     }
 
 
+def shortcut_criteria() -> dict[str, str]:
+    """Which shortcut press_shortcut presses. The catalog, plus one key for none of them."""
+    return {
+        **{name: shortcut.says for name, shortcut in SHORTCUTS.items()},
+        "none": "None of these shortcuts is what the goal needs.",
+    }
+
+
 def base_state(
     goal: str,
     screen: Screen,
@@ -217,6 +232,7 @@ class Decision:
     offscreen: ChoiceAnswer | None = None
     browser: ChoiceAnswer | None = None  # asked only when more than one browser is installed
     app: ChoiceAnswer | None = None  # asked only once open_app is chosen
+    shortcut: ChoiceAnswer | None = None  # asked only once press_shortcut is chosen
     refused: str | None = None  # a question the model refused, so the step was decided without it
 
     @property
@@ -226,6 +242,10 @@ class Decision:
     @property
     def pressing_offscreen(self) -> bool:
         return self.kind.choice == "press_offscreen" and self.offscreen is not None
+
+    @property
+    def pressing_shortcut(self) -> bool:
+        return self.kind.choice == "press_shortcut" and self.shortcut is not None
 
     @property
     def chosen(self) -> str:
@@ -245,6 +265,8 @@ class Decision:
             return min(self.kind.confidence, self.item.confidence)
         if self.pressing_offscreen:
             return min(self.kind.confidence, self.offscreen.confidence)
+        if self.pressing_shortcut:
+            return min(self.kind.confidence, self.shortcut.confidence)  # a wrong shortcut is not always undone
         return self.kind.confidence
 
     @property
@@ -332,7 +354,8 @@ def decide(
     apps: Sequence[str] = (),
 ) -> Decision:
     """One request for the step's decision, and a second, small one for the app only when the first
-    chose open_app: the list of installed apps is long, and most steps open none.
+    chose open_app: the list of installed apps is long, and most steps open none. A shortcut is asked
+    the same way, once press_shortcut is chosen.
 
     Luna refuses the item question now and then, the one whose labels are text read off the screen,
     and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
@@ -359,6 +382,12 @@ def decide(
             state={"goal": goal, **(guidance.state() if guidance else {}), "frontmost_app": screen.app},
             questions={"app": app_question(apps, screen.app)},
         ).answers["app"]
+    shortcut = None
+    if answers["kind"].choice == "press_shortcut":
+        shortcut = client.system_one(
+            state={"goal": goal, **(guidance.state() if guidance else {}), "frontmost_app": screen.app},
+            questions={"shortcut": shortcut_question()},
+        ).answers["shortcut"]
     return Decision(
         kind=answers["kind"],
         item=answers.get("item"),
@@ -366,6 +395,7 @@ def decide(
         offscreen=answers.get("offscreen"),
         browser=answers.get("browser"),
         app=app,
+        shortcut=shortcut,
         refused=refused,
     )
 
@@ -377,6 +407,16 @@ def app_question(apps: Sequence[str], frontmost: str) -> Choice:
             "one it names; when it names none, the one made for the task it describes."
         ),
         criteria=app_criteria(apps, frontmost),
+    )
+
+
+def shortcut_question() -> Choice:
+    return Choice(
+        instructions=(
+            "A keyboard shortcut is to be pressed this step. Which one does the goal, or the current "
+            "focus, need? The one that does what it describes; 'none' when no shortcut in the list does."
+        ),
+        criteria=shortcut_criteria(),
     )
 
 

@@ -500,6 +500,11 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         f"site={decision.site.choice}"
         + (f" browser={decision.browser.choice!r} ({decision.browser.confidence:.2f})" if decision.browser is not None else "")
         + (f" open={decision.app.choice!r} ({decision.app.confidence:.2f})" if decision.app is not None else "")
+        + (
+            f" shortcut={decision.shortcut.choice!r} ({decision.shortcut.confidence:.2f})"
+            if decision.shortcut is not None
+            else ""
+        )
         + (f" refused={decision.refused}, asked again without it" if decision.refused else "")
     )
     for key, p in top(decision.kind, 4):
@@ -681,6 +686,8 @@ def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
         return f"click {item.text!r}" if item is not None else decision.chosen
     if decision.pressing_offscreen:
         return f"press {screen.offscreen[int(decision.offscreen.choice)].label!r}"
+    if decision.pressing_shortcut:
+        return f"press the {decision.shortcut.choice.replace('_', ' ')} shortcut"
     return decision.kind.choice.replace("_", " ")
 
 
@@ -752,6 +759,11 @@ def answers(
             else {}
         ),
         **({"app_to_open": decision.app.choice, "app_to_open_probabilities": decision.app.probabilities} if decision.app else {}),
+        **(
+            {"shortcut": decision.shortcut.choice, "shortcut_probabilities": decision.shortcut.probabilities}
+            if decision.shortcut
+            else {}
+        ),
         "offscreen": decision.offscreen.choice if decision.offscreen else None,
         "offscreen_probabilities": decision.offscreen.probabilities if decision.offscreen else None,
         "offscreen_controls": offscreen_records(screen.offscreen),

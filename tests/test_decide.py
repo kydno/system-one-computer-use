@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from conftest import item
 
-from typesafe_computer_use.config import SITES
+from typesafe_computer_use.config import SHORTCUTS, SITES
 from typesafe_computer_use.decide import (
     Decision,
     app_criteria,
@@ -14,6 +14,7 @@ from typesafe_computer_use.decide import (
     kind_criteria,
     offscreen_criteria,
     row_mates,
+    shortcut_criteria,
     site_criteria,
     verify_typed,
 )
@@ -257,6 +258,41 @@ def test_the_app_is_asked_in_a_second_request_only_once_open_app_is_chosen(scree
     state, questions = requests[1]
     assert state == {"goal": goal, "current_focus": "open Photos", "frontmost_app": "Google Chrome"}
     assert list(questions["app"].criteria) == ["Photos", "Notes", "none"]
+
+
+def test_press_shortcut_is_always_offered_and_the_catalog_ends_with_none():
+    assert "press_shortcut" in kind_criteria("Google Chrome", None)
+    assert list(shortcut_criteria()) == [*SHORTCUTS, "none"]
+    assert all(text.endswith(".") for text in shortcut_criteria().values())
+
+
+def test_the_shortcut_is_asked_in_a_second_request_only_once_press_shortcut_is_chosen(screen):
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "shortcut" in questions:
+            return SimpleNamespace(answers={"shortcut": answer("copy", 0.7)})
+        return SimpleNamespace(answers={"kind": answer(kind, 0.95), "site": answer("none", 1.0)})
+
+    client = SimpleNamespace(system_one=system_one)
+    kind = "click_item"
+    assert decide(client, "g", screen, [], [], "Google Chrome", None).shortcut is None
+    assert len(requests) == 1 and "shortcut" not in requests[0][1]
+
+    requests.clear()
+    kind = "press_shortcut"
+    d = decide(client, "copy the figure", screen, [], [], "Google Chrome", None, guidance=Guidance(focus="copy it"))
+    assert d.pressing_shortcut and d.chosen == "press_shortcut" and d.shortcut.choice == "copy"
+    assert d.confidence == 0.7  # a wrong shortcut is not always undone, so a split on it counts
+    state, questions = requests[1]
+    assert state == {"goal": "copy the figure", "current_focus": "copy it", "frontmost_app": "Google Chrome"}
+    assert list(questions["shortcut"].criteria) == [*SHORTCUTS, "none"]
+
+
+def test_a_shortcut_answer_for_any_other_kind_is_ignored():
+    d = Decision(kind=answer("click_item", 0.9), item=answer("3", 0.8), site=answer("none", 1.0), shortcut=answer("copy", 0.1))
+    assert not d.pressing_shortcut and d.chosen == "3" and d.confidence == 0.8
 
 
 def test_browser_criteria_say_which_is_in_front_and_which_is_the_default():

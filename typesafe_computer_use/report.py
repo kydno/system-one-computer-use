@@ -16,6 +16,7 @@ from .decide import (
     item_criteria,
     kind_criteria,
     offscreen_criteria,
+    shortcut_criteria,
     site_criteria,
 )
 from .events import Events
@@ -110,6 +111,13 @@ def render_payload(
             json.dumps(app_criteria(apps, screen.app), indent=2),
             "",
         ]
+    parts += [
+        RULE,
+        "QUESTION shortcut  (Choice criteria; a request of its own, sent only once kind is press_shortcut)",
+        RULE,
+        json.dumps(shortcut_criteria(), indent=2),
+        "",
+    ]
     if screen.offscreen:
         parts += [
             RULE,

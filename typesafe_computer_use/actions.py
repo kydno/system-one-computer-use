@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 
 from PIL import Image, ImageChops
 
-from .config import SITES
+from .config import SHORTCUTS, SITES
 from .decide import OFFSCREEN_PREFIX, Decision, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
@@ -338,6 +338,21 @@ def _open_app(decision: Decision, screen, items, ctx: Context) -> str:
     return f"open_app failed: {app} did not come to the front with a window"
 
 
+def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
+    """Press the shortcut the shortcut answer named, from the catalog and nowhere else.
+
+    `none` means no shortcut in the list is the one the goal needs, and the history line says so, so
+    the next step does not ask again. What the keys did shows on the next capture, which is the only
+    witness: a copy changes nothing on screen, and the idle count bounds a run that only copies.
+    """
+    name = decision.shortcut.choice if decision.shortcut is not None else "none"
+    shortcut = SHORTCUTS.get(name)
+    if shortcut is None:
+        return "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    desktop.press(shortcut.key, command=shortcut.command, shift=shortcut.shift, option=shortcut.option, control=shortcut.control)
+    return f"pressed the {name.replace('_', ' ')} shortcut"
+
+
 def _type_email(decision, screen: Screen, items, ctx: Context) -> str:
     if not (screen.field and screen.field.is_text):
         return "type_email refused: no text field is focused"
@@ -525,6 +540,7 @@ def wait(screen: Screen, items: list[Item], ctx: Context) -> str:
 _HANDLERS = {
     "use_browser": _use_browser,
     "open_app": _open_app,
+    "press_shortcut": _press_shortcut,
     "type_email": _type_email,
     "type_text": _type_text,
     "press_enter": _key("return", "pressed Return"),
