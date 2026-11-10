@@ -61,6 +61,24 @@ events, AppleScript, screen capture, `open`, and accessibility actions. The poin
 mid-screen. Do not weaken or bypass that guard. A test that needs one of those calls patches it
 itself. When you add a new call that reaches the machine, add it to the guard in the same change.
 
+## Improvement loop
+
+`clicker-eval` measures a change offline from the run folders in `runs/`; see
+[docs/improvement-loop.md](docs/improvement-loop.md). It reads files and never drives this machine, so it
+needs no approval, and neither do its offline commands (`harvest`, `check`, `digest`, `show`, `label`,
+`labels`, `size`, `report`, `batch status`).
+
+- The commands that ask a model (`decisions`) run only inside a batch the user approved, with the
+  dollar cap and iteration count they named. Open one with `clicker-eval batch open` only after the
+  user has said those numbers. The command refuses past the cap; do not raise it, reopen it, or route
+  around it.
+- `.private/evals/` holds cases frozen from real runs and stays on this machine. The repository is
+  public: no goal, screen or item text, or screenshot from `runs/` goes into a commit, pull request,
+  issue, or log. A pull request may name a run by its folder and step, as CONTRIBUTING asks; the rows
+  in `benchmarks/replay/` hold numbers and model ids only.
+- A real run on this Mac, to check a change in the real app, keeps the rule above: the user approves
+  each command.
+
 ## Everything else
 
 See `CONTRIBUTING.md` for how the project works and what a pull request needs.

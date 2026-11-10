@@ -46,4 +46,6 @@ checks `infra/gcp` (format, validation, and `terraform test` against mock provid
 there also needs a run by hand, since nothing in CI opens it.
 
 Add a replay-based note to the PR when a change alters what the model sees:
-which run folder, which step, what the decision was before and after.
+which run folder, which step, what the decision was before and after. `clicker-eval size` gives the
+change in request bytes by part, and `clicker-eval decisions` scores the model's picks on saved steps;
+see [improvement loop](docs/improvement-loop.md). Neither touches the machine.
