@@ -17,7 +17,7 @@ AppleScript   ─► frontmost app and pid, active tab URL
 clock         ─► local date and time
 dates.py      ─► "dated 2026-10-13 (in 27 days)" on any block containing a date,
                  "near a line dated ..." on its neighbours, none from the menu bar's clock
-layout        ─► "in the row of ..." on any label that appears more than once
+layout        ─► "beside" (the row's other labels) on any label that appears more than once
 runner.py     ─► the actions already tried on this same screen, each of which led back here
                      │
                      ▼
@@ -40,15 +40,20 @@ runner.py     ─► the actions already tried on this same screen, each of whic
 Items carry where they came from: `ocr` for a text block, `ax` for a control the app
 declared, `ax+ocr` when both found the same thing. A symbol OCR reads off a button or
 link, `←` on Back or `☆` on the bookmark star, is that control's icon, and the control
-stands for it: two options for one click would only split the vote. An `ax` item reads as
-`button 'Share' (top-right)` in the criteria, so the classifier can tell a real control
-from a line of text. A label that appears more than once carries its row as well:
-`'Buy' (middle-right; in the row of 'Coldplay', 'Oct 2')`, since the label says nothing
-about which and the layout does. Text read inside the focused one-line field is not an
+stands for it: two options for one click would only split the vote. An `ax` item has a
+`role` (`button`, `menu`) in its row of the state's `screen_items_in_reading_order`, so the
+classifier can tell a real control from a line of text. A label that appears more than once
+carries its row as well, `"beside": ["Coldplay", "Oct 2"]`, since the label says nothing
+about which and the layout does. Each item goes out once, in that list: the item question's
+criteria are only pointers to its rows (`"14": "Item 14."`). They used to repeat every row, and the
+two copies were 85% of a request; the copy in the criteria was 8.5 KB of 23.2 KB, and with a pointer in
+its place a request is 26% smaller and its input tokens 17%, the same items picked (silver agreement
+0.598 both ways on `~typesafe/jev-latest`). Dropping the state's list instead saves more and loses the kind
+question the screen: agreement 0.446, `scroll_down` picked twice as often. Text read inside the focused one-line field is not an
 item: it is the field's value or placeholder, the state carries the value, and the field
 is an item of its own when the app declares it. A text area keeps its lines.
 
-A control under a popup says which: `button 'Organise' (top-right; under 'Restore pages?')`.
+A control under a popup says which, in its row: `"under": "'Restore pages?'"`.
 Chrome draws its bubbles, menus, and dialogs as windows of their own, in front of the page, so a
 click on the page there lands on the popup. Picking such an item closes the popup first, with its
 own close button, or with Escape when it has none, and never with its other buttons ('Restore'
@@ -185,6 +190,13 @@ where it picked the shortcut. A probe of Jev scored 20 goals that need one 0.58 
 when the run was offered them, so it does not send the classifier to a move it lacks. The run records
 `moves` in `run.json` and the log. `clicker-eval size --moves` and `decisions --moves` measure the
 requests of a run that was offered them; without the flag they are the requests of any other run.
+
+A selection leaves nothing on the screen the request reads, so a run offered the moves is told what is
+selected: the focused field's `selected_text` (the accessibility value of the selection, up to 200
+characters, left out when nothing is selected, and never sent to a run that was not offered the moves).
+The `shortcut` follow-up gets the previous actions and the focused field as well as the goal, and is told
+that a goal can take several shortcuts in turn: without them it answered "select all" six times in a
+row on a goal of select all, copy, paste, since the goal was all it saw.
 
 After any action the screen gets time to settle before the next step reads it. It is looked at
 every 0.25 s: once it differs from the capture the action was decided on and then holds still for
