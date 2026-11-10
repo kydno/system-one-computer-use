@@ -466,6 +466,10 @@ class FakeTypeSafe:
             return SimpleNamespace(answers={"moves": SimpleNamespace(noul=1.0 if self.moves else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
+        if set(questions) == {"target"}:  # the follow-up to a drag_item: where it is dropped, named by text
+            self.asked.append(questions)
+            target, confidence = self.pending[0][1], self.pending[1]
+            return SimpleNamespace(answers={"target": _answer(self._item_key(state, target), confidence)})
         if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
             self.asked.append(questions)
             target, confidence = self.pending
@@ -484,8 +488,11 @@ class FakeTypeSafe:
         confidence, item_confidence = confidence if isinstance(confidence, tuple) else (confidence, confidence)
         answers = {"kind": _answer(kind, confidence), "site": _answer(target if kind == "use_browser" else "none", confidence)}
         if "item" in questions:
-            aimed = kind in ("click_item", *POINTING) or (kind in ("scroll_down", "scroll_up") and target is not None)
-            answers["item"] = _answer(self._item_key(state, target) if aimed else "0", item_confidence)
+            aimed = kind in ("click_item", *POINTING, "drag_item") or (
+                kind in ("scroll_down", "scroll_up") and target is not None
+            )
+            what = target[0] if kind == "drag_item" else target
+            answers["item"] = _answer(self._item_key(state, what) if aimed else "0", item_confidence)
         if "offscreen" in questions:
             key = self._offscreen_key(state, target) if kind == "press_offscreen" else "0"
             answers["offscreen"] = _answer(key, confidence)

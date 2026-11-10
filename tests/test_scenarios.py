@@ -2359,3 +2359,39 @@ def test_l74_a_double_click_that_opens_nothing_is_a_stall_like_any_click_that_do
     state = drive(world, policy, goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
 
     assert state.outcome == "stalled" and state.history == ["double-clicked 'Notes.txt'"] * 3
+
+
+def tabs_world() -> World:
+    return World(
+        [
+            Page(
+                name="folders",
+                items=["Invoice.pdf", "Taxes", "Photos"],
+                app="Finder",
+                on={"drag:Invoice.pdf>Taxes": "filed", "drag:Invoice.pdf>Photos": "folders"},
+            ),
+            Page(name="filed", items=["Taxes (1 item)", "Photos"], app="Finder"),
+        ]
+    )
+
+
+def test_l78_a_file_is_dragged_onto_a_folder_with_the_target_asked_in_its_own_request(monkeypatch, tmp_path):
+    world = tabs_world()
+    policy = scripted(("drag_item", ("Invoice.pdf", "Taxes")))
+
+    state = drive(world, policy, goal="file the invoice under Taxes", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "done" and world.page.name == "filed" and world.log == ["drag:Invoice.pdf>Taxes"]
+    assert state.history == ["dragged 'Invoice.pdf' onto 'Taxes'"]
+    (follow_up,) = [q for q in world.fake.asked if set(q) == {"target"}]
+    assert next(iter(follow_up["target"].criteria.values())).startswith("'Taxes'")  # the dragged file is not a choice
+    assert len(world.fake.states) == 2  # the drag and the stop; the target is not a decision of its own
+
+
+def test_l79_a_drag_the_classifier_is_unsure_of_the_target_for_moves_nothing(monkeypatch, tmp_path):
+    world = tabs_world()
+    policy = scripted(("drag_item", ("Invoice.pdf", "Taxes"), (0.9, 0.2)))
+
+    state = drive(world, policy, goal="file the invoice under Taxes", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "low confidence" and world.log == []

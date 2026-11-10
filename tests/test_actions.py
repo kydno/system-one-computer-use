@@ -246,6 +246,51 @@ def test_a_pointer_that_never_got_there_clicks_nothing_and_says_so(screen, monke
     assert said == "right_click_item refused: 'Organise' was not clicked, the cursor went to (0, 0)"
 
 
+@pytest.fixture
+def dragged(monkeypatch):
+    log: list[tuple] = []
+    monkeypatch.setattr(desktop, "drag", lambda start, end: log.append((start, end)))
+    return log
+
+
+def dragging(source: int | None, target: int | None) -> SimpleNamespace:
+    pick = lambda n: SimpleNamespace(choice=str(n)) if n is not None else None  # noqa: E731
+    return SimpleNamespace(chosen="drag_item", item=pick(source), target=pick(target))
+
+
+FOLDER = Item(4, "Taxes", 1.0, 3000.0, 600.0, 3200.0, 660.0)  # capture pixels, scale 2
+
+
+def test_one_item_is_dragged_onto_another_by_their_centers(screen, dragged):
+    said = actions.perform(dragging(3, 4), screen, [ORGANISE, FOLDER], context())
+    assert said == "dragged 'Organise' onto 'Taxes'" and dragged == [((1888.0, 142.0), (1550.0, 315.0))]
+
+
+@pytest.mark.parametrize("source, target", [(3, 3), (3, 9), (None, 4), (3, None)])
+def test_a_drag_needs_two_different_items_on_screen(screen, dragged, source, target):
+    assert actions.perform(dragging(source, target), screen, [ORGANISE, FOLDER], context()) == (
+        "drag_item refused: it needs two different items on screen"
+    )
+    assert dragged == []
+
+
+def test_nothing_is_dragged_from_under_or_onto_a_popup(screen, dragged):
+    for covered in ({3: BUBBLE}, {4: BUBBLE}):
+        said = actions.perform(dragging(3, 4), replace(screen, covered=covered), [ORGANISE, FOLDER], context())
+        assert said == "drag_item refused: 'Organise' or 'Taxes' is under a popup"
+    assert dragged == []
+
+
+def test_a_drag_the_pointer_could_not_start_says_so(screen, monkeypatch):
+    def miss(start, end):
+        raise Missed("the cursor went to (0, 0)")
+
+    monkeypatch.setattr(desktop, "drag", miss)
+    assert actions.perform(dragging(3, 4), screen, [ORGANISE, FOLDER], context()) == (
+        "drag_item refused: 'Organise' was not dragged, the cursor went to (0, 0)"
+    )
+
+
 def context(writer=None) -> actions.Context:
     return actions.Context(
         goal="find the next upcoming bruno mars concert",

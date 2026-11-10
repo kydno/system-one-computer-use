@@ -118,6 +118,26 @@ def _point(button: str, count: int, said: str):
     return handler
 
 
+def _drag(decision: Decision, screen: Screen, items: list[Item], ctx: Context) -> str:
+    """Drag the item the item answer named onto the one the target answer named.
+
+    Nothing is dragged out from under a popup or onto one: the popup would take the press or the
+    drop, and a drag moves things, so the step refuses and the next one can close the popup first.
+    """
+    by_index = {str(it.index): it for it in items}
+    source = by_index.get(decision.item.choice) if decision.item is not None else None
+    target = by_index.get(decision.target.choice) if decision.target is not None else None
+    if source is None or target is None or source is target:
+        return "drag_item refused: it needs two different items on screen"
+    if {source.index, target.index} & set(screen.covered):
+        return f"drag_item refused: {source.text!r} or {target.text!r} is under a popup"
+    try:
+        desktop.drag(screen.to_points(source), screen.to_points(target))
+    except Missed as e:
+        return f"drag_item refused: {source.text!r} was not dragged, {e}"
+    return f"dragged {source.text!r} onto {target.text!r}"
+
+
 def press_showed(screen: Screen) -> bool:
     """Whether the screen changed after an accessibility press on a web page.
 
@@ -563,6 +583,7 @@ def wait(screen: Screen, items: list[Item], ctx: Context) -> str:
 
 
 _HANDLERS = {
+    "drag_item": _drag,
     "right_click_item": _point("right", 1, "right-clicked"),
     "double_click_item": _point("left", 2, "double-clicked"),
     "select_item_text": _point("left", 3, "selected the text of"),

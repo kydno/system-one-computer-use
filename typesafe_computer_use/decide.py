@@ -22,7 +22,7 @@ SHORTCUT_KIND = (
 # What the goal question lists, so that it opens for the moves the run is offered and no others.
 MOVES_ASKED = (
     "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs), the context menu of "
-    "an item (a right click), a double click, or selecting the text of an item"
+    "an item (a right click), a double click, selecting the text of an item, or dragging one item onto another"
 )
 OFFSCREEN_PREFIX = "offscreen:"
 # The questions a step is asked again without when the model refuses one, each with the one kind
@@ -45,7 +45,12 @@ POINTING = {
         "copied or replaced and no control on screen selects it."
     ),
 }
-SPARED = {"item": ("click_item", *POINTING), "offscreen": ("press_offscreen",)}
+DRAG = (
+    "Drag one on-screen item (chosen in the item question) onto another (chosen in the target question that "
+    "follows): to move a file into a folder, reorder a list or the tabs, or drop something on a place. Not "
+    "for a slider or a map, and not when a menu or a button on screen does the same."
+)
+SPARED = {"item": ("click_item", *POINTING, "drag_item"), "offscreen": ("press_offscreen",)}
 PRESS_OFFSCREEN = (
     "Activate a labelled control that the app exposes but that is not currently visible on screen "
     "(chosen in the offscreen question). Use when the needed control is known to exist but is "
@@ -124,7 +129,10 @@ def kind_criteria(
     apps: Sequence[str] = (),
     moves: bool = False,
 ) -> dict[str, str]:
-    clicks = {"click_item": "Click one of the on-screen text items (chosen in the item question).", **(POINTING if moves else {})}
+    clicks = {
+        "click_item": "Click one of the on-screen text items (chosen in the item question).",
+        **({**POINTING, "drag_item": DRAG} if moves else {}),
+    }
     if offscreen:
         clicks["press_offscreen"] = PRESS_OFFSCREEN
     return {**clicks, **fixed_actions(browser, email, browsers, apps, moves)}
@@ -267,6 +275,7 @@ class Decision:
     browser: ChoiceAnswer | None = None  # asked only when more than one browser is installed
     app: ChoiceAnswer | None = None  # asked only once open_app is chosen
     shortcut: ChoiceAnswer | None = None  # asked only once press_shortcut is chosen
+    target: ChoiceAnswer | None = None  # asked only once drag_item is chosen: the item the dragged one is dropped on
     refused: str | None = None  # a question the model refused, so the step was decided without it
 
     @property
@@ -277,6 +286,10 @@ class Decision:
     def pointing(self) -> bool:
         """A click of another kind than a single one, on the item the item question picked."""
         return self.kind.choice in POINTING and self.item is not None
+
+    @property
+    def dragging(self) -> bool:
+        return self.kind.choice == "drag_item" and self.item is not None and self.target is not None
 
     @property
     def pressing_offscreen(self) -> bool:
@@ -304,6 +317,8 @@ class Decision:
             return min(self.kind.confidence, self.item.confidence)
         if self.pressing_offscreen:
             return min(self.kind.confidence, self.offscreen.confidence)
+        if self.dragging:
+            return min(self.kind.confidence, self.item.confidence, self.target.confidence)  # a drag moves things
         if self.pressing_shortcut:
             return min(self.kind.confidence, self.shortcut.confidence)  # a wrong shortcut is not always undone
         return self.kind.confidence
@@ -398,7 +413,7 @@ def decide(
 ) -> Decision:
     """One request for the step's decision, and a second, small one for the app only when the first
     chose open_app: the list of installed apps is long, and most steps open none. A shortcut is asked
-    the same way, once press_shortcut is chosen.
+    the same way, once press_shortcut is chosen, and so is the item a drag drops on.
 
     Luna refuses the item question now and then, the one whose labels are text read off the screen,
     and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
@@ -431,6 +446,19 @@ def decide(
             state={"goal": goal, **(guidance.state() if guidance else {}), "frontmost_app": screen.app},
             questions={"shortcut": shortcut_question()},
         ).answers["shortcut"]
+    target = None
+    if answers["kind"].choice == "drag_item" and answers.get("item") is not None:
+        source = answers["item"].choice
+        target = client.system_one(
+            state={
+                "goal": goal,
+                **(guidance.state() if guidance else {}),
+                "frontmost_app": screen.app,
+                "dragging_item": source,
+                "screen_items_in_reading_order": state["screen_items_in_reading_order"],
+            },
+            questions={"target": target_question(screen, items, source)},
+        ).answers["target"]
     return Decision(
         kind=answers["kind"],
         item=answers.get("item"),
@@ -439,6 +467,7 @@ def decide(
         browser=answers.get("browser"),
         app=app,
         shortcut=shortcut,
+        target=target,
         refused=refused,
     )
 
@@ -450,6 +479,17 @@ def app_question(apps: Sequence[str], frontmost: str) -> Choice:
             "one it names; when it names none, the one made for the task it describes."
         ),
         criteria=app_criteria(apps, frontmost),
+    )
+
+
+def target_question(screen: Screen, items: list[Item], source: str) -> Choice:
+    """Which item the dragged one is dropped on: every item but the dragged one, in the item question's words."""
+    return Choice(
+        instructions=(
+            "An on-screen item is dragged this step (the state's dragging_item). Which item is it dropped "
+            "on? The one the goal, or the current focus, moves it to: a folder, a slot in a list, a tab."
+        ),
+        criteria={key: line for key, line in item_criteria(screen, items).items() if key != source},
     )
 
 
