@@ -512,6 +512,41 @@ def test_keys_map_onto_pyautogui():
     ]
 
 
+def test_a_right_click_a_double_click_and_a_drag_map_onto_pyautogui():
+    desktop = over(obs())
+    desktop.click_at((10.4, 20.6), button="right")
+    desktop.click_at((10.4, 20.6), count=2)
+    desktop.click_at((10.4, 20.6), count=3)
+    desktop.drag((10.0, 20.0), (300.4, 220.6))
+    (code,) = desktop.actions
+    assert code.splitlines() == [
+        "pyautogui.click(10, 21, button='right')",
+        "pyautogui.click(10, 21, clicks=2)",
+        "pyautogui.click(10, 21, clicks=3)",
+        "pyautogui.moveTo(10, 20)",
+        "pyautogui.dragTo(300, 221, duration=0.5, button='left')",
+    ]
+
+
+def test_modifiers_become_the_hotkey_the_vm_reads():
+    desktop = over(obs())
+    desktop.press("c", command=True)
+    desktop.press("z", command=True, shift=True)
+    desktop.press("tab", control=True)
+    desktop.press("tab", control=True, shift=True)
+    desktop.press("t", option=True)
+    desktop.press("return", shift=True)
+    (code,) = desktop.actions
+    assert code.splitlines() == [
+        "pyautogui.hotkey('ctrl', 'c')",
+        "pyautogui.hotkey('ctrl', 'shift', 'z')",
+        "pyautogui.hotkey('ctrl', 'tab')",
+        "pyautogui.hotkey('ctrl', 'shift', 'tab')",
+        "pyautogui.hotkey('alt', 't')",
+        "pyautogui.hotkey('shift', 'enter')",
+    ]
+
+
 PREFIX = "import pyautogui; import time; import platform; "  # how OSWorld's prefix starts every action
 
 
