@@ -58,7 +58,10 @@ A pass that runs out of budget stops, keeps what it has, and says so.
 
 ## One iteration
 
-1. `clicker-eval digest`: take the largest cluster of failures.
+1. `clicker-eval digest --since <the run folder name at the last change to the loop>`: take the largest cluster
+   of failures. A failure from before a fix is no failure of the code as it is now, and a stop on a goal too
+   vague for any classifier ("yes", "check it urself") is the loop handing off as designed; look for a
+   cluster with a screen a person could act on.
 2. `clicker-eval show <run>/<step>` for up to ten of its failure points, and `label` each with the
    right action.
 3. Reproduce it: the gold cases that fail, plus a scenario in `tests/test_scenarios.py` when it is

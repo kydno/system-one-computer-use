@@ -31,6 +31,7 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("digest", help="where real runs failed, and the stops worth labelling")
     s.add_argument("--candidates", type=int, default=25)
+    s.add_argument("--since", help="only runs from this folder name on, such as 20261030-16: the last change to the loop")
 
     s = sub.add_parser("show", help="one case, compactly, to decide what it should have done")
     s.add_argument("id", help="<run folder>/<step>, as the digest prints it")
@@ -105,7 +106,7 @@ def do_check(home: Home, args: argparse.Namespace) -> None:
 
 
 def do_digest(home: Home, args: argparse.Namespace) -> None:
-    print(digest.render(digest.digest(home), args.candidates))
+    print(digest.render(digest.digest(home, args.since), args.candidates))
 
 
 def find_case(home: Home, case_id: str) -> cases.Case:
