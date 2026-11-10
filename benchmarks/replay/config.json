@@ -1,5 +1,5 @@
 {
-  "decisions": "inception/mercury-decide",
+  "decisions": "~typesafe/jev-latest",
   "writer": "inception/mercury-3",
   "answer": "openrouter/free",
   "floor": 0.4
