@@ -142,6 +142,7 @@ class World:
         self.mouse: list[tuple[float, float]] = []
         self.wheel: list[tuple[float, float] | None] = []  # where each scroll parked the pointer, None for the window's center
         self.fake: FakeTypeSafe | None = None  # the classifier `drive` built, for fake.states
+        self.apart: list[bool] = []  # whether each step's perception was told to keep a text area's lines apart
         self.asked: list[str] = []  # the questions the writer put to the user
         self.loading = {p.name: p.loads_in for p in pages}
         self.ticks = 0  # captures taken so far, so a page can show something that moves on its own
@@ -399,7 +400,9 @@ class World:
     def install(self, monkeypatch) -> None:
         """Replace the two outer seams: the screen the loop reads and the machine it drives."""
         monkeypatch.setattr(runner, "capture", lambda *a, **k: self.capture())
-        monkeypatch.setattr(runner, "perceive", lambda screen, *a, **k: self.perceive(screen))
+        monkeypatch.setattr(
+            runner, "perceive", lambda screen, *a, **k: (self.apart.append(k.get("apart", False)), self.perceive(screen))[1]
+        )
         monkeypatch.setattr(desktop, "check_abort", lambda: None)
         monkeypatch.setattr(desktop, "sleep_watching", lambda seconds: None)
         monkeypatch.setattr(desktop, "click_at", self.click_at)

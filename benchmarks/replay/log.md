@@ -160,3 +160,12 @@ current code (agreement 0.598, 63 cases mostly right, 32 confident and wrong, 10
 - Issue 13 (cap long item text) now acts on one copy, so its gain is about half of what it was; issue 14 is unchanged.
 
 Spent in batch2 so far: $0.33 of $1.00, two of two iterations.
+
+## 2026-11-10: the lines of a text area kept apart for a run with the moves (not measured offline)
+
+Follow-up to the supervised runs. The clicks land on the middle of an item, and `merge_blocks` had read the three
+close lines of the document in front as one block, so "the line X" could not be aimed at. A run offered the moves
+now keeps the lines of the focused text area or editor one item each (`perceive(..., apart=True)`); every other run
+reads the blocks it always did, so no request of a run without the moves changes. The saved cases hold their items
+as they were, so no offline pass can show the effect: it needs a supervised run of a goal that names a line. A word
+inside a line is still not an item. Unit tests cover the split and that the flag follows the gate.

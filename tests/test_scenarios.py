@@ -2199,6 +2199,7 @@ def test_l68_a_shortcut_is_asked_for_in_its_own_request_and_pressed_with_its_mod
     follow_ups = [q for q in world.fake.asked if set(q) == {"shortcut"}]
     assert len(follow_ups) == 2 and list(follow_ups[0]["shortcut"].criteria)[-1] == "none"
     assert len(world.fake.states) == 3  # the two decisions and the final done; the follow-ups are not decisions
+    assert world.apart and all(world.apart)  # a run offered the moves reads the lines of a text area one by one
 
 
 def test_l69_a_shortcut_the_classifier_is_unsure_of_stops_the_run_before_any_key_is_pressed(monkeypatch, tmp_path):
@@ -2240,6 +2241,7 @@ def test_l75_the_gate_is_asked_of_the_goal_alone_and_a_closed_gate_leaves_the_re
     )
 
     assert all("press_shortcut" not in criteria["kind"].criteria for criteria in world.fake.asked)  # no step was offered it
+    assert world.apart and not any(world.apart)  # and its perception is the one every run had
     assert all(set(q) != {"shortcut"} for q in world.fake.asked)
     (answer_request,) = asked_for_the_answer(writer)[:1]
     assert (

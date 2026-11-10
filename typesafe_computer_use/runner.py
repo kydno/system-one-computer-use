@@ -471,7 +471,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         )
     screen = with_clicked_field(screen, state.clicked, browser_names(ctx.browser, ctx.browsers))
     state.clicked = None
-    items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache)
+    items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache, apart=state.moves)
     state.view = (screen, items)
     if not screen_moved(state, screen, items, log):
         return False

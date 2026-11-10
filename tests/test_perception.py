@@ -277,6 +277,41 @@ def test_text_inside_a_stand_in_field_stays_an_item(screen):
     assert not in_field(block, replace(screen, field=replace(box, clicked=True)))
 
 
+# ----- the lines of a document, for a run that points at them --------------------------------------
+
+BODY = Field(role="AXTextArea", label="", placeholder="", value="a\nb\nc\n", x=146, y=103, w=656, h=384)
+
+
+def document_items(monkeypatch, field: Field | None, apart: bool) -> list[str]:
+    """Three close lines in a text area read as one block; a button outside it. Scale 2, so points halve."""
+    lines = [
+        ("Quarterly figures", 1.0, (310.0, 208.0, 480.0, 230.0)),
+        ("Total 4,210", 1.0, (310.0, 234.0, 420.0, 256.0)),
+        ("Prepared by the scratch test", 1.0, (310.0, 260.0, 682.0, 282.0)),
+        ("Save", 1.0, (900.0, 20.0, 960.0, 42.0)),
+    ]
+    monkeypatch.setattr(perception, "ocr_lines", lambda screen, cache: (lines, 100.0, 1))
+    monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: ([], [], False))
+    screen = Screen(image=busy_page((1000, 600)), scale=2.0, app="TextEdit", field=field, url=None, pid=7)
+    return [it.text for it in perception.perceive(screen, 255, "goal", None, None, apart)]
+
+
+def test_the_lines_of_a_text_area_are_one_block_unless_the_run_points_at_text(monkeypatch):
+    block = "Quarterly figures Total 4,210 Prepared by the scratch test"
+    assert sorted(document_items(monkeypatch, BODY, apart=False)) == sorted([block, "Save"])
+    assert sorted(document_items(monkeypatch, BODY, apart=True)) == sorted(
+        ["Quarterly figures", "Total 4,210", "Prepared by the scratch test", "Save"]
+    )
+
+
+def test_keeping_lines_apart_touches_only_the_body_of_the_focused_text_area(monkeypatch):
+    block = "Quarterly figures Total 4,210 Prepared by the scratch test"
+    assert block in document_items(monkeypatch, None, apart=True)  # nothing focused: the lines merge as ever
+    assert block in document_items(monkeypatch, replace(BODY, x=1000, y=1000), apart=True)  # the text is outside the field
+    one_line = replace(BODY, role="AXTextField")
+    assert document_items(monkeypatch, one_line, apart=True) == ["Save"]  # a one-line field's text is its value, still no item
+
+
 # ------------------------------------------------------------- where the keyboard goes, in the step line
 def keys_line(keys) -> str:
     return keys_desc(Screen(image=Image.new("RGB", (10, 10)), scale=1.0, app="Brave Browser", field=None, url=None, keys=keys))

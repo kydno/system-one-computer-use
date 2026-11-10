@@ -194,6 +194,12 @@ requests of a run that was offered them; without the flag they are the requests 
 A selection leaves nothing on the screen the request reads, so a run offered the moves is told what is
 selected: the focused field's `selected_text` (the accessibility value of the selection, up to 200
 characters, left out when nothing is selected, and never sent to a run that was not offered the moves).
+Only the Mac adapter reads it so far; Windows and the OSWorld VM leave it empty, so there a selection is
+still invisible to the request.
+The clicks land on the middle of an item, and OCR reads close lines of a document as one block, so
+"the second line" was out of reach: a run offered the moves keeps the lines of the focused text area apart
+(`perceive(..., apart=True)`), one item each, and every other run reads the blocks it always did. A word
+inside a line is still not an item.
 The `shortcut` follow-up gets the previous actions and the focused field as well as the goal, and is told
 that a goal can take several shortcuts in turn: without them it answered "select all" six times in a
 row on a goal of select all, copy, paste, since the goal was all it saw.
