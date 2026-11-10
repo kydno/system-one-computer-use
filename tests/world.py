@@ -24,6 +24,7 @@ from PIL import Image
 
 from typesafe_computer_use import actions, runner
 from typesafe_computer_use.actions import Context
+from typesafe_computer_use.decide import POINTING
 from typesafe_computer_use.decisions import Endpoint, Noul
 from typesafe_computer_use.events import Events
 from typesafe_computer_use.models import AxNode, Field, Item, Popup, Screen
@@ -483,7 +484,7 @@ class FakeTypeSafe:
         confidence, item_confidence = confidence if isinstance(confidence, tuple) else (confidence, confidence)
         answers = {"kind": _answer(kind, confidence), "site": _answer(target if kind == "use_browser" else "none", confidence)}
         if "item" in questions:
-            aimed = kind == "click_item" or (kind in ("scroll_down", "scroll_up") and target is not None)
+            aimed = kind in ("click_item", *POINTING) or (kind in ("scroll_down", "scroll_up") and target is not None)
             answers["item"] = _answer(self._item_key(state, target) if aimed else "0", item_confidence)
         if "offscreen" in questions:
             key = self._offscreen_key(state, target) if kind == "press_offscreen" else "0"

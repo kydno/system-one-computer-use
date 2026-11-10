@@ -186,6 +186,66 @@ def test_an_item_pressed_through_accessibility_leaves_the_popup_alone(screen, ca
     assert calls == [] and keys_and_pauses == []
 
 
+@pytest.fixture
+def pointer(monkeypatch):
+    """Every pointer click the desktop was asked for, with its button and how many times."""
+    log: list[tuple] = []
+    monkeypatch.setattr(desktop, "click_at", lambda point, button="left", count=1: log.append((point, button, count)))
+    return log
+
+
+def pointing(kind: str, index: int | None) -> SimpleNamespace:
+    item = SimpleNamespace(choice=str(index)) if index is not None else None
+    return SimpleNamespace(chosen=kind, kind=SimpleNamespace(choice=kind), item=item)
+
+
+@pytest.mark.parametrize(
+    "kind, said, button, count",
+    [
+        ("right_click_item", "right-clicked 'Organise'", "right", 1),
+        ("double_click_item", "double-clicked 'Organise'", "left", 2),
+        ("select_item_text", "selected the text of 'Organise'", "left", 3),
+    ],
+)
+def test_the_other_clicks_are_pointer_clicks_even_on_a_control_the_tree_could_press(screen, pointer, kind, said, button, count):
+    live = replace(screen, ax_refs={3: object()})  # a press would be a single left click, so none is made
+    assert actions.perform(pointing(kind, 3), live, [ORGANISE], context()) == said
+    assert pointer == [((1888.0, 142.0), button, count)]
+
+
+def test_the_other_clicks_name_the_row_when_a_label_repeats(screen, pointer):
+    buy = [
+        Item(0, "Buy", 1.0, 3000.0, 100.0, 3100.0, 130.0),
+        Item(1, "Mars", 1.0, 100.0, 100.0, 300.0, 130.0),
+        Item(2, "Buy", 1.0, 3000.0, 500.0, 3100.0, 530.0),
+    ]
+    assert actions.perform(pointing("double_click_item", 0), screen, buy, context()) == "double-clicked 'Buy' beside 'Mars'"
+
+
+def test_the_other_clicks_close_the_popup_in_front_of_the_item_first(screen, pointer, keys_and_pauses):
+    live = replace(screen, covered={3: BUBBLE})
+    said = actions.perform(pointing("right_click_item", 3), live, [ORGANISE], context())
+    assert said.startswith("closed ") and said.endswith(" then right-clicked 'Organise'")
+    assert pointer[-1][1:] == ("right", 1)
+
+
+@pytest.mark.parametrize("index", [None, 9])
+def test_the_other_clicks_refuse_when_no_item_on_screen_was_chosen(screen, pointer, index):
+    assert actions.perform(pointing("select_item_text", index), screen, [ORGANISE], context()) == (
+        "select_item_text refused: no item on screen was chosen"
+    )
+    assert pointer == []
+
+
+def test_a_pointer_that_never_got_there_clicks_nothing_and_says_so(screen, monkeypatch):
+    def miss(point, button="left", count=1):
+        raise Missed("the cursor went to (0, 0)")
+
+    monkeypatch.setattr(desktop, "click_at", miss)
+    said = actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context())
+    assert said == "right_click_item refused: 'Organise' was not clicked, the cursor went to (0, 0)"
+
+
 def context(writer=None) -> actions.Context:
     return actions.Context(
         goal="find the next upcoming bruno mars concert",

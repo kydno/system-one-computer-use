@@ -2287,3 +2287,75 @@ def test_l77_a_gate_the_model_would_not_answer_is_a_closed_gate(monkeypatch, tmp
 
     assert state.moves is False and state.outcome == "done"
     assert "moves: unknown (no answer), so none are offered" in (tmp_path / "run" / "run.log").read_text()
+
+
+def files_world() -> World:
+    return World(
+        [
+            Page(
+                name="folder",
+                items=["Projects", "Notes.txt", "Photo.png"],
+                app="Finder",
+                on={
+                    "rightclick:Notes.txt": "menu",
+                    "doubleclick:Notes.txt": "opened",
+                    "tripleclick:Notes.txt": "selected",
+                    "click:Notes.txt": "folder",
+                },
+            ),
+            Page(
+                name="menu",
+                items=["Projects", "Notes.txt", "Open", "Copy", "Move to Trash"],
+                app="Finder",
+                on={"click:Copy": "copied"},
+            ),
+            Page(name="opened", items=["Notes.txt", "Hello, world"], app="TextEdit"),
+            Page(
+                name="selected", items=["Projects", "Notes.txt (selected)", "Photo.png"], app="Finder", on={"key:cmd+c": "copied"}
+            ),
+            Page(name="copied", items=["Projects", "Notes.txt", "Photo.png", "Copied"], app="Finder"),
+        ]
+    )
+
+
+def test_l71_a_right_click_opens_the_menu_and_the_next_step_picks_from_it(monkeypatch, tmp_path):
+    world = files_world()
+    policy = scripted(("right_click_item", "Notes.txt"), ("click_item", "Copy"))
+
+    state = drive(world, policy, goal="copy Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "done" and world.page.name == "copied"
+    assert world.log == ["rightclick:Notes.txt", "click:Copy"]
+    assert {"right_click_item", "double_click_item", "select_item_text"} <= set(world.fake.asked[0]["kind"].criteria)
+    assert state.history == ["right-clicked 'Notes.txt'", "clicked 'Copy'"]
+    assert [it["text"] for it in world.fake.states[1]["screen_items_in_reading_order"]][2:] == ["Open", "Copy", "Move to Trash"]
+
+
+def test_l72_a_double_click_opens_the_file(monkeypatch, tmp_path):
+    world = files_world()
+    state = drive(
+        world, scripted(("double_click_item", "Notes.txt")), goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path
+    )
+
+    assert state.outcome == "done" and world.page.name == "opened" and world.log == ["doubleclick:Notes.txt"]
+    assert state.history == ["double-clicked 'Notes.txt'"]
+
+
+def test_l73_a_triple_click_selects_the_text_and_the_copy_shortcut_takes_it(monkeypatch, tmp_path):
+    world = files_world()
+    policy = scripted(("select_item_text", "Notes.txt"), ("press_shortcut", "copy"))
+
+    state = drive(world, policy, goal="copy the name of Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "done" and world.page.name == "copied"
+    assert world.log == ["tripleclick:Notes.txt", "key:cmd+c"]
+    assert state.history == ["selected the text of 'Notes.txt'", "pressed the copy shortcut"]
+
+
+def test_l74_a_double_click_that_opens_nothing_is_a_stall_like_any_click_that_does_nothing(monkeypatch, tmp_path):
+    world = World([Page(name="folder", items=["Projects", "Notes.txt", "Photo.png"], app="Finder")])
+    policy = scripted(*[("double_click_item", "Notes.txt")] * 8)
+
+    state = drive(world, policy, goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "stalled" and state.history == ["double-clicked 'Notes.txt'"] * 3

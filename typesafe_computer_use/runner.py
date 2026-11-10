@@ -517,7 +517,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         state.outcome = "no decision"
         return False
     by_index = {str(it.index): it for it in items}
-    annotate(screen, items, decision.chosen, prefix.with_suffix(".png"))
+    annotate(screen, items, decision.item.choice if decision.pointing else decision.chosen, prefix.with_suffix(".png"))
 
     field_desc = (
         f" field={'clicked' if screen.field.clicked else screen.field.role}:{screen.field.label!r}" if screen.field else ""
@@ -712,6 +712,13 @@ def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
     if decision.clicking:
         item = next((it for it in items if str(it.index) == decision.item.choice), None)
         return f"click {item.text!r}" if item is not None else decision.chosen
+    if decision.pointing:
+        item = next((it for it in items if str(it.index) == decision.item.choice), None)
+        return (
+            f"{decision.kind.choice.removesuffix('_item').replace('_', '-')} {item.text!r}"
+            if item is not None
+            else decision.chosen
+        )
     if decision.pressing_offscreen:
         return f"press {screen.offscreen[int(decision.offscreen.choice)].label!r}"
     if decision.pressing_shortcut:
