@@ -59,13 +59,13 @@ def cache_key(body: dict, repeat: int) -> str:
     return hashlib.sha256(json.dumps([body, repeat], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def plan(selected: Selected, model: str, cache: Path, repeats: int) -> dict:
+def plan(selected: Selected, model: str, cache: Path, repeats: int, moves: bool = False) -> dict:
     """How many requests a pass would send and how many of those the cache already holds. Counts the
     first request of each decision; a refused question or an app question would add a few more."""
     cached = 0
     for repeat in range(repeats):
         for case, _, _ in selected:
-            state, questions = request(case)
+            state, questions = request(case, moves)
             body = {"model": model, "state": state, "questions": {n: q.wire() for n, q in questions.items() if not is_settled(q)}}
             cached += (cache / f"{cache_key(body, repeat)}.json").is_file()
     asks = len(selected) * repeats
@@ -128,7 +128,7 @@ def matches(expect: dict, pick: dict | None) -> bool:
     return all(pick.get(key) == expect[key] for key in ("item", "site") if key in expect)
 
 
-def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[dict], dict, str | None]:
+def run_pass(selected: Selected, factory: Factory, repeats: int, moves: bool = False) -> tuple[list[dict], dict, str | None]:
     """Ask every selected case `repeats` times. Returns a row per ask, how the clients were used, and
     why the pass stopped early (the budget, or FAILURE_STREAK requests in a row that got no answer), if it did.
     A refusal is the model's answer to a case, so it neither counts toward that streak nor ends it."""
@@ -156,6 +156,7 @@ def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[d
                             r.guidance,
                             r.browsers,
                             r.apps,
+                            moves,
                         )
                 except BudgetError as e:
                     stopped = str(e)

@@ -12,6 +12,7 @@ from typesafe_computer_use.decide import (
     decide,
     item_criteria,
     kind_criteria,
+    needs_moves,
     offscreen_criteria,
     row_mates,
     shortcut_criteria,
@@ -260,10 +261,42 @@ def test_the_app_is_asked_in_a_second_request_only_once_open_app_is_chosen(scree
     assert list(questions["app"].criteria) == ["Photos", "Notes", "none"]
 
 
-def test_press_shortcut_is_always_offered_and_the_catalog_ends_with_none():
-    assert "press_shortcut" in kind_criteria("Google Chrome", None)
+def test_press_shortcut_is_offered_only_to_a_run_whose_goal_needs_the_moves_and_the_catalog_ends_with_none():
+    assert "press_shortcut" not in kind_criteria("Google Chrome", None)
+    assert "press_shortcut" in kind_criteria("Google Chrome", None, moves=True)
     assert list(shortcut_criteria()) == [*SHORTCUTS, "none"]
     assert all(text.endswith(".") for text in shortcut_criteria().values())
+
+
+def test_a_closed_gate_leaves_the_kind_question_as_it_was_before_the_moves_existed():
+    shut, open_ = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
+    assert {k: v for k, v in open_.items() if k != "press_shortcut"} == shut
+    assert list(shut) == [
+        "click_item",
+        "use_browser",
+        "type_text",
+        "press_enter",
+        "press_escape",
+        "go_back",
+        "scroll_down",
+        "scroll_up",
+        "wait",
+        "done",
+        "none",
+    ]
+
+
+def test_the_goal_is_asked_once_whether_it_needs_a_move_beyond_clicks_and_typing():
+    asked = []
+
+    def system_one(state, questions):
+        asked.append((state, questions))
+        return SimpleNamespace(answers={"moves": SimpleNamespace(noul=0.9)})
+
+    assert needs_moves(SimpleNamespace(system_one=system_one), "copy the total") == 0.9
+    ((state, questions),) = asked
+    assert state == {"goal": "copy the total"} and list(questions) == ["moves"]
+    assert "keyboard shortcut" in questions["moves"].wire()["instructions"]
 
 
 def test_the_shortcut_is_asked_in_a_second_request_only_once_press_shortcut_is_chosen(screen):
@@ -282,7 +315,7 @@ def test_the_shortcut_is_asked_in_a_second_request_only_once_press_shortcut_is_c
 
     requests.clear()
     kind = "press_shortcut"
-    d = decide(client, "copy the figure", screen, [], [], "Google Chrome", None, guidance=Guidance(focus="copy it"))
+    d = decide(client, "copy the figure", screen, [], [], "Google Chrome", None, guidance=Guidance(focus="copy it"), moves=True)
     assert d.pressing_shortcut and d.chosen == "press_shortcut" and d.shortcut.choice == "copy"
     assert d.confidence == 0.7  # a wrong shortcut is not always undone, so a split on it counts
     state, questions = requests[1]

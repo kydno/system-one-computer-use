@@ -51,6 +51,7 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("size", help="request bytes by part under the current code; no model call")
     s.add_argument("--save-baseline", action="store_true", help="keep this measurement as the baseline later ones compare with")
     s.add_argument("--runs", nargs="*", help="only these run folders")
+    s.add_argument("--moves", action="store_true", help="as a run whose goal needs the moves beyond clicking and typing is asked")
 
     s = sub.add_parser("decisions", help="ask the decision model about the labelled cases and score its picks")
     s.add_argument("--only", choices=("gold", "silver", "labeled", "all"), default="labeled")
@@ -59,6 +60,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--runs", nargs="*", help="only these run folders")
     s.add_argument("--plan", action="store_true", help="count the requests a pass would send, and how many are already cached")
     s.add_argument("--misses", type=int, default=10, help="how many wrong picks to list")
+    s.add_argument("--moves", action="store_true", help="as a run whose goal needs the moves beyond clicking and typing is asked")
 
     s = sub.add_parser("batch", help="open, inspect, advance, or close the budget the user approved")
     s.add_argument("action", choices=("open", "status", "iteration", "close"))
@@ -195,9 +197,9 @@ def chosen_cases(home: Home, runs: list[str] | None) -> list[cases.Case]:
 
 def do_size(home: Home, args: argparse.Namespace) -> None:
     every = chosen_cases(home, args.runs)
-    per_case = size.measure(every)
+    per_case = size.measure(every, args.moves)
     parts = size.aggregate(per_case)
-    print(f"request bytes under the current code, over {len(every)} cases")
+    print(f"request bytes under the current code{', with the moves offered' if args.moves else ''}, over {len(every)} cases")
     for part, v in parts.items():
         print(f"  {part:15s} mean {v['mean']:6d}  median {v['median']:6d}  p90 {v['p90']:6d}")
     base = size.load_baseline(home)
@@ -238,7 +240,7 @@ def do_decisions(home: Home, args: argparse.Namespace) -> None:
     )
     ledger = budget.Ledger(home.ledger)
     if args.plan:
-        plan = decisions.plan(selected, settings["decisions"], home.cache, args.repeats)
+        plan = decisions.plan(selected, settings["decisions"], home.cache, args.repeats, args.moves)
         print(
             f"{plan['asks']} requests, {plan['cached']} already cached, {plan['new']} new: "
             f"at most ${plan['new'] * decisions.ESTIMATE_USD:.3f} against {ledger.current().line() if ledger.current() else 'no open batch'}"
@@ -247,14 +249,16 @@ def do_decisions(home: Home, args: argparse.Namespace) -> None:
     ledger.require_funds()
     where = decisions.endpoint_for(settings["decisions"])
     rows, used, stopped = decisions.run_pass(
-        selected, lambda repeat: decisions.EvalClient(where, home.cache, repeat, ledger), args.repeats
+        selected, lambda repeat: decisions.EvalClient(where, home.cache, repeat, ledger), args.repeats, args.moves
     )
     if rows and all(r["error"] for r in rows):
         raise ValueError(
             f"nothing was answered, so no pass was saved ({len(rows)} asks failed; {ledger.current().line()}): {stopped or rows[0]['error']}"
         )
     summary = decisions.summarize(rows, args.repeats, float(settings["floor"]))
-    summary.update(requests_sent=used["sent"], requests_cached=used["cached"], cost_spent=round(used["spent"], 6))
+    summary.update(
+        requests_sent=used["sent"], requests_cached=used["cached"], cost_spent=round(used["spent"], 6), moves=args.moves
+    )
     summary["stopped_early"] = stopped
     models = {"configured": settings["decisions"], "named_by_replies": used["models"]}
     path = write_pass(home, "decisions", summary, models, rows)

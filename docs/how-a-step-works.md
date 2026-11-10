@@ -162,12 +162,27 @@ on the app, and the node and time caps bind first on a big tree: Notes and Chrom
 | `open_app` | bring the app the `app` answer names to the front, starting it when it is not running, with up to 10 s to get there. The `app` question is a request of its own, sent only once `kind` is `open_app`, since the list is long and most steps open no app: it carries the goal, the focus, and the app in front, and lists every app bundle in `/Applications`, `~/Applications`, `/System/Applications` and the `Utilities` inside each, except the browsers `use_browser` reaches, plus `none`. `none`, or the app already in front, is refused in the history line. Offered only where the adapter lists apps: macOS, not Windows or the OSWorld VM |
 | `type_text` | the writer composes the string; it is set on the focused element through the accessibility tree, with keystrokes as the fallback when the value does not read back, and a Noul then checks the field's value; text the writer submits gets Return at once instead, and the next screen is the check. Into a stand-in field (see above) the text goes by keystrokes, and the Noul checks the text OCR reads across the box's row instead of a value. Into a rich-text editor that is no form field, such as a Google Doc (a focused element with an `AXEditableAncestor` and no text role), the text goes in at the caret by keystrokes, never after Select All and Delete, and the Noul checks the screen lines that share a word with it |
 | `type_email` | fills in `$CLICKER_EMAIL` the same way; refused unless a text field is focused |
-| `press_shortcut` | press the shortcut the `shortcut` answer names, from the catalog `SHORTCUTS` in `config.py` (copy, cut, paste, select all, undo, redo, save, find, new tab, close tab, next and previous tab, reload, zoom in and out; nothing that quits, logs out, or types), each written for a Mac and turned by the adapter into the keys of its platform (Command is Control on Windows and in the OSWorld VM). The `shortcut` question is a request of its own, sent only once `kind` is `press_shortcut`, and lists the catalog plus `none`; `none` is refused in the history line. Unlike an app, a wrong shortcut is not always undone (cut, close tab), so a split on the shortcut answer lowers the step's confidence as a split on an item does. What the keys did shows on the next capture; a copy changes nothing on screen, and the idle count bounds a run that only copies |
+| `press_shortcut` | (offered only to a run whose goal needs the moves beyond clicking and typing; see below) press the shortcut the `shortcut` answer names, from the catalog `SHORTCUTS` in `config.py` (copy, cut, paste, select all, undo, redo, save, find, new tab, close tab, next and previous tab, reload, zoom in and out; nothing that quits, logs out, or types), each written for a Mac and turned by the adapter into the keys of its platform (Command is Control on Windows and in the OSWorld VM). The `shortcut` question is a request of its own, sent only once `kind` is `press_shortcut`, and lists the catalog plus `none`; `none` is refused in the history line. Unlike an app, a wrong shortcut is not always undone (cut, close tab), so a split on the shortcut answer lowers the step's confidence as a split on an item does. What the keys did shows on the next capture; a copy changes nothing on screen, and the idle count bounds a run that only copies |
 | `press_enter`, `press_escape` | keyboard |
 | `go_back` | Cmd-[, the browser's Back, when the last click led somewhere unhelpful |
 | `scroll_down`, `scroll_up` | 10 lines, after parking the cursor over the item the `item` answer names, since a wheel scrolls whatever is under it: on Google Maps the window's center is the map, which zoomed out while the results list beside it stayed put. With no item, or one in the menu bar or outside the frontmost window, the cursor goes to the window's center. 0.4 s later the screen around the cursor is compared with the capture, and a scroll that changed nothing there says so in the history (`scrolled down over 'X' (nothing there moved)`) |
 | `wait` | screen still loading: 3 s, then the step's own settle, so three waits cover a slow page |
 | `done`, `none` | stop |
+
+### Moves beyond clicking and typing
+
+`press_shortcut` is in the kind question only for a run whose goal needs it. Once a run, before
+its first step, the decision model is asked of the goal alone whether reaching it needs a move that
+clicking and typing cannot make (`decide.needs_moves`, a Noul like the read-only question), and the
+run is offered the moves when the answer is at least `MOVES_NOUL` (0.5). Unsure, or no answer, offers
+none, so the requests stay as they were. The reason is measured: with `press_shortcut` in the kind
+question of every step, agreement with saved steps that never needed it fell 2.6 points (0.601 to
+0.575 over six repeats), mostly steps where the model moved off `scroll_down` to a click, not steps
+where it picked the shortcut. A probe of Jev scored 20 goals that need one 0.58 to 0.98 and 16 that do not
+0.05 to 0.36. The answer model's instructions follow the gate: it is told the agent has the shortcuts only
+when the run was offered them, so it does not send the classifier to a move it lacks. The run records
+`moves` in `run.json` and the log. `clicker-eval size --moves` and `decisions --moves` measure the
+requests of a run that was offered them; without the flag they are the requests of any other run.
 
 After any action the screen gets time to settle before the next step reads it. It is looked at
 every 0.25 s: once it differs from the capture the action was decided on and then holds still for

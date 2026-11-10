@@ -399,7 +399,6 @@ class Answer:
     scroll_over: str = ""  # the text of the item to scroll over; empty for the window's center
 
 
-SHORTCUT_NAMES = ", ".join(name.replace("_", " ") for name in SHORTCUTS)
 ANSWER_SYSTEM = (
     "An agent is driving a user's computer toward the user's goal. A small classifier picks each "
     "action, and it has stopped and handed the run to you. You receive the goal, the actions taken, "
@@ -441,9 +440,8 @@ ANSWER_SYSTEM = (
     "click an on-screen item, type into a focused field, replacing what the field holds, press "
     "Return or Escape, scroll, go back, open a website by its "
     "https address, and open an app installed on this computer by its name; it cannot read, "
-    "compare, or remember, so a focus is one move, not a plan. It can press one keyboard shortcut "
-    f"from a short list ({SHORTCUT_NAMES}) and no other key. It cannot right-click, double-click, "
-    "or select text, so a focus that needs one of those is "
+    "compare, or remember, so a focus is one move, not a plan. It has no other key or shortcut and "
+    "cannot right-click, double-click, or select text, so a focus that needs one of those is "
     "refused: name the button, menu, or link on screen that does the same. Never conclude from "
     "memory that a setting, feature, or page does not exist: apps move and rename them between "
     "versions. While the screen still shows a place to look, such as a search result, a row "
@@ -461,6 +459,27 @@ ANSWER_SYSTEM = (
 )
 
 
+# For a run whose goal needs them (see `decide.needs_moves`), the agent has the moves the kind question
+# offers, and the answer model is told so; otherwise it is told the agent has none, and does not ask for one.
+_NO_MOVES = (
+    "It has no other key or shortcut and cannot right-click, double-click, or select text, so a focus "
+    "that needs one of those is refused: name the button, menu, or link on screen that does the same."
+)
+_MOVES = (
+    "It can press one keyboard shortcut from a short list ("
+    + ", ".join(name.replace("_", " ") for name in SHORTCUTS)
+    + ") and no other key. It cannot right-click, double-click, or select text, so a focus that needs "
+    "one of those is refused: name the button, menu, or link on screen that does the same."
+)
+assert _NO_MOVES in ANSWER_SYSTEM
+ANSWER_SYSTEM_MOVES = ANSWER_SYSTEM.replace(_NO_MOVES, _MOVES)
+
+
+def answer_system(moves: bool = False) -> str:
+    """The answer model's instructions, with the agent's moves as the run was offered them."""
+    return ANSWER_SYSTEM_MOVES if moves else ANSWER_SYSTEM
+
+
 def compose_answer(
     writer: Writer,
     goal: str,
@@ -472,6 +491,7 @@ def compose_answer(
     guidance: Guidance | None = None,
     earlier_stops: list[dict] | None = None,
     can_ask: bool = False,
+    moves: bool = False,
 ) -> Answer:
     """What to tell the user now that the classifier has stopped, and how the run could go on.
 
@@ -501,7 +521,7 @@ def compose_answer(
     }
     data = _structured(
         writer,
-        system=ANSWER_SYSTEM,
+        system=answer_system(moves),
         packet=packet,
         properties={
             "achieved": {"type": "boolean"},

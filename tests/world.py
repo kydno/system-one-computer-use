@@ -443,10 +443,11 @@ class FakeTypeSafe:
 
     endpoint = Endpoint("fake", "https://decisions.example.com/v1/decisions", "", "fake/decisions")
 
-    def __init__(self, policy: Policy, noul: float = 0.95, read_only: bool = False):
+    def __init__(self, policy: Policy, noul: float = 0.95, read_only: bool = False, moves: bool = False):
         self.policy = policy
         self.noul = noul
         self.read_only = read_only  # how the goal question at the start of a run is answered
+        self.moves = moves  # how the goal-needs-moves question is: closed unless a scenario opens it
         self.states: list[dict] = []
         self.asked: list[dict] = []  # the questions each decision was asked, so a test can read the criteria offered
         self.pending: tuple = (None, DEFAULT_CONFIDENCE)  # the last step's target and second confidence, for a follow-up question
@@ -460,6 +461,8 @@ class FakeTypeSafe:
     def system_one(self, state: dict, questions: dict) -> SimpleNamespace:
         if "read_only" in questions:
             return SimpleNamespace(answers={"read_only": SimpleNamespace(noul=1.0 if self.read_only else 0.0)})
+        if "moves" in questions:
+            return SimpleNamespace(answers={"moves": SimpleNamespace(noul=1.0 if self.moves else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
         if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
@@ -592,6 +595,7 @@ def drive(
     events: Events | None = None,
     act: bool = True,
     read_only: bool = False,
+    moves: bool = False,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
@@ -600,7 +604,7 @@ def drive(
     With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
-    fake = FakeTypeSafe(policy, noul, read_only)
+    fake = FakeTypeSafe(policy, noul, read_only, moves)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
     cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)

@@ -71,6 +71,7 @@ def render_payload(
     guidance: Guidance | None = None,
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
+    moves: bool = False,
 ) -> str:
     """Exactly what goes to the classifier for this screen, plus a table of every item."""
     parts = [
@@ -82,7 +83,7 @@ def render_payload(
         RULE,
         "QUESTION kind  (Choice criteria)",
         RULE,
-        json.dumps(kind_criteria(browser, email, bool(screen.offscreen), browsers, apps), indent=2),
+        json.dumps(kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves), indent=2),
         "",
         RULE,
         "QUESTION item  (Choice criteria)",
@@ -111,13 +112,14 @@ def render_payload(
             json.dumps(app_criteria(apps, screen.app), indent=2),
             "",
         ]
-    parts += [
-        RULE,
-        "QUESTION shortcut  (Choice criteria; a request of its own, sent only once kind is press_shortcut)",
-        RULE,
-        json.dumps(shortcut_criteria(), indent=2),
-        "",
-    ]
+    if moves:
+        parts += [
+            RULE,
+            "QUESTION shortcut  (Choice criteria; a request of its own, sent only once kind is press_shortcut)",
+            RULE,
+            json.dumps(shortcut_criteria(), indent=2),
+            "",
+        ]
     if screen.offscreen:
         parts += [
             RULE,

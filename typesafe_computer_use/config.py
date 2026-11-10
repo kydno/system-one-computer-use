@@ -15,6 +15,11 @@ DEFAULT_MIN_CONFIDENCE = 0.4
 # page and the next step can leave it. GPT-6 Luna spreads an item's odds over every item on screen:
 # its right click scored 0.11 to 0.24 on three Firebase and Cloud Console runs.
 DEFAULT_READ_ONLY_CONFIDENCE = 0.15
+# How sure the decision model must be that a goal needs a move beyond clicks and typing (a shortcut, a
+# right click, a double click, a selection, a drag) before those moves are offered for the run. A probe of
+# Jev scored 20 goals that need one 0.58 to 0.98 and 16 that do not 0.05 to 0.36; offering the moves to every
+# goal cost 2.6 points of agreement on saved steps that never needed them.
+MOVES_NOUL = 0.5
 READ_ONLY_NOUL = 0.8  # how sure the decision model must be that a goal changes nothing before it counts as read-only
 DEFAULT_STEPS = 100
 DEFAULT_DELAY = 2.0

@@ -322,12 +322,13 @@ def frozen_clock(state: dict) -> Iterator[None]:
         yield
 
 
-def request(case: Case) -> tuple[dict, dict[str, Choice]]:
-    """The state and questions the current code would send for this case."""
+def request(case: Case, moves: bool = False) -> tuple[dict, dict[str, Choice]]:
+    """The state and questions the current code would send for this case. `moves` is a run whose goal
+    needs the moves beyond clicking and typing; the saved runs were asked for none, so it is off."""
     r = rebuild(case)
     with frozen_clock(case.state):
         state = decide.base_state(r.goal, r.screen, r.items, r.history, r.tried, r.guidance)
-        questions = decide.build_questions(r.screen, r.items, r.browser, r.email, r.guidance, r.browsers, r.apps)
+        questions = decide.build_questions(r.screen, r.items, r.browser, r.email, r.guidance, r.browsers, r.apps, moves)
     return state, questions
 
 
