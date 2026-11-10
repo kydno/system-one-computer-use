@@ -225,3 +225,58 @@ def test_a_recorded_row_holds_numbers_and_model_ids_and_no_text(monkeypatch, tmp
     assert saved["git_dirty"] is True and saved["models"] == {"configured": "vendor/model"}
     worse = {**saved, "silver": {**saved["silver"], "agree": 0.5}}
     assert report.compare(saved, worse) == ["  silver.agree: 1.0 -> 0.5 (-50.0%)"]
+
+
+def answering(tmp_path, ledger, reply):
+    """A client factory whose service answers every request with `reply()`."""
+
+    def factory(repeat: int):
+        return decisions.EvalClient(
+            WHERE, tmp_path / "cache", repeat, ledger, transport=httpx.MockTransport(lambda request: reply(request))
+        )
+
+    return factory
+
+
+def test_a_service_that_answers_nothing_stops_the_pass_after_a_few_asks_and_charges_nothing(monkeypatch, tmp_path):
+    found = frozen(monkeypatch, tmp_path)
+    ledger = open_ledger(tmp_path)
+    gone = lambda request: httpx.Response(404, json={"error": {"message": "No endpoints found for vendor/model."}})  # noqa: E731
+
+    rows, used, stopped = decisions.run_pass(selected(found), answering(tmp_path, ledger, gone), repeats=3)
+
+    assert len(rows) == decisions.FAILURE_STREAK and all("404" in r["error"] for r in rows)
+    assert stopped is not None and f"{decisions.FAILURE_STREAK} requests in a row got no answer" in stopped
+    assert used["sent"] == 0 and ledger.current().spent_usd == 0  # nothing was answered, so nothing was charged
+
+
+def test_a_refusal_is_the_models_answer_and_does_not_stop_the_pass(monkeypatch, tmp_path):
+    found = frozen(monkeypatch, tmp_path)
+
+    def refuses(request: httpx.Request) -> httpx.Response:
+        asked = json.loads(request.content)["questions"]
+        answers = {name: {"type": "refusal", "reason": "cannot tell"} for name in asked}
+        return httpx.Response(200, json={**REPLY, "answers": answers})
+
+    rows, _, stopped = decisions.run_pass(selected(found), answering(tmp_path, open_ledger(tmp_path), refuses), repeats=2)
+
+    assert stopped is None and len(rows) == 2 * len(found) and all("refused" in r["error"] for r in rows)
+
+
+def test_one_good_answer_between_failures_starts_the_count_again(monkeypatch, tmp_path):
+    found = frozen(monkeypatch, tmp_path)
+    calls = iter(range(100))
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        if next(calls) % (decisions.FAILURE_STREAK) == decisions.FAILURE_STREAK - 1:
+            asked = json.loads(request.content)["questions"]
+            answers = {
+                n: {"type": "choice", "choice": next(iter(q["criteria"])), "confidence": 0.9, "probabilities": {}}
+                for n, q in asked.items()
+            }
+            return httpx.Response(200, json={**REPLY, "answers": answers})
+        return httpx.Response(404, json={})  # not retried, as a 503 would be
+
+    rows, _, stopped = decisions.run_pass(selected(found), answering(tmp_path, open_ledger(tmp_path), flaky), repeats=2)
+
+    assert stopped is None and len(rows) == 2 * len(found)
