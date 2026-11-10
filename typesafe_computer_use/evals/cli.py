@@ -248,6 +248,10 @@ def do_decisions(home: Home, args: argparse.Namespace) -> None:
     rows, used, stopped = decisions.run_pass(
         selected, lambda repeat: decisions.EvalClient(where, home.cache, repeat, ledger), args.repeats
     )
+    if rows and all(r["error"] for r in rows):
+        raise ValueError(
+            f"nothing was answered, so no pass was saved ({len(rows)} asks failed; {ledger.current().line()}): {stopped or rows[0]['error']}"
+        )
     summary = decisions.summarize(rows, args.repeats, float(settings["floor"]))
     summary.update(requests_sent=used["sent"], requests_cached=used["cached"], cost_spent=round(used["spent"], 6))
     summary["stopped_early"] = stopped

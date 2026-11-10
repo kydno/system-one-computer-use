@@ -22,7 +22,7 @@ from pathlib import Path
 from .. import decide
 from ..calls import Calls, MeteredClassifier
 from ..config import DEFAULT_MIN_CONFIDENCE, OPENROUTER_DECISIONS_URL
-from ..decisions import DecisionClient, DecisionError, Endpoint, is_settled
+from ..decisions import DecisionClient, DecisionError, Endpoint, Refusal, is_settled
 from .budget import BudgetError, Ledger
 from .cases import Case, frozen_clock, rebuild, request
 from .store import Home
@@ -36,6 +36,7 @@ DEFAULTS = {
 Factory = Callable[[int], DecisionClient]
 Selected = Sequence[tuple[Case, dict | None, str | None]]
 ESTIMATE_USD = 0.002  # charged for a reply that reports no cost, so the cap still holds
+FAILURE_STREAK = 5  # requests in a row that get no answer at all: the service is down, or the model is gone
 
 
 def load_config(home: Home) -> dict:
@@ -128,10 +129,12 @@ def matches(expect: dict, pick: dict | None) -> bool:
 
 def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[dict], dict, str | None]:
     """Ask every selected case `repeats` times. Returns a row per ask, how the clients were used, and
-    why the pass stopped early (the budget), if it did."""
+    why the pass stopped early (the budget, or FAILURE_STREAK requests in a row that got no answer), if it did.
+    A refusal is the model's answer to a case, so it neither counts toward that streak nor ends it."""
     rows: list[dict] = []
     used = {"sent": 0, "cached": 0, "seconds": 0.0, "spent": 0.0, "models": set()}
     stopped = None
+    failing = 0
     for repeat in range(repeats):
         with factory(repeat) as client:
             for case, want, source in selected:
@@ -158,7 +161,11 @@ def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[d
                     break
                 except DecisionError as e:
                     row["error"] = str(e)[:200]
+                    failing = 0 if isinstance(e, Refusal) else failing + 1
+                    if failing >= FAILURE_STREAK:
+                        stopped = f"{failing} requests in a row got no answer, so the pass stopped: {row['error']}"
                 else:
+                    failing = 0
                     row["picked"] = pick_of(decision, case)
                     row.update(
                         confidence=round(decision.confidence, 4),
@@ -172,6 +179,8 @@ def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[d
                 used["models"].update(tokens)
                 row["correct"] = matches(want, row["picked"]) if want is not None else None
                 rows.append(row)
+                if stopped:
+                    break
             used["sent"] += getattr(client, "sent", 0)
             used["cached"] += getattr(client, "cached", 0)
             used["seconds"] += getattr(client, "seconds", 0.0)

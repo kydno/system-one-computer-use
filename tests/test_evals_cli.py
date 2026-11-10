@@ -128,6 +128,21 @@ def test_a_pass_that_asks_a_model_needs_an_open_batch_and_is_recorded_as_numbers
     assert eval_run(checkout, capsys, "batch", "status")[1] == "no batch is open\n"
 
 
+def test_a_pass_the_service_never_answered_is_not_saved_as_a_pass(checkout, capsys, monkeypatch):
+    def gone(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": {"message": "No endpoints found."}})
+
+    real = decisions.EvalClient
+    monkeypatch.setattr(decisions, "EvalClient", lambda *a, **k: real(*a, **k, transport=httpx.MockTransport(gone)))
+    eval_run(checkout, capsys, "harvest")
+    eval_run(checkout, capsys, "batch", "open", "--cap", "1", "--iterations", "1")
+
+    code, _, err = eval_run(checkout, capsys, "decisions")
+
+    assert code == 2 and "nothing was answered, so no pass was saved" in err and "404" in err
+    assert not list(checkout.passes.glob("*-decisions.json")) and not checkout.replay.exists()
+
+
 def test_a_batch_is_opened_only_with_the_cap_and_iterations_the_user_approved(checkout, capsys):
     code, _, err = eval_run(checkout, capsys, "batch", "open", "--cap", "4")
     assert code == 2 and "--iterations" in err
