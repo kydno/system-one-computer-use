@@ -48,7 +48,7 @@ Cluster: the first stop of each run that fell short, in the two largest groups: 
   back had a median of 0.85, of those accepted 0.99. The loop already reviews every `done`, so a false `done`
   costs one free reviewer call, not a run. Not changed.
 - 14 baseline cases where Jev clicked another item than the run did: 13 of 14 are a different control, not the
-  same one under another index, and 12 of the 14 are items read by OCR alone, from runs of 2026-10-29.
+  same one under another index, and in 12 of the 14 the run's item was read by OCR alone.
 
 Verdict: nothing to change on this evidence, and a change made on it would be a guess. Evidence for a fix has
 to come from fresh runs of specific goals on the current code. Added `digest --since` so the next look leaves
