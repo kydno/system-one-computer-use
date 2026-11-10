@@ -92,7 +92,15 @@ def test_the_answer_request_carries_what_the_run_has_learned_and_offers_both_way
 
     assert answer == Answer(text="Two sizes.", achieved=False, focus="Click '15 inch'", question="")
     request = fake.requests[0]
-    assert set(request["output_config"]["format"]["schema"]["required"]) == {"achieved", "answer", "focus", "question", "wait"}
+    assert set(request["output_config"]["format"]["schema"]["required"]) == {
+        "achieved",
+        "answer",
+        "focus",
+        "question",
+        "wait",
+        "scroll",
+        "scroll_over",
+    }
     packet = json.loads(request["messages"][0]["content"][1]["text"])
     assert packet["current_focus"] == "Open the size menu"
     assert packet["user_said"] == [{"asked": "13 or 15 inch?", "replied": "15"}]

@@ -25,6 +25,9 @@ PRESS_SECONDS = 0.4  # for a page to paint what an accessibility press did; Chro
 PIXEL_STEP = 24
 CHANGED_PIXELS = 100
 SCROLL_REACH = (160, 200)  # half the width and height, in points, of the box around the pointer a scroll must change
+SCROLL_LINES = 10  # one scroll, in lines; a screen or so of a web page
+QUOTES = "'\"\u201c\u201d\u2018\u2019"  # the marks a writer may quote an item's text in
+SCROLLS_TO_END = 15  # the most scrolls a writer's "top" or "bottom" takes before it stops anyway
 OPEN_SECONDS = 10.0  # for an app that was not running to start and come to the front; Photos takes a few seconds cold
 CARET_SECONDS = 0.2  # for a document to report where arrow keys left its caret
 CARET_WALK = 600  # the most Right presses that take the caret to its paragraph's end; past that it is refused
@@ -332,7 +335,7 @@ def _open_app(decision: Decision, screen, items, ctx: Context) -> str:
         return f"open_app refused: {app} is already in front"
     if desktop.activate(app, timeout=OPEN_SECONDS):
         return f"opened {app}"
-    return f"open_app failed: {app} did not come to the front"
+    return f"open_app failed: {app} did not come to the front with a window"
 
 
 def _type_email(decision, screen: Screen, items, ctx: Context) -> str:
@@ -406,42 +409,105 @@ def _scroll(lines: int, description: str):
     def handler(decision, screen, items, ctx) -> str:
         target = scroll_target(decision, screen, items)
         point = screen.to_points(target) if target is not None else None
+        before = hovered(point) if point is not None else screen.image
         desktop.scroll(lines, point)
         what = f"{description} over {target.text!r}" if target is not None else description
-        return what if scroll_showed(screen, point) else f"{what} (nothing there moved)"
+        return what if scroll_showed(screen, before, point) else f"{what} (nothing there moved)"
 
     return handler
 
 
 def scroll_target(decision: Decision, screen: Screen, items: list[Item]) -> Item | None:
-    """The item the classifier picked, when a wheel there can reach the app: not one in the menu
-    bar, and not one outside the frontmost window when its bounds are known."""
+    """The item the classifier picked, when a wheel there can reach the app."""
     if decision.item is None:
         return None
     item = next((it for it in items if str(it.index) == decision.item.choice), None)
-    if item is None or screen.in_menu_bar(item):
-        return None
+    return item if item is not None and wheel_reaches(item, screen) else None
+
+
+def wheel_reaches(item: Item, screen: Screen) -> bool:
+    """Whether a wheel over `item` reaches the app: not over the menu bar, and not outside the
+    frontmost window when its bounds are known."""
+    if screen.in_menu_bar(item):
+        return False
     if screen.window is not None:
         x, y = screen.to_points(item)
         wx, wy, ww, wh = screen.window
         if not (wx <= x <= wx + ww and wy <= y <= wy + wh):
-            return None
-    return item
+            return False
+    return True
 
 
-def scroll_showed(screen: Screen, point: tuple[float, float] | None) -> bool:
-    """Whether a scroll changed the screen around the pointer, or anywhere when it went to no item.
+def writer_scroll(way: str, over: str, screen: Screen, items: list[Item]) -> str:
+    """Scroll as the writer said: "up" or "down" once, "top" or "bottom" until nothing more moves.
+
+    `over` is the text of the item to scroll over, and the window's center when it names none on
+    screen. The writer scrolls itself because the classifier would not: on the Firebase console a
+    goal about Google Analytics drew its scroll to the sidebar's 'Analytics' link every time, even
+    while the writer's focus said to scroll over the settings page.
+    """
+    lines = SCROLL_LINES if way in ("up", "top") else -SCROLL_LINES
+    target = scroll_over(over, screen, items)
+    point = screen.to_points(target) if target is not None else None
+    before = hovered(point) if point is not None else screen.image
+    scrolls = 0
+    for _ in range(SCROLLS_TO_END if way in ("top", "bottom") else 1):
+        desktop.scroll(lines, point)
+        desktop.sleep_watching(PRESS_SECONDS)
+        after = desktop.screenshot()
+        if not scroll_moved(screen, before, after, point):
+            break
+        scrolls += 1
+        before = after
+    where = f" over {target.text!r}" if target is not None else ""
+    if way in ("top", "bottom"):
+        what = f"scrolled to the {way}{where} ({scrolls} {'scroll' if scrolls == 1 else 'scrolls'})"
+    else:
+        what = f"scrolled {way}{where}"
+    return what if scrolls else f"{what} (nothing there moved)"
+
+
+def scroll_over(text: str, screen: Screen, items: list[Item]) -> Item | None:
+    """The item a writer's scroll names: the one whose text is `text`, else the first that holds it,
+    as long as a wheel there reaches the app."""
+    wanted = text.strip().strip(QUOTES).casefold()
+    if not wanted:
+        return None
+    exact = [it for it in items if it.text.strip().casefold() == wanted]
+    holding = [it for it in items if wanted in it.text.casefold()]
+    return next((it for it in exact + holding if wheel_reaches(it, screen)), None)
+
+
+def hovered(point: tuple[float, float]) -> Image.Image:
+    """The display with the pointer parked at `point`, the capture a scroll there is judged against.
+
+    The pointer alone can change the screen. On the Firebase console a scroll aimed at the sidebar's
+    'Analytics' link opened its flyout menu, and the change read as the page scrolling up, twice,
+    while the page never moved and the setting above stayed out of sight.
+    """
+    desktop.hover(point)
+    desktop.sleep_watching(PRESS_SECONDS)
+    return desktop.screenshot()
+
+
+def scroll_showed(screen: Screen, before: Image.Image, point: tuple[float, float] | None) -> bool:
+    """Whether a scroll changed the screen around the pointer, or anywhere when it went to no item,
+    from `before`: the capture with the pointer already there, or the step's own when it was not.
 
     A page at its end, or a view that does not scroll, leaves the screen as it was, and the next
     step should know that rather than read "scrolled down" again.
     """
     desktop.sleep_watching(PRESS_SECONDS)
-    after = desktop.screenshot()
+    return scroll_moved(screen, before, desktop.screenshot(), point)
+
+
+def scroll_moved(screen: Screen, before: Image.Image, after: Image.Image, point: tuple[float, float] | None) -> bool:
+    """Whether the screen changed around the pointer from `before` to `after`, or anywhere with no pointer."""
     if point is None:
-        return moved(screen.image, after, screen.scale)
+        return moved(before, after, screen.scale)
     x, y = point
     dx, dy = SCROLL_REACH
-    return moved(screen.image, after, screen.scale, within=(x - dx, y - dy, x + dx, y + dy))
+    return moved(before, after, screen.scale, within=(x - dx, y - dy, x + dx, y + dy))
 
 
 def _wait(decision, screen, items, ctx) -> str:
@@ -464,7 +530,7 @@ _HANDLERS = {
     "press_enter": _key("return", "pressed Return"),
     "press_escape": _key("escape", "pressed Escape"),
     "go_back": _key("[", "went back", command=True),
-    "scroll_down": _scroll(-10, "scrolled down"),
-    "scroll_up": _scroll(10, "scrolled up"),
+    "scroll_down": _scroll(-SCROLL_LINES, "scrolled down"),
+    "scroll_up": _scroll(SCROLL_LINES, "scrolled up"),
     "wait": _wait,
 }

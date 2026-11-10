@@ -192,6 +192,9 @@ class OSWorldDesktop:
         x, y, w, h = window
         self._do(f"pyautogui.scroll({int(lines)}, x={round(x + w / 2)}, y={round(y + h / 2)})")
 
+    def hover(self, at: tuple[float, float]) -> None:
+        self._do(f"pyautogui.moveTo({round(at[0])}, {round(at[1])})")
+
     # ----- apps and windows ------------------------------------------------------------------
 
     def frontmost_app_and_pid(self) -> tuple[str, int]:

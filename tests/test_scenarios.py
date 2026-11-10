@@ -1484,6 +1484,7 @@ def test_l42_a_stop_between_two_good_moves_is_settled_by_the_writer_and_the_run_
         {
             "after_action": 0,
             "why": "the classifier was not confident enough in any next action",
+            "you_said": state.handoffs[0].said,
             "focus_given": state.handoffs[0].focus,
         }
     ]
@@ -1491,18 +1492,30 @@ def test_l42_a_stop_between_two_good_moves_is_settled_by_the_writer_and_the_run_
     assert [(r["outcome"], r["focus"], r["handed_back"]) for r in reviews] == [("low confidence", state.handoffs[0].focus, True)]
 
 
-def test_l43_a_focus_the_classifier_cannot_act_on_leaves_the_answer_standing(monkeypatch, tmp_path):
+def test_l43_a_focus_the_classifier_cannot_act_on_ends_the_run_with_a_last_answer(monkeypatch, tmp_path):
     world = shop()
-    writer = FakeWriter(reviews=[{"focus": "Open the listing", "answer": "Not confirmed yet."}])
+    writer = FakeWriter(
+        reviews=[
+            {"focus": "Open the listing", "answer": "Not confirmed yet; I'll open the listing."},
+            {"focus": "Open the listing", "answer": "I could not open the listing."},
+        ]
+    )
     unsure = scripted(("click_item", "MacBook 2010", 0.38), ("click_item", "MacBook 2010", 0.38))
 
     state = drive(world, unsure, goal=SHOP_GOAL, monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer)
 
-    assert state.outcome == "low confidence"
+    assert state.outcome == "unfollowed"
     assert world.log == []
     assert len(world.fake.states) == 2  # asked again under the focus, and no surer
-    assert len(writer.packets) == 1  # the same screen and no new action: nothing to read a second time
-    assert state.answer.text == "Not confirmed yet." and not state.answer.achieved
+    # The answer that gave the focus was written to send the run on, so the writer is told the
+    # focus led nowhere and gives the last answer, and its second focus is not taken.
+    assert len(writer.packets) == 2
+    assert writer.packets[1]["why_the_run_stopped"] == STOPPED["unfollowed"]
+    assert writer.packets[1]["earlier_stops"][-1]["focus_given"] == "Open the listing"
+    # And what it said then, which may quote a screen that has since dropped out of earlier_screens.
+    assert writer.packets[1]["earlier_stops"][-1]["you_said"] == "Not confirmed yet; I'll open the listing."
+    assert [h.focus for h in state.handoffs] == ["Open the listing"]
+    assert state.answer.text == "I could not open the listing." and not state.answer.achieved
 
 
 def test_l44_the_writer_asks_the_user_and_the_reply_steers_the_rest_of_the_run(monkeypatch, tmp_path):
@@ -2103,3 +2116,53 @@ def test_l65_a_click_the_writers_focus_quotes_goes_ahead_under_the_floor(monkeyp
     assert [h.outcome for h in state.handoffs] == ["low confidence"]
     assert state.outcome == "done"
     assert "below 0.4, but the focus names 'Manage →'; going ahead" in (tmp_path / "run" / "run.log").read_text()
+
+
+FIREBASE_GOAL = "turn on the Google Analytics export with daily export"
+
+
+def firebase() -> World:
+    """The BigQuery settings page scrolled to its foot, where the Analytics export is a screen above."""
+    settings = "https://console.firebase.google.com/project/settings/integrations/bigquery"
+    return World(
+        [
+            Page(
+                name="foot",
+                items=["Cloud Messaging", "Imported segments", "Unlink from BigQuery", "Analytics"],
+                url=settings,
+                on={"scroll_up": "head"},
+            ),
+            Page(
+                name="head",
+                items=["Google Analytics", "Crashlytics", "Analytics"],
+                url=settings,
+                on={"click:Google Analytics": "on"},
+            ),
+            Page(name="on", items=["Google Analytics Daily export on", "Analytics"], url=settings),
+        ]
+    )
+
+
+def drawn_to_the_sidebar(state: dict, questions: dict) -> tuple:
+    """Jev on the Firebase console: the goal says Analytics, so the sidebar's 'Analytics' draws it
+    until the export's own switch is on screen."""
+    texts = [it["text"] for it in state["screen_items_in_reading_order"]]
+    if "Google Analytics Daily export on" in texts:
+        return ("done", None)
+    if "Google Analytics" in texts:
+        return ("click_item", "Google Analytics")
+    return ("click_item", "Analytics", 0.3)
+
+
+def test_l66_the_writer_scrolls_the_page_itself_when_the_classifier_would_not(monkeypatch, tmp_path):
+    world = firebase()
+    writer = FakeWriter(reviews=[{"answer": "The export is further up.", "scroll": "top", "scroll_over": "“Cloud Messaging”"}])
+
+    state = drive(world, drawn_to_the_sidebar, goal=FIREBASE_GOAL, monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer)
+
+    assert state.outcome == "done" and world.page.name == "on"
+    # Over the settings page, not the sidebar, and on until a scroll moved nothing.
+    assert world.log == ["scroll_up", "scroll_up", "click:Google Analytics"]
+    assert world.wheel[0] is not None and world.wheel[0] == world.wheel[1]
+    assert state.history == ["scrolled to the top over 'Cloud Messaging' (1 scroll)", "clicked 'Google Analytics'"]
+    assert [(h.focus, h.said) for h in state.handoffs] == [("scroll top over '“Cloud Messaging”'", "The export is further up.")]

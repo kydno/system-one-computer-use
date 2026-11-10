@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from world import FakeWriter, Page, World, drive, scripted
 
-from typesafe_computer_use.calls import Calls, MeteredClassifier, MeteredWriter, Usage
+from typesafe_computer_use.calls import Calls, MeteredClassifier, MeteredWriter, Usage, reviewing
 from typesafe_computer_use.config import answer_model, writer_model
 from typesafe_computer_use.decisions import DecisionError
 
@@ -111,6 +111,47 @@ def test_openrouter_costs_add_up_per_model_and_over_the_run():
     assert calls.line().endswith("  cost $0.0130")
 
 
+def test_a_decision_reply_billed_then_refused_still_counts_its_cost():
+    """A reply that refused one question was billed for all of them; the run's cost said nothing of it."""
+    calls = Calls()
+
+    def refused(**request):
+        error = DecisionError("the model refused 'item'")
+        error.reply = SimpleNamespace(model="jev", usage=SimpleNamespace(input_tokens=900, output_tokens=4, cost=0.0004))
+        raise error
+
+    classifier = MeteredClassifier(SimpleNamespace(system_one=refused), calls)
+
+    with pytest.raises(DecisionError):
+        classifier.system_one(state={}, questions={})
+    assert calls.count["classifier"] == 1
+    assert calls.usage["jev"] == Usage(requests=1, input_tokens=900, output_tokens=4, cost=0.0004)
+    assert calls.cost() == pytest.approx(0.0004)
+
+
+def test_each_reply_is_counted_under_the_role_that_asked_for_it():
+    calls = Calls()
+    classifier = MeteredClassifier(
+        SimpleNamespace(system_one=lambda **request: SimpleNamespace(model="jev", usage=SimpleNamespace(cost=0.001))), calls
+    )
+    usage = SimpleNamespace(input_tokens=10, output_tokens=2, cost=0.01)
+    writer = MeteredWriter(
+        SimpleNamespace(messages=SimpleNamespace(create=lambda **request: SimpleNamespace(usage=usage))), calls
+    )
+
+    classifier.system_one(state={}, questions={})
+    writer.messages.create(model="same-model")  # a field fill
+    with reviewing():
+        writer.messages.create(model="same-model")  # a review, by the same model
+    writer.messages.create(model="same-model")
+
+    roles = calls.by_role()
+    assert list(roles) == ["decision", "reviewer", "writer"]
+    assert roles["decision"]["jev"]["cost"] == pytest.approx(0.001)
+    assert roles["reviewer"]["same-model"]["requests"] == 1
+    assert roles["writer"]["same-model"]["requests"] == 2 and roles["writer"]["same-model"]["cost"] == pytest.approx(0.02)
+
+
 class CountingWriter(FakeWriter):
     """The scenario writer, with Anthropic usage on every reply."""
 
@@ -145,6 +186,10 @@ def test_run_json_shows_tokens_per_model_and_the_calls_line_is_unchanged(monkeyp
         },
     }
     assert run["cost"] is None
+    # The one writer call was the review of the stop: the answer model's, under the reviewer.
+    assert set(run["usage_by_role"]) == {"decision", "reviewer"}
+    assert run["usage_by_role"]["reviewer"][model]["requests"] == len(writer.requests)
+    assert run["ended_at"]
     assert run["calls"]["classifier"]["calls"] == 2
     log = (tmp_path / "run" / "run.log").read_text()
     assert "calls: classifier 2 (67%, " in log and "writer 1 (33%, " in log

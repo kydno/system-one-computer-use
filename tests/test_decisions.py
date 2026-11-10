@@ -25,6 +25,7 @@ from typesafe_computer_use.decisions import (
     Refusal,
     Score,
     ScoreAnswer,
+    Usage,
     endpoint,
 )
 from typesafe_computer_use.runner import STOPPED
@@ -206,6 +207,27 @@ def test_an_answer_that_is_not_one_is_a_decision_error(answers):
         Service(answers).client().system_one(state="s", questions={"kind": QUESTIONS["kind"]})
 
 
+def test_a_choice_with_one_label_is_answered_here_and_never_sent():
+    # OpenAI Decisions answers 400 to a request with such a choice, so a step whose off-screen
+    # question had one control in it had no decision at all.
+    service = Service({"kind": ANSWERS["kind"]})
+    lone = {"kind": QUESTIONS["kind"], "offscreen": Choice(instructions="Which control?", criteria={"0": "Save"})}
+
+    reply = service.client().system_one(state={"goal": "save"}, questions=lone)
+
+    assert set(json.loads(service.seen[0].content)["questions"]) == {"kind"}
+    assert reply.answers["offscreen"] == ChoiceAnswer(choice="0", confidence=1.0, probabilities={"0": 1.0})
+    assert reply.answers["kind"].choice == "click"
+
+
+def test_with_every_choice_settled_no_request_is_made():
+    service = Service()
+
+    reply = service.client().system_one(state={}, questions={"only": Choice(criteria={"yes": "the one"})})
+
+    assert service.seen == [] and reply.answers["only"].choice == "yes"
+
+
 def test_an_overloaded_service_is_asked_again():
     service = Service((429, {"error": "slow down"}), (529, {"error": "overloaded"}), ANSWERS)
 
@@ -231,6 +253,9 @@ def test_a_refusal_answered_natively_names_its_question():
             state="s", questions={"kind": QUESTIONS["kind"]}
         )
     assert refused.value.question == "kind"
+    # The reply came back and was billed: the error carries it, so the run's cost keeps it.
+    assert refused.value.reply.usage == Usage(input_tokens=476, output_tokens=70, cost=2e-05)
+    assert refused.value.reply.answers == {}
 
 
 def test_a_502_that_names_no_question_fails_after_its_retries():
@@ -314,3 +339,21 @@ def test_a_click_chosen_once_the_item_was_refused_is_no_decision(monkeypatch, tm
 
     assert state.outcome == "no decision"
     assert world.log == []  # nothing was guessed
+
+
+def test_a_refused_offscreen_question_is_asked_again_without_it(monkeypatch, tmp_path):
+    world = claude_window()
+    world.pages["claude"].offscreen = ("Grant access",)
+    refused = Refusal('openrouter answered 502: OpenAI refused to answer question "offscreen"', "offscreen")
+
+    def policy(state: dict, questions: dict) -> tuple:
+        if state["frontmost_app"] == "Claude":
+            if "offscreen" in questions:
+                raise refused
+            return ("use_browser", "other")
+        return ("done", None)
+
+    state = drive(world, policy, monkeypatch=monkeypatch, tmp_path=tmp_path, writer=FakeWriter(url=IAM))
+
+    assert world.page.name == "iam" and state.outcome == "done"
+    assert "refused=offscreen, asked again without it" in (tmp_path / "run" / "run.log").read_text()

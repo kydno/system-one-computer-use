@@ -13,6 +13,9 @@ from .models import AxNode, Field, Guidance, Item, Screen
 
 STOP_KINDS = ("done", "none")
 OFFSCREEN_PREFIX = "offscreen:"
+# The questions a step is asked again without when the model refuses one, each with the one kind
+# of action that cannot go ahead without its answer.
+SPARED = {"item": "click_item", "offscreen": "press_offscreen"}
 PRESS_OFFSCREEN = (
     "Activate a labelled control that the app exposes but that is not currently visible on screen "
     "(chosen in the offscreen question). Use when the needed control is known to exist but is "
@@ -268,7 +271,8 @@ def decide(
     Luna refuses the item question now and then, the one whose labels are text read off the screen,
     and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
     IAM roles, a run never got as far as opening the browser the goal named. Most moves need no
-    item, so the step is asked again without it, and only a click is left without a decision.
+    item, so the step is asked again without it, and only a click is left without a decision. It
+    refuses the off-screen question the same way, and only pressing one of those controls needs it.
     """
     questions = {
         "kind": Choice(
@@ -302,7 +306,10 @@ def decide(
         questions["item"] = Choice(
             instructions=(
                 "If clicking an on-screen item is the right move, which item? If scrolling is, which "
-                "item sits in the list, panel, or page that should scroll? Items marked with a "
+                "item sits in the list, panel, or page that should scroll? Pick a line of that content "
+                "itself, not a sidebar or menu entry that shares a word with the goal: the wheel turns "
+                "whatever is under the pointer, so over a sidebar link the sidebar scrolls, or its "
+                "menu opens, and the page stays where it was. Items marked with a "
                 "role come from the app's accessibility tree and are real controls; plain items are "
                 "text read from the screen. Never pick an item that an action listed as already tried "
                 "on this screen clicked or pressed: each of those led straight back here."
@@ -323,13 +330,13 @@ def decide(
     try:
         answers = client.system_one(state=state, questions=questions).answers
     except Refusal as e:
-        if e.question != "item" or "item" not in questions:
+        if e.question not in SPARED or e.question not in questions:
             raise
         refused = e.question
         rest = {name: question for name, question in questions.items() if name != refused}
         answers = client.system_one(state=state, questions=rest).answers
-        if answers["kind"].choice == "click_item":
-            raise DecisionError(f"the model refused 'item', then chose a click without it ({e})") from e
+        if answers["kind"].choice == SPARED[refused]:
+            raise DecisionError(f"the model refused {refused!r}, then chose {SPARED[refused]} without it ({e})") from e
     app = None
     if answers["kind"].choice == "open_app" and apps:
         app = client.system_one(

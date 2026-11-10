@@ -79,12 +79,25 @@ def openrouter_writer() -> bool:
 
     CLICKER_WRITER_BASE_URL names one; so does ANTHROPIC_BASE_URL, which the Anthropic SDK reads
     with the Anthropic key it belongs to, and CLICKER_WRITER_API=anthropic asks for Anthropic's own.
+    ANTHROPIC_BASE_URL with no Anthropic credential beside it names nothing to write with: a coding
+    agent's shell sets one for itself, and an app started from there inherits it.
     """
-    if not os.environ.get("OPENROUTER_API_KEY", "").strip():
+    if not openrouter_key():
         return False
     if os.environ.get("CLICKER_WRITER_API", "").strip().lower() == "anthropic":
         return False
-    return not (os.environ.get("CLICKER_WRITER_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL"))
+    if os.environ.get("CLICKER_WRITER_BASE_URL"):
+        return False
+    return not (os.environ.get("ANTHROPIC_BASE_URL") and anthropic_credential())
+
+
+def openrouter_key() -> bool:
+    return bool(os.environ.get("OPENROUTER_API_KEY", "").strip())
+
+
+def anthropic_credential() -> bool:
+    """Whether the Anthropic SDK has a key, token, or profile of its own to send to its base URL."""
+    return any(os.environ.get(name, "").strip() for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"))
 
 
 def writer_model() -> str:

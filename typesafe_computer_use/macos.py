@@ -152,6 +152,12 @@ def scroll(lines: int, at: tuple[float, float] | None = None) -> None:
     _post(Quartz.CGEventCreateScrollWheelEvent(None, Quartz.kCGScrollEventUnitLine, 1, lines))
 
 
+def hover(at: tuple[float, float]) -> None:
+    """Park the cursor at `at` and press nothing, so what reacts to it there shows before a scroll."""
+    check_abort()
+    _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, at, Quartz.kCGMouseButtonLeft))
+
+
 # ------------------------------------------------------------------ apps and windows
 
 
@@ -176,16 +182,21 @@ def frontmost_pid() -> int:
 
 
 def activate(app: str, timeout: float = 3.0) -> bool:
-    """Bring an app to the front, starting it when it is not running, and confirm it got there."""
+    """Bring an app to the front with a window on screen, starting it when it is not running.
+
+    `reopen` is what a click on the app's Dock icon sends: an app with every window closed or
+    minimized shows one. `activate` alone brings such an app's menu bar to the front over the last
+    app's window, so the screen still shows that window while the run reads the new app's.
+    """
     check_abort()
     try:
-        osascript(f'tell application "{app}" to activate')
+        osascript(f'tell application "{app}"\nreopen\nactivate\nend tell')
     except subprocess.CalledProcessError:
         return False  # no app goes by that name
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         check_abort()
-        if frontmost_app() == app:
+        if in_front(app):
             return True
         time.sleep(0.1)
     check_abort()
@@ -194,7 +205,13 @@ def activate(app: str, timeout: float = 3.0) -> bool:
     except subprocess.CalledProcessError:
         return False  # still starting, or its process goes by another name than its bundle
     time.sleep(0.3)
-    return frontmost_app() == app
+    return in_front(app)
+
+
+def in_front(app: str) -> bool:
+    """The app is frontmost and shows a window."""
+    name, pid = frontmost_app_and_pid()
+    return name == app and frontmost_window_bounds(pid) is not None
 
 
 def open_url(browser: str, url: str) -> bool:

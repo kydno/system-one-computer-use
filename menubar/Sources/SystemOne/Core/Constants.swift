@@ -154,6 +154,47 @@ enum K {
         static let effortUnlitOpacity: Double = 0.35
     }
 
+    // MARK: - The usage breakdown, in settings
+
+    enum Usage {
+        /// Where `clicker` writes its run folders, in the checkout.
+        static let runsFolder = "runs"
+        /// A run folder's name starts with when it began.
+        static let folderDateFormat = "yyyyMMdd-HHmmss"
+        /// Tones a role's share of the pie splits into; past that, the smallest become "Other".
+        static let tonesPerRole = 3
+        static let otherLabel = "Other"
+
+        /// Three hues a third of the wheel apart, so no role's tones run into another's:
+        /// blue for the decision model, magenta for the reviewer, green for the writer.
+        static let decisionHue: Double = 0.58
+        static let reviewerHue: Double = 0.91
+        static let writerHue: Double = 0.25
+        /// Each tone of a role, its biggest model first: (saturation, brightness).
+        static let tones: [(Double, Double)] = [(0.72, 0.95), (0.85, 0.72), (0.95, 0.50)]
+
+        static let pieSize: CGFloat = 116
+        /// The hairline between slices, in the box's own background.
+        static let sliceGap: CGFloat = 1.5
+        static let pieLegendGap: CGFloat = 16
+        static let legendRowGap: CGFloat = 3
+        static let legendRoleGap: CGFloat = 8
+        static let legendDotSize: CGFloat = 7
+        static let legendFontSize: CGFloat = 11
+        static let caretSize: CGFloat = 10
+        /// The pie sweeps in this long after the section opens.
+        static let sweepDuration: Double = 0.7
+        /// The pie with nothing to divide: one grey disc.
+        static let emptyPieOpacity: Double = 0.12
+        static let emptyTextOpacity: Double = 0.4
+        static let pickerGap: CGFloat = 8
+
+        /// A decision model is suggested only once this many of its runs said whether the goal was reached.
+        static let runsToSuggest = 3
+        /// Success rates this close to the best count as a tie, which the cheaper per token wins.
+        static let suggestMargin: Double = 0.05
+    }
+
     // MARK: - Permissions
 
     enum Permissions {
