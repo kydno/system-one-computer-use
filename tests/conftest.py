@@ -69,7 +69,7 @@ for _windows_module in ("psutil", "uiautomation", "win32api", "win32con", "win32
 import pytest  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from typesafe_computer_use import macos, windows  # noqa: E402
+from typesafe_computer_use import actions, macos, windows  # noqa: E402
 from typesafe_computer_use.browser import cdp  # noqa: E402
 from typesafe_computer_use.models import Item, Screen  # noqa: E402
 
@@ -207,6 +207,12 @@ def clean_env(monkeypatch):
     for name in WRITER_ENV:
         monkeypatch.delenv(name, raising=False)
     return monkeypatch
+
+
+@pytest.fixture(autouse=True)
+def no_look_left(monkeypatch):
+    """No capture an action's check kept in one test seeds a settle in the next (see `actions.last_look`)."""
+    monkeypatch.setattr(actions, "_look", None)
 
 
 @pytest.fixture

@@ -290,3 +290,37 @@ moved to the last-name field (the next capture's field reads it), step 3 typed t
 achieved. Against the earlier run of the same goal with the gate shut: 4 steps for 5, no hand-off for one, 3 writer and answer
 calls taking 6.0 s for 4 taking 38.7 s, $0.0018 for $0.0020. One pair of runs, so a demonstration, not a rate; the same
 goal reaches the same end by a shorter path when the move it names is there.
+
+## 2026-11-11: settle after an action whose own check already looked (issue 16, offline, no spend)
+
+Measured from the saved `timing` and `kind` of every step that settled (604 steps in 128 runs, all at `--delay 2`), with the
+history line's shape (refused, nothing moved, pressed via accessibility) for what the action's own check saw. Settle was 914 s of
+2760 s of step time on those steps, 33%.
+
+| kind | steps | mean s | sum s | ran the whole 2 s |
+|---|---|---|---|---|
+| click_item | 233 | 1.52 | 354 | 90 |
+| scroll_down | 178 | 1.34 | 238 | 40 |
+| use_browser | 96 | 1.85 | 178 | 64 |
+| type_text | 27 | 1.33 | 36 | 8 |
+| wait | 15 | 1.89 | 28 | 11 |
+| the rest | 55 | 1.4 | 80 | 16 |
+
+By what the check saw: a scroll that moved (174 steps, mean 1.30 s), a web press that showed (80, 1.56 s), a press that showed
+nothing and was followed by a pointer click (35, 1.47 s), a refusal (24, 1.92 s; 18 ran the whole 2 s), a wait (15, 1.89 s), a scroll
+that moved nothing (15, 1.75 s), and no check at all (261, 1.58 s). 229 settles ran the whole 2 s. After 81 of them the next step's
+capture was unchanged, 141 (301 s) changed but never held still, and 7 were a run's last step (a rough split: the comparison
+masked a 25 pt menu bar and no focused field). Settles that ended on their own took a median 1.0 s for every kind, two looks; no scroll that ended on its own took past 1.70 s.
+
+Change (`runner.settle_action`): no settle after a wait, a refusal that did nothing (one that closed a popup first still settles), or a
+scroll its check saw change nothing. A press or scroll check that saw the change hands its capture to `settle` as the first look, so a
+screen already still settles one look sooner. Scrolls wait 1.5 s at most; every other kind keeps the whole delay, clicks included,
+since a page load is likely there, and so does a pointer click after a press that showed nothing.
+
+Expected saving, row by row over the same 604 steps, with one look costed at 0.38 s (0.25 s plus the median capture, a low figure;
+two looks measured about 1.0 s): refusals 46 s, waits 28 s, scrolls that moved nothing 26 s, the check's look as the first 70 s on
+184 steps, the scroll cap 7 s on 33 steps. 177 s of 914 s settle, 0.29 s a step: the mean step from 4.57 s to about 4.28 s. The
+141 steps whose screen changed and never held still are left alone; shortening those needs supervised runs.
+
+Not yet run on hardware. Verification is the timing line before and after on the same goals, path replays still completing, and
+`MAX_IDLE` stalls not firing more often.

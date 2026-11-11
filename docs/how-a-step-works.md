@@ -173,7 +173,7 @@ on the app, and the node and time caps bind first on a big tree: Notes and Chrom
 | `press_enter`, `press_escape` | keyboard |
 | `go_back` | Cmd-[, the browser's Back, when the last click led somewhere unhelpful |
 | `scroll_down`, `scroll_up` | 10 lines, after parking the cursor over the item the `item` answer names, since a wheel scrolls whatever is under it: on Google Maps the window's center is the map, which zoomed out while the results list beside it stayed put. With no item, or one in the menu bar or outside the frontmost window, the cursor goes to the window's center. 0.4 s later the screen around the cursor is compared with the capture, and a scroll that changed nothing there says so in the history (`scrolled down over 'X' (nothing there moved)`) |
-| `wait` | screen still loading: 3 s, then the step's own settle, so three waits cover a slow page |
+| `wait` | screen still loading: 3 s and no settle after it, so three waits cover a slow page |
 | `done`, `none` | stop |
 
 ### Moves beyond clicking and typing
@@ -215,9 +215,17 @@ row on a goal of select all, copy, paste, since the goal was all it saw.
 
 After any action the screen gets time to settle before the next step reads it. It is looked at
 every 0.25 s: once it differs from the capture the action was decided on and then holds still for
-one look, it has settled. One that has not changed at all, or never holds still, gets the whole
-`--delay` (2 s). The menu bar clock and a caret blink do not count as change. The step's timing
+one look, it has settled. Otherwise, one that has not changed at all, or never holds still, gets the
+whole `--delay` (2 s), except as below. The menu bar clock and a caret blink do not count as change. The step's timing
 line shows the wait as `settle`. On Google Flights the fixed 2 s was 20 s of a 116 s run.
+
+An action whose own check already looked settles sooner (`runner.settle_action`). A press on a web
+page and a scroll each take a look 0.4 s after acting; when that look saw the change, it counts as
+the settle's first one. A scroll that moved nothing, a refusal, and a wait get no settle at all:
+nothing is left to show, and the wait was itself the time. A scroll waits 1.5 s at most, since past
+that a scrolled screen that never holds still is something playing beside the list. A click keeps
+the whole delay, as does a pointer click after a press that showed nothing, since either may be
+waiting on a page load.
 
 ## Where free text comes from
 

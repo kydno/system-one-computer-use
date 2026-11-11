@@ -17,7 +17,7 @@ from .platform_adapter import desktop
 from .writer import Writer, WriterError, compose_text, compose_url, looks_credential, url_named_in
 
 VERIFY_THRESHOLD = 0.5
-WAIT_SECONDS = 3.0  # what a wait adds to the settle every step already gets; three of them cover a slow page
+WAIT_SECONDS = 3.0  # a wait is this and no settle after it; three of them cover a slow page
 CLOSE_SECONDS = 0.5  # for a closed popup to leave the screen before the click under it
 PRESS_SECONDS = 0.4  # for a page to paint what an accessibility press did; Chromium paints within a frame or two
 # A press shows when at least this many pixels of the half-size capture moved by more than PIXEL_STEP
@@ -48,8 +48,39 @@ class Context:
     earlier: list[dict] = field(default_factory=list)  # the screens before this one, for text that was read on the way
 
 
+@dataclass(frozen=True)
+class Look:
+    """The capture an action's own check took after acting, and whether it saw the action's effect.
+
+    The settle after the action starts from it (see `runner.settle_action`): a check that saw no
+    change leaves nothing to wait for, and one that saw a change is the settle's first look, so a
+    screen already still is settled one look sooner.
+    """
+
+    image: Image.Image
+    changed: bool
+
+
+_look: Look | None = None
+
+
+def looked(image: Image.Image, changed: bool) -> None:
+    """Keep what the action's own check saw, for the settle after it."""
+    global _look
+    _look = Look(image, changed)
+
+
+def last_look() -> Look | None:
+    """What the check of the action just taken saw, or None when it took no look. Read once: a look
+    from one action must never stand in for the next one's."""
+    global _look
+    look, _look = _look, None
+    return look
+
+
 def perform(decision: Decision, screen: Screen, items: list[Item], ctx: Context) -> str:
     desktop.check_abort()
+    last_look()  # a look left from an earlier action is not this one's
     key = decision.chosen
     by_index = {str(it.index): it for it in items}
     if key in by_index:
@@ -85,7 +116,9 @@ def click_item(item: Item, screen: Screen) -> str:
     try:
         desktop.click_at(screen.to_points(item))
     except Missed as e:
-        return f"{closed}click refused: {item.text!r} was not clicked, {e}"
+        # After a press that went out, this is no refusal that did nothing: the press may still be loading a page.
+        pressed = "accessibility press showed nothing, then " if unseen else ""
+        return f"{pressed}{closed}click refused: {item.text!r} was not clicked, {e}"
     if ref is None:
         return f"{closed}clicked {item.text!r}"
     if unseen:
@@ -158,7 +191,11 @@ def press_showed(screen: Screen) -> bool:
     if screen.url is None:
         return True
     desktop.sleep_watching(PRESS_SECONDS)
-    return moved(screen.image, desktop.screenshot(), screen.scale, screen.field)
+    after = desktop.screenshot()
+    if not moved(screen.image, after, screen.scale, screen.field):
+        return False  # a pointer click follows, and what it does has not been looked at
+    looked(after, changed=True)
+    return True
 
 
 def moved(
@@ -535,6 +572,7 @@ def writer_scroll(way: str, over: str, screen: Screen, items: list[Item]) -> str
     goal about Google Analytics drew its scroll to the sidebar's 'Analytics' link every time, even
     while the writer's focus said to scroll over the settings page.
     """
+    last_look()
     lines = SCROLL_LINES if way in ("up", "top") else -SCROLL_LINES
     target = scroll_over(over, screen, items)
     point = screen.to_points(target) if target is not None else None
@@ -548,6 +586,7 @@ def writer_scroll(way: str, over: str, screen: Screen, items: list[Item]) -> str
             break
         scrolls += 1
         before = after
+    looked(after, changed=scrolls > 0)
     where = f" over {target.text!r}" if target is not None else ""
     if way in ("top", "bottom"):
         what = f"scrolled to the {way}{where} ({scrolls} {'scroll' if scrolls == 1 else 'scrolls'})"
@@ -587,7 +626,10 @@ def scroll_showed(screen: Screen, before: Image.Image, point: tuple[float, float
     step should know that rather than read "scrolled down" again.
     """
     desktop.sleep_watching(PRESS_SECONDS)
-    return scroll_moved(screen, before, desktop.screenshot(), point)
+    after = desktop.screenshot()
+    showed = scroll_moved(screen, before, after, point)
+    looked(after, changed=showed)
+    return showed
 
 
 def scroll_moved(screen: Screen, before: Image.Image, after: Image.Image, point: tuple[float, float] | None) -> bool:
@@ -600,7 +642,8 @@ def scroll_moved(screen: Screen, before: Image.Image, after: Image.Image, point:
 
 
 def _wait(decision, screen, items, ctx) -> str:
-    """Give a loading page time. The step's own settle follows, and holds out while the page still moves."""
+    """Give a loading page time. No settle follows: the wait is the time, and a page still loading after
+    it is seen as such by the next step."""
     desktop.sleep_watching(WAIT_SECONDS)
     return "waited"
 
