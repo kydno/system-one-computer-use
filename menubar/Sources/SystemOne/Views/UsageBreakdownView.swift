@@ -2,13 +2,19 @@ import SwiftUI
 
 /// The settings box's usage section: what the runs in this checkout cost, or how many tokens they
 /// took, split by the role each model played, as `run.json` reports it, and the decision model
-/// those runs suggest. Folded to its title until the caret opens it; then the pie sweeps in, a third
-/// of the wheel's hues to each role and up to three tones of it, one per model, the smallest folded
-/// into "Other".
+/// those runs suggest. The cost pie also holds what `clicker-eval` batches paid, which no run folder
+/// records, and says how many runs saved no cost, which its total leaves out; over the whole
+/// lifetime it adds OpenRouter's own count for the key, which includes both. It follows the run
+/// folders while the panel is up, so a run from a terminal shows without reopening it. Folded to
+/// its title until the caret opens it; then the pie sweeps in, a third of the wheel's hues to each
+/// role and up to three tones of it, one per model, the smallest folded into "Other".
 struct UsageBreakdownView: View {
 
     /// The decision model `.env` names, and how the box writes a new one.
     let decisionModel: String
+    /// Whether the panel is up. The hosting view outlives each opening, so this is what tells the
+    /// section the panel is open again and its numbers may have moved.
+    let isLive: Bool
     let write: (String, String) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -19,6 +25,9 @@ struct UsageBreakdownView: View {
     @State private var window = UsageWindow.lifetime
     @State private var metric = UsageMetric.cost
     @State private var runs: [RunUsage]?
+    @State private var evals: [EvalSpend] = []
+    /// What OpenRouter says the decision key has spent in all; nil until it says, or with no key.
+    @State private var openRouterTotal: Double?
     @State private var sweep: Double = 0
     @State private var detailsHeight: CGFloat = 0
 
@@ -36,11 +45,42 @@ struct UsageBreakdownView: View {
                 .accessibilityHidden(!isExpanded)
         }
         .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: isExpanded)
-        // Read again on every open, so the runs since the last one count.
-        .task(id: isExpanded) {
-            guard isExpanded, let root = Project.root else { return }
-            runs = await Task.detached(priority: .userInitiated) { UsageLedger.load(root: root) }.value
-            sweepIn()
+        // Read on every open of the section and of the panel, so the runs since the last one count,
+        // then kept current: a run that ends while it is open, from this app or from a terminal,
+        // shows within `K.Usage.refreshInterval`. It only reads the folders again when one changed.
+        .task(id: isExpanded && isLive) {
+            guard isExpanded, isLive, let root = Project.root else { return }
+            var seen: [String: Date]?
+            var asked: Date?
+            while !Task.isCancelled {
+                let stamp = await Task.detached(priority: .utility) { UsageLedger.fingerprint(root: root) }.value
+                if stamp != seen {
+                    let (loaded, paid) = await Task.detached(priority: .userInitiated) {
+                        (UsageLedger.load(root: root), UsageLedger.loadEvals(root: root))
+                    }.value
+                    if seen == nil {
+                        runs = loaded
+                        evals = paid
+                        sweepIn()
+                    } else {
+                        // The wheel is already round: the slices glide to their new shares.
+                        withAnimation(Motion.curve(K.Usage.sweepDuration, reduceMotion: reduceMotion)) {
+                            runs = loaded
+                            evals = paid
+                        }
+                    }
+                    seen = stamp
+                }
+                if asked.map({ Date().timeIntervalSince($0) >= K.Usage.keyRefreshInterval }) ?? true {
+                    asked = Date()
+                    if let key = EnvFile.value(K.Usage.keyEnvName) {
+                        if let total = await OpenRouter.keyUsage(apiKey: key) { openRouterTotal = total }
+                    } else {
+                        openRouterTotal = nil
+                    }
+                }
+                try? await Task.sleep(for: .seconds(K.Usage.refreshInterval))
+            }
         }
     }
 
@@ -133,10 +173,28 @@ struct UsageBreakdownView: View {
     // MARK: - The pie and its legend
 
     private func breakdown(_ shown: [RunUsage]) -> some View {
-        let slices = UsageLedger.slices(UsageLedger.totals(shown, metric: metric))
-        return HStack(alignment: .top, spacing: K.Usage.pieLegendGap) {
-            pie(slices)
-            legend(slices)
+        var totals = UsageLedger.totals(shown, metric: metric)
+        // Eval batches have only a cost, so they are in the cost pie and not the token one.
+        let evalCost = UsageLedger.evalCost(evals, window)
+        if metric == .cost, evalCost > 0 { totals[.evals] = [K.Usage.evalsLabel: evalCost] }
+        let slices = UsageLedger.slices(totals)
+        let uncosted = metric == .cost ? UsageLedger.uncostedRuns(shown) : 0
+        return VStack(alignment: .leading, spacing: K.RunBox.sectionGap) {
+            HStack(alignment: .top, spacing: K.Usage.pieLegendGap) {
+                pie(slices)
+                legend(slices)
+            }
+            // OpenRouter counts by key and by calendar, not by this window, so only the whole is shown.
+            if metric == .cost, window == .lifetime, let total = openRouterTotal {
+                HStack {
+                    SectionLabel(text: "OpenRouter total")
+                    figure(total).font(.system(size: K.Usage.legendFontSize, weight: .medium))
+                }
+                .help("What OpenRouter says this key has spent in all: every run, eval batch and anything else that used it, including runs from before costs were saved")
+            }
+            if uncosted > 0 {
+                caption("\(uncosted) \(uncosted == 1 ? "run has" : "runs have") no cost recorded, so only \(uncosted == 1 ? "its" : "their") tokens count.")
+            }
         }
     }
 
@@ -173,7 +231,8 @@ struct UsageBreakdownView: View {
                 SectionLabel(text: "Total")
                 figure(slices.isEmpty ? nil : total).font(.system(size: K.Usage.legendFontSize, weight: .medium))
             }
-            ForEach(UsageRole.allCases) { role in
+            // Evals are on show only when a batch has paid something in this window.
+            ForEach(UsageRole.allCases.filter { role in role != .evals || slices.contains { $0.role == role } }) { role in
                 let mine = slices.filter { $0.role == role }
                 VStack(alignment: .leading, spacing: K.Usage.legendRowGap) {
                     SectionLabel(text: role.title, trailing: mine.isEmpty ? "N/A" : metric.format(mine.reduce(0) { $0 + $1.value }))
@@ -274,6 +333,7 @@ struct UsageBreakdownView: View {
         case .decision: hue = K.Usage.decisionHue
         case .reviewer: hue = K.Usage.reviewerHue
         case .writer: hue = K.Usage.writerHue
+        case .evals: hue = K.Usage.evalsHue
         }
         let (saturation, brightness) = K.Usage.tones[min(slice.tone, K.Usage.tones.count - 1)]
         return Color(hue: hue, saturation: saturation, brightness: brightness)

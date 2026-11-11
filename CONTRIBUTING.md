@@ -1,10 +1,7 @@
-# Contributing
+# Ground rules
 
-Bug reports with a run folder attached are the most useful thing you can send.
-`runs/<timestamp>/` holds the capture, the exact payload, and every probability,
-so a stall can be replayed offline with `--image`.
-
-## Ground rules
+The design rules the code holds to, how to write a task the loop cannot do yet, and the checks a
+change passes. `AGENTS.md` points here.
 
 - Keep the action set mutually exclusive. Two options that mean the same thing
   split the vote and read as low confidence.

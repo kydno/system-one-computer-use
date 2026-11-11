@@ -96,6 +96,19 @@ enum OpenRouter {
         return data
     }
 
+    /// What OpenRouter says `apiKey` has spent in all, in USD, over every request made with it. Nil
+    /// when it cannot say: no network, a refused key, a reply that is not what it should be.
+    static func keyUsage(apiKey: String) async -> Double? {
+        var request = URLRequest(url: K.Usage.keyURL, timeoutInterval: K.Usage.keyRequestTimeout)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let reply = try? JSONDecoder().decode(KeyReply.self, from: data)
+        else { return nil }
+        return reply.data.usage
+    }
+
     private actor Cache {
         static let shared = Cache()
         private(set) var models: [Model]?
@@ -103,6 +116,11 @@ enum OpenRouter {
     }
 
     // The parts of OpenRouter's replies read here; field names are theirs.
+
+    private struct KeyReply: Decodable {
+        struct Body: Decodable { let usage: Double }
+        let data: Body
+    }
 
     private struct ModelList: Decodable {
         let data: [RawModel]

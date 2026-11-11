@@ -96,7 +96,7 @@ struct SettingsView: View {
 
             Divider()
 
-            UsageBreakdownView(decisionModel: decisionModel.id, write: write)
+            UsageBreakdownView(decisionModel: decisionModel.id, isLive: !model.isClosing, write: write)
 
             Divider()
 
