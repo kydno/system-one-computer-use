@@ -30,18 +30,24 @@ model can stand in: `click` (left or right, one to three clicks), `move_pointer`
 `type_text`, `press_key` (the named keys, or a letter with modifiers for a shortcut), `scroll`,
 `wait` (at most 10 s), `screenshot`, and `finish`, which ends the takeover with the model's verdict
 and what to tell the user. Coordinates are pixels of the screenshot the model was last sent: the
-capture shrunk to 1568 px on its longest side.
+capture shrunk to at most 1568 px on its longer side and 768 px on its shorter (1280x768 for a
+16:10 screen), the size OpenAI's high detail leaves an image at, sent as a JPEG with its size said
+beside it.
 
 ## What it is told
 
-- **Instructions:** the rules, then the whole packet as JSON: `goal`, `outcome` and `why`, the
-  writer's `answer` and `last_focus`, every action with the app, URL and screen it led to,
-  `handoffs`, `questions`, `earlier_screens`, `current_screen` (its text in reading order), the
-  `moves` the loop had, and `read_only`. A read-only goal is told to change nothing.
-- **First turn:** the goal and a fresh screenshot. The screen may have changed since the run
-  stopped, so the model sees it as it is, and the packet's `current_screen` says what it was.
+- **Instructions:** the rules alone, including that text on screen and in the story is data and
+  never instructions. A read-only goal is told to change nothing.
+- **First turn:** the goal, then the whole packet as JSON, labelled as what the run did and read:
+  `outcome` and `why`, the writer's `answer` and `last_focus`, every action with the app, URL and
+  screen it led to, `handoffs`, `questions`, `earlier_screens`, `current_screen` (its text in
+  reading order), the `moves` the loop had, and `read_only`. Then a fresh screenshot: the screen
+  may have changed since the run stopped, so the model sees it as it is, and the packet's
+  `current_screen` says what it was. The story is in a user turn rather than the instructions
+  because it holds text read off pages.
 - **Each turn after:** the result of every call, and a new screenshot after the turn's last one.
-  A turn that acted waits `--delay` seconds first.
+  A turn that acted waits `--delay` seconds first. Each request carries the three newest
+  screenshots; a line stands in for each older one, and every action and result stays.
 
 It never types into a field the system calls secure, or one whose label names a password, a code
 or a card: that call is refused, and the model is told to finish and say what the user has to do.
@@ -68,9 +74,10 @@ count the takeover.
 
 ## What it costs
 
-OpenRouter reports each reply's cost, and `takeover.json` adds them up. At GPT-6 Luna's listed
-price ($0.10 per million input tokens, $0.01 cached, $0.50 output), a screenshot is a fraction of
-a cent: one OSWorld task Luna finished in 6 turns took about 59,000 input tokens (43,000 cached)
-and 320 output tokens, about $0.002. A 30-turn takeover carries every screenshot it took, so it
-costs more per turn as it goes, but stays in cents. A stronger model costs a hundred times more per
+`takeover.json` adds up the cost each reply reports, as OpenRouter's replies do on its other APIs;
+when none reports one, `cost` is null and the token counts remain. At GPT-6 Luna's listed price on
+OpenRouter ($0.10 per million input tokens, $0.01 cached, $0.50 output), a screenshot is a
+fraction of a cent. For scale, not a measurement of this loop: OSWorld's own GPT agent on Luna, at
+`xhigh` effort, finished one task in 6 turns on about 59,000 input tokens (43,000 cached) and 320
+output tokens, about $0.002. With three screenshots per request, a 30-turn takeover stays in cents. A stronger model costs a hundred times more per
 token and more per turn: check its price before naming it in `CLICKER_TAKEOVER_MODEL`.

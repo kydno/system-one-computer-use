@@ -20,8 +20,11 @@ from typesafe_computer_use.models import Abort
 from typesafe_computer_use.platform_adapter import desktop
 from typesafe_computer_use.runner import HANDOFF_FILE, STOPPED
 from typesafe_computer_use.takeover import (
+    DROPPED,
+    KEEP_SCREENSHOTS,
     NUDGE,
     READ_ONLY,
+    SHORT_EDGE,
     TAKEOVER_FILE,
     TOOLS,
     TakeoverError,
@@ -34,7 +37,9 @@ GOAL = "buy a ticket to the next show"
 HOME = "https://example.com/"
 TICKETS = "https://example.com/tickets"
 FOCUS = "Click 'Buy' beside the next show"
-SENT = ANSWER_IMAGE_EDGE / CAPTURE[0]  # the screenshot the model sees is the capture shrunk by this
+# The screenshot the model sees is the capture shrunk by this: 2000x1200 to 1280x768.
+SENT = min(ANSWER_IMAGE_EDGE / CAPTURE[0], SHORT_EDGE / CAPTURE[1])
+SIZE = "Screenshot: 1280x768 pixels; (0, 0) is the top left."
 
 
 def tickets() -> World:
@@ -127,9 +132,13 @@ def test_the_takeover_is_told_the_story_and_goes_on_from_where_the_run_stopped(m
 
     # The story reached the model: the goal, why the run stopped, every action and where it led,
     # the writer's last answer and the step it suggested, and the screen the run ended on.
-    system = model.requests[0]["instructions"]
-    assert GOAL in system and STOPPED["low confidence"] in system
-    story = json.loads(system[system.index("{") :])
+    # It goes in the first turn, as data, beside the screen as it is now and the size of that screenshot.
+    first = model.requests[0]["input"]
+    assert len(first) == 1 and len(images(model.requests[0])) == 1
+    text = first[0]["content"][0]["text"]
+    assert GOAL in text and text.endswith(SIZE) and STOPPED["low confidence"] in text
+    story = json.loads(text[text.index("{") : text.rindex("}") + 1])
+    assert story["goal"] == GOAL and story["why"] == STOPPED["low confidence"]
     assert story["actions"] == packet["actions"] and story["actions"][0]["action"] == "clicked 'Tickets'"
     assert story["last_focus"] == FOCUS and story["answer"] == "Not there yet."
     assert story["current_screen"] == {
@@ -139,8 +148,8 @@ def test_the_takeover_is_told_the_story_and_goes_on_from_where_the_run_stopped(m
         "text": ["Next show", "Buy", "Terms"],
     }
     assert story["earlier_screens"] == packet["earlier_screens"] and "click_item" in story["moves"]
-    first = model.requests[0]["input"]
-    assert len(first) == 1 and GOAL in first[0]["content"][0]["text"] and len(images(model.requests[0])) == 1
+    # The instructions are the rules alone: no page text gets their authority.
+    assert "Next show" not in model.requests[0]["instructions"]
     assert model.requests[0]["tools"] == TOOLS and model.requests[0]["model"] == config.DEFAULT_TAKEOVER_MODEL
     assert model.requests[0]["reasoning"] == {"effort": config.DEFAULT_TAKEOVER_REASONING}
 
@@ -149,9 +158,8 @@ def test_the_takeover_is_told_the_story_and_goes_on_from_where_the_run_stopped(m
     second = model.requests[1]["input"]
     assert second[1] == {"role": "assistant", "content": "The run reached the tickets page; Buy is next."}
     assert second[2]["type"] == "function_call" and second[2]["call_id"] == "call_1"
-    assert second[3]["type"] == "function_call_output" and second[3]["output"][0]["text"] == "clicked at ({x}, {y})".format(
-        **at(1)
-    )
+    assert second[3]["type"] == "function_call_output"
+    assert second[3]["output"][0]["text"] == "clicked at ({x}, {y})\n{size}".format(size=SIZE, **at(1))
     assert len(images(model.requests[1])) == 2
 
     assert taken.outcome == "done" and taken.achieved is True
@@ -258,13 +266,18 @@ def test_a_model_that_only_talks_is_reminded_once_then_the_takeover_ends(monkeyp
     assert taken_over(folder)["goal_achieved"] is None
 
 
-def test_the_step_limit_ends_the_takeover(monkeypatch, tmp_path):
+def test_the_step_limit_ends_the_takeover_and_old_screenshots_leave_the_requests(monkeypatch, tmp_path):
     folder = stopped_short(tickets(), monkeypatch, tmp_path)
-    model = FakeOpenRouter(*[[call("screenshot", n)] for n in range(3)])
+    model = FakeOpenRouter(*[[call("screenshot", n)] for n in range(6)])
 
-    taken = take_over(folder, model, steps=3, delay=0)
+    taken = take_over(folder, model, steps=6, delay=0)
 
-    assert taken.outcome == "step limit" and taken.steps == 3 and len(model.requests) == 3
+    assert taken.outcome == "step limit" and taken.steps == 6 and len(model.requests) == 6
+    # Every turn adds a screenshot; each request carries the newest few, and a line stands for each older one.
+    assert [len(images(r)) for r in model.requests] == [1, 2, 3, 3, 3, 3]
+    last = json.dumps(model.requests[-1]["input"])
+    assert last.count(DROPPED) == 6 - KEEP_SCREENSHOTS and images(model.requests[-1])[0].startswith("data:image/jpeg")
+    assert "handoff-raw.png" not in json.dumps(model.requests[0])  # the file name means nothing to the model
 
 
 def test_the_abort_corner_stops_a_takeover_and_the_report_is_still_written(monkeypatch, tmp_path):
@@ -289,7 +302,6 @@ def test_a_read_only_goal_is_told_to_change_nothing(monkeypatch, tmp_path):
 
     assert packet["read_only"] is True and READ_ONLY in instructions(packet)
     assert READ_ONLY not in instructions({**packet, "read_only": False})
-    assert "handoff-raw.png" not in instructions(packet)  # the file name means nothing to the model
 
 
 def test_only_a_run_folder_with_a_packet_not_yet_taken_over_is_taken_over(monkeypatch, tmp_path):
