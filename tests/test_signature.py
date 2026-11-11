@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from typesafe_computer_use.decide import Decision
 from typesafe_computer_use.models import LINES_PER_DIFFERENCE, Field, same_screen, signature
-from typesafe_computer_use.runner import MAX_REPEATS, RunState, answers, earlier_screens, repeating, tried_here
+from typesafe_computer_use.runner import MAX_REPEATS, MAX_REVISITS, RunState, answers, earlier_screens, repeating, tried_here
 
 
 def texts(*words: str):
@@ -158,3 +158,37 @@ def test_the_step_record_carries_the_stop_rules_standing(screen, make_item):
     assert record["already_tried_on_this_screen"] == ["clicked 'Terms'"]
     assert record["idle_actions"] == 1 and record["repeated_actions"] == 0
     assert record["chosen"] == "0" and record["items"][0]["text"] == "Buy"
+
+
+def test_a_navigation_to_the_place_the_last_action_went_to_counts_whatever_the_screen_reads():
+    lines: list[str] = []
+    state = RunState()
+    for n in range(MAX_REVISITS + 1):
+        state.last = ("Google Chrome", "https://a/", None, texts(*[f"Line {i}" for i in range(n + 3)]))  # a new reading each time
+        stopped = repeating(state, "opened https://b/", False, lines.append, navigating=True)
+        assert stopped == (n == MAX_REVISITS)
+    assert state.outcome == "stalled" and state.repeats == 0
+    assert lines == [f"  'opened https://b/' {MAX_REVISITS + 1} times in a row; stopping"]
+
+
+def test_a_navigation_elsewhere_or_a_click_between_two_openings_starts_the_count_again():
+    state = RunState()
+    sequence = [
+        ("opened https://b/", True),
+        ("opened https://c/", True),  # somewhere else
+        ("clicked 'Home'", False),
+        ("opened https://c/", True),  # the same place as two actions ago, with a click between
+        ("opened https://b/", True),
+        ("opened https://b/", True),  # one revisit is a warning shot
+    ]
+    stops = []
+    for n, (what, nav) in enumerate(sequence):
+        state.last = (
+            "Google Chrome",
+            "https://a/",
+            None,
+            texts(*[f"Line {i}" for i in range(n + 3)]),
+        )  # never the same screen twice
+        stops.append(repeating(state, what, False, lambda line: None, navigating=nav))
+    assert stops == [False] * 6
+    assert state.revisits == 1 and state.outcome == "crashed"

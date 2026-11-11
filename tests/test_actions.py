@@ -454,6 +454,55 @@ def test_a_shortcut_from_the_catalog_is_pressed_with_its_modifiers(screen, press
     assert pressed == [keys]
 
 
+@pytest.mark.parametrize("name", ["new_tab", "close_tab", "next_tab", "previous_tab", "reload"])
+@pytest.mark.parametrize("app", ["Notes", "Mail", "TextEdit", ""])
+def test_a_browser_shortcut_is_refused_when_another_app_is_in_front(screen, pressed, name, app):
+    out = actions.perform(shortcut_of(name), replace(screen, app=app), [], context())
+    assert out == f"press_shortcut refused: {name.replace('_', ' ')} works in a browser, and {app or 'no app'} is in front"
+    assert pressed == []
+
+
+@pytest.mark.parametrize("app", ["Google Chrome", "Safari", "Firefox", "Arc"])
+def test_a_browser_shortcut_is_pressed_in_a_browser(screen, pressed, app):
+    assert actions.perform(shortcut_of("close_tab"), replace(screen, app=app), [], context()) == "pressed the close tab shortcut"
+    assert pressed == [("w", True, False, False, False)]
+
+
+def test_the_configured_browser_counts_as_a_browser_whatever_its_name(screen, pressed):
+    ctx = replace(context(), browser="Vivaldi")
+    assert actions.perform(shortcut_of("reload"), replace(screen, app="Vivaldi"), [], ctx) == "pressed the reload shortcut"
+
+
+@pytest.mark.parametrize("name", ["paste", "cut"])
+@pytest.mark.parametrize(
+    "role, label, placeholder",
+    [
+        ("AXSecureTextField", "", ""),
+        ("AXTextField", "Password", ""),
+        ("AXTextField", "", "Card number"),
+        ("AXTextField", "One-time code", ""),
+    ],
+)
+def test_paste_and_cut_are_refused_in_a_field_that_looks_like_a_credential(screen, pressed, name, role, label, placeholder):
+    box = Field(role=role, label=label, placeholder=placeholder, value="", x=0, y=0, w=10, h=10)
+    out = actions.perform(shortcut_of(name), replace(screen, field=box), [], context())
+    assert out == f"press_shortcut refused: {name} would act on a field that looks like a credential"
+    assert pressed == []
+
+
+def test_copy_and_the_other_shortcuts_are_not_held_back_by_a_credential_field(screen, pressed):
+    box = Field(role="AXSecureTextField", label="Password", placeholder="", value="", x=0, y=0, w=10, h=10)
+    assert (
+        actions.perform(shortcut_of("select_all"), replace(screen, field=box), [], context()) == "pressed the select all shortcut"
+    )
+
+
+def test_paste_goes_into_an_ordinary_field(screen, pressed):
+    box = Field(role="AXTextField", label="Search", placeholder="", value="", x=0, y=0, w=10, h=10)
+    assert actions.perform(shortcut_of("paste"), replace(screen, field=box), [], context()) == "pressed the paste shortcut"
+    assert pressed == [("v", True, False, False, False)]
+
+
 @pytest.mark.parametrize("name", ["none", "quit", "force_quit", "Cmd-Q", None])
 def test_a_shortcut_outside_the_catalog_is_refused_and_presses_nothing(screen, pressed, name):
     assert actions.perform(shortcut_of(name), screen, [], context()) == (
