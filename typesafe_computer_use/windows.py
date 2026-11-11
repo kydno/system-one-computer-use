@@ -120,11 +120,16 @@ def role_for(control_type_name: str, password: bool = False) -> str:
 
 
 def _role_of(element) -> str:
-    try:
-        password = bool(getattr(element, "IsPassword", False))
-    except Exception:  # the bridge raises when the element has gone away
-        password = False
-    return role_for(getattr(element, "ControlTypeName", ""), password)
+    """Asks IsPassword only of an edit box: each property read crosses to the app, and the tree
+    walk asks this of every element."""
+    control_type = getattr(element, "ControlTypeName", "")
+    password = False
+    if control_type == "EditControl":
+        try:
+            password = bool(getattr(element, "IsPassword", False))
+        except Exception:  # the bridge raises when the element has gone away
+            password = False
+    return role_for(control_type, password)
 
 
 def pressable(has_invoke: bool, default_action: str) -> bool:
@@ -613,11 +618,13 @@ def focused_field(pid: int | None = None) -> Field | None:
         return None
     frame = _ui_frame(element)
     x, y, w, h = frame if frame is not None else (0.0, 0.0, 0.0, 0.0)
+    role = _role_of(element)
     return Field(
-        role=_role_of(element),
+        role=role,
         label=(getattr(element, "Name", "") or "").strip(),
         placeholder=_ui_placeholder(element),
-        value=_ui_value(element) or "",
+        # A password box's value goes into every request as the focused field's; never read it.
+        value="" if role == "AXSecureTextField" else (_ui_value(element) or ""),
         x=x,
         y=y,
         w=w,

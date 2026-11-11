@@ -68,6 +68,28 @@ def test_the_focused_field_is_secure_when_the_element_says_it_is_a_password(monk
     assert windows.focused_field().role == role
 
 
+@pytest.mark.parametrize(("password", "value"), [(True, ""), (False, "typed text")])
+def test_a_password_box_value_is_never_read(monkeypatch, password, value):
+    """The focused field's value goes into every request, so a password box reports none."""
+    monkeypatch.setattr(windows, "auto", SimpleNamespace(GetFocusedControl=lambda: _Element(password)))
+    monkeypatch.setattr(windows, "_ui_placeholder", lambda _: "")
+    monkeypatch.setattr(windows, "_ui_value", lambda _: "typed text")
+    assert windows.focused_field().value == value
+
+
+def test_is_password_is_asked_only_of_an_edit_box():
+    """The tree walk reads the role of every element; each property read crosses to the app."""
+
+    class Button:
+        ControlTypeName = "ButtonControl"
+
+        @property
+        def IsPassword(self):
+            raise AssertionError("IsPassword read on a button")
+
+    assert windows._role_of(Button()) == "AXButton"
+
+
 def test_an_unknown_control_type_has_no_role():
     assert role_for("PaneControl") == ""
     assert role_for("") == ""
