@@ -7,7 +7,7 @@ from PIL import Image
 
 from typesafe_computer_use import actions, perception
 from typesafe_computer_use.actions import click_item, fill_field, press_offscreen
-from typesafe_computer_use.models import AxNode, Field, Item, Missed, Popup
+from typesafe_computer_use.models import AxNode, Field, Guidance, Item, Missed, Popup
 from typesafe_computer_use.platform_adapter import desktop
 from typesafe_computer_use.writer import Fill, make_writer
 
@@ -414,6 +414,42 @@ def test_use_browser_switches_to_the_open_tab_the_writer_names(screen, browser, 
     assert actions.perform(browsing("other"), screen, [], context(object())) == f"switched to the open tab {GUIDE}"
     assert read == [OPEN_TABS]
     assert browser == [("show", "Google Chrome", GUIDE)]
+
+
+FOCUS_URL = "https://docs.example.com/create/new"
+
+
+def with_focus(focus: str, writer=None) -> actions.Context:
+    return replace(context(writer), guidance=Guidance(focus=focus))
+
+
+def test_use_browser_opens_the_url_the_focus_names_without_asking_the_writer(screen, browser, monkeypatch):
+    monkeypatch.setattr(actions, "compose_url", lambda *a: pytest.fail("the focus already names the page"))
+    ctx = with_focus(f"Open {FOCUS_URL} in the address bar.", writer=object())
+    assert actions.perform(browsing("other"), screen, [], ctx) == f"opened {FOCUS_URL}"
+    assert browser == [("open", "Google Chrome", FOCUS_URL)]
+
+
+def test_use_browser_opens_the_url_the_focus_names_when_there_is_no_writer_at_all(screen, browser, monkeypatch):
+    """Code read the URL out, so the page opens where it used to be refused for want of a writer to propose one."""
+    monkeypatch.setattr(actions, "compose_url", lambda *a: pytest.fail("there is no writer"))
+    ctx = with_focus(f"Open {FOCUS_URL}.")
+    assert ctx.writer is None
+    assert actions.perform(browsing("other"), screen, [], ctx) == f"opened {FOCUS_URL}"
+
+
+def test_use_browser_shows_the_open_tab_when_the_url_the_focus_names_is_one(screen, browser, monkeypatch):
+    monkeypatch.setattr(desktop, "browser_tabs", lambda app: [("New document", FOCUS_URL)])
+    monkeypatch.setattr(actions, "compose_url", lambda *a: pytest.fail("the focus already names the page"))
+    ctx = with_focus(f"Open {FOCUS_URL} in the address bar.")
+    assert actions.perform(browsing("other"), screen, [], ctx) == f"switched to the open tab {FOCUS_URL}"
+    assert browser == [("show", "Google Chrome", FOCUS_URL)]
+
+
+def test_use_browser_asks_the_writer_when_the_focus_only_mentions_a_page_it_is_leaving(screen, browser, monkeypatch):
+    monkeypatch.setattr(actions, "compose_url", lambda *a: "https://www.songkick.com/")
+    ctx = with_focus(f"The page {FOCUS_URL} is not found; click Blank instead.", writer=object())
+    assert actions.perform(browsing("other"), screen, [], ctx) == "opened https://www.songkick.com/"
 
 
 def test_use_browser_opens_a_url_that_is_not_an_open_tab(screen, browser, monkeypatch):
