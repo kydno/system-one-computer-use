@@ -271,3 +271,10 @@ when that run was made; it names the key now), the Windows and OSWorld adapters.
 
 Spent in batch3: $0.03 of $1.00, two of two iterations (the history line of a long row; the gate question naming Tab). The kind
 question's routing to the new shortcuts, measured on saved steps, and issue 14 are still not done: they need a new batch.
+
+Tab, on hardware (`20261110-221057`, approved), the same form goal as `-195229`, now with the gate question naming the key. The gate
+opened (0.97; it was 0.24), step 1 typed the first name, step 2 chose `press_shortcut` (0.83) and `next_field` (1.00), the focus
+moved to the last-name field (the next capture's field reads it), step 3 typed the last name, and the answer model judged the goal
+achieved. Against the earlier run of the same goal with the gate shut: 4 steps for 5, no hand-off for one, 3 writer and answer
+calls taking 6.0 s for 4 taking 38.7 s, $0.0018 for $0.0020. One pair of runs, so a demonstration, not a rate; the same
+goal reaches the same end by a shorter path when the move it names is there.
