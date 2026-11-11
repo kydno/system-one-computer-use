@@ -36,13 +36,13 @@ POINTING = {
     ),
     "double_click_item": (
         "Double-click one of the on-screen items (chosen in the item question): to open a file or folder in a "
-        "list that opens its items by double-click, or to select the word that was clicked. Not for a link, "
-        "a button, or anything that one click already activates."
+        "list that opens its items by double-click. Not for a link, a button, a checkbox, or anything that one "
+        "click already activates."
     ),
     "select_item_text": (
         "Select the whole line or paragraph of an on-screen text item with a triple click (chosen in the item "
-        "question), so that copying it or typing over it acts on that text. Use when the goal needs that text "
-        "copied or replaced and no control on screen selects it."
+        "question), so that it can be copied. Use when the goal needs that text copied and no control on screen "
+        "selects it. Typing afterwards adds text and does not replace the selection."
     ),
 }
 SPARED = {"item": ("click_item", *POINTING), "offscreen": ("press_offscreen",)}

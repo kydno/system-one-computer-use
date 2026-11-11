@@ -486,6 +486,9 @@ class FakeTypeSafe:
         self.asked.append(questions)
         step = self.policy(state, questions)
         kind, target = step[0], step[1]
+        offered = questions["kind"].criteria if "kind" in questions else {}
+        if kind not in offered and kind not in ("done", "none"):
+            raise AssertionError(f"the scenario takes {kind!r}, which the kind question did not offer: {sorted(offered)}")
         confidence = step[2] if len(step) > 2 else DEFAULT_CONFIDENCE
         asked_again = confidence[1] if isinstance(confidence, tuple) else confidence
         self.pending = (target, asked_again)

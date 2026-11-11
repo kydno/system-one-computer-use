@@ -208,9 +208,24 @@ def pointing(kind: str, index: int | None) -> SimpleNamespace:
     ],
 )
 def test_the_other_clicks_are_pointer_clicks_even_on_a_control_the_tree_could_press(screen, pointer, kind, said, button, count):
+    row = replace(ORGANISE, role="cell")  # a list row the tree could press; a double click opens it
     live = replace(screen, ax_refs={3: object()})  # a press would be a single left click, so none is made
-    assert actions.perform(pointing(kind, 3), live, [ORGANISE], context()) == said
+    assert actions.perform(pointing(kind, 3), live, [row], context()) == said
     assert pointer == [((1888.0, 142.0), button, count)]
+
+
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+@pytest.mark.parametrize("role", ["button", "link", "checkbox", "radio", "popup", "menu", "tab"])
+def test_a_second_click_is_refused_on_a_control_that_one_click_activates(screen, pointer, kind, role):
+    control = replace(ORGANISE, role=role)
+    said = actions.perform(pointing(kind, 3), screen, [control], context())
+    assert said == f"{kind} refused: 'Organise' is a {role}, one click activates it"
+    assert pointer == []
+
+
+def test_a_right_click_is_fine_on_a_button(screen, pointer):
+    assert actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context()) == "right-clicked 'Organise'"
+    assert pointer == [((1888.0, 142.0), "right", 1)]
 
 
 def test_the_other_clicks_name_the_row_when_a_label_repeats(screen, pointer):

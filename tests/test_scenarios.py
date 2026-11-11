@@ -2427,11 +2427,30 @@ def test_l71_a_right_click_opens_the_menu_and_the_next_step_picks_from_it(monkey
 def test_l72_a_double_click_opens_the_file(monkeypatch, tmp_path):
     world = files_world()
     state = drive(
-        world, scripted(("double_click_item", "Notes.txt")), goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path
-    )
+        world, scripted(("double_click_item", "Notes.txt")), goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path,
+        moves=True,
+    )  # fmt: skip
 
     assert state.outcome == "done" and world.page.name == "opened" and world.log == ["doubleclick:Notes.txt"]
     assert state.history == ["double-clicked 'Notes.txt'"]
+
+
+def test_l72b_a_double_click_on_a_button_is_refused_and_clicks_nothing(monkeypatch, tmp_path):
+    world = World(
+        [Page(name="shop", items=["Mars tickets", ("Buy", "button")], app="Google Chrome", on={"doubleclick:Buy": "bought"}),
+         Page(name="bought", items=["Bought twice"], app="Google Chrome")]
+    )  # fmt: skip
+
+    state = drive(
+        world,
+        scripted(("double_click_item", "Buy")),
+        goal="buy the ticket",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        moves=True,
+    )
+
+    assert world.log == [] and state.history[0] == "double_click_item refused: 'Buy' is a button, one click activates it"
 
 
 def test_l73_a_triple_click_selects_the_text_and_the_copy_shortcut_takes_it(monkeypatch, tmp_path):

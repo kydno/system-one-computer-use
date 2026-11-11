@@ -111,7 +111,7 @@ class EvalClient(DecisionClient):
 def pick_of(decision: decide.Decision, case: Case) -> dict:
     """A decision as the thing a label states: its kind, and the item it clicked or the site it opened."""
     kind = decision.kind.choice
-    clicked = kind == "click_item" and decision.item is not None
+    clicked = kind in ("click_item", *decide.POINTING) and decision.item is not None
     text = next((i["text"] for i in case.items if decision.item and str(i["index"]) == decision.item.choice), None)
     return {
         "kind": kind,

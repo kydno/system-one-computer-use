@@ -293,7 +293,7 @@ def describe(decision: Decision, state: dict) -> str:
     """A decision as one line: the action, what it acts on, and its confidence."""
     kind = decision.kind.choice
     target = ""
-    if decision.clicking:
+    if decision.clicking or decision.pointing:
         items = {str(it.get("i")): it.get("text") for it in state.get("screen_items_in_reading_order", [])}
         target = f" {items.get(decision.item.choice, decision.item.choice)!r}"
     elif decision.pressing_offscreen:

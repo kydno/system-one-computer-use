@@ -93,6 +93,10 @@ def click_item(item: Item, screen: Screen) -> str:
     return f"{closed}clicked {item.text!r} (accessibility press did not take)"
 
 
+# What an accessibility control is called (`Item.role`) when one click already does what it is for.
+ACTIVATED_BY_ONE_CLICK = frozenset({"button", "link", "checkbox", "radio", "popup", "menu", "tab"})
+
+
 def _point(button: str, count: int, said: str):
     """A right click, a double click, or a triple click on the item the item answer named.
 
@@ -105,6 +109,9 @@ def _point(button: str, count: int, said: str):
         item = next((it for it in items if decision.item is not None and str(it.index) == decision.item.choice), None)
         if item is None:
             return f"{decision.kind.choice} refused: no item on screen was chosen"
+        if count > 1 and item.role in ACTIVATED_BY_ONE_CLICK:
+            # A second click submits twice, toggles a checkbox back, or lands on whatever the next page shows there.
+            return f"{decision.kind.choice} refused: {item.text!r} is a {item.role}, one click activates it"
         popup = screen.covered.get(item.index)
         closed = f"{close_popup(popup)} then " if popup is not None else ""
         try:
