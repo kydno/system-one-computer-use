@@ -11,6 +11,7 @@ import json
 
 from world import FakeWriter, Page, World, drive, scripted
 
+from typesafe_computer_use import runner
 from typesafe_computer_use.events import Events
 from typesafe_computer_use.runner import EARLIER_LINES, HANDOFF_FILE, HANDOFF_RAW, MAX_STALLS, STOPPED
 
@@ -194,6 +195,29 @@ def test_nothing_helps_hands_on(monkeypatch, tmp_path):
     p = handed_on(state, tmp_path)
     assert p["actions"] == [] and p["earlier_screens"] == []
     assert p["current_screen"]["text"] == ["Home", "Tickets", "About"]
+
+
+def test_a_packet_that_cannot_be_written_leaves_the_run_its_outcome(monkeypatch, tmp_path):
+    """The packet is an extra: a fault building it is logged, and the run still ends as it stopped."""
+
+    def broken(*_):
+        raise ValueError("cannot build the packet")
+
+    monkeypatch.setattr(runner, "handoff_packet", broken)
+    state = drive(
+        tickets(),
+        scripted(("none", None)),
+        goal=GOAL,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        writer=FakeWriter(reviews=[NOT_YET]),
+    )
+
+    assert state.outcome == "nothing helps"
+    assert not (tmp_path / "run" / HANDOFF_FILE).exists()
+    run = json.loads((tmp_path / "run" / "run.json").read_text())
+    assert run["outcome"] == "nothing helps" and run["handoff"] is None
+    assert "handoff not written" in (tmp_path / "run" / "run.log").read_text()
 
 
 def test_an_achieved_run_hands_nothing_on(monkeypatch, tmp_path):

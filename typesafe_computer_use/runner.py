@@ -239,12 +239,18 @@ def write_handoff(cfg: RunConfig, ctx: Context, state: RunState, log: Log) -> No
     """
     if state.outcome not in STOPPED or goal_achieved(state) is not False:
         return
-    raw = None
-    if state.view is not None:
-        state.view[0].image.save(cfg.out / HANDOFF_RAW)  # the screen in memory, not a new capture
-        raw = HANDOFF_RAW
-    packet = handoff_packet(cfg, ctx, state, raw)
-    (cfg.out / HANDOFF_FILE).write_text(json.dumps(packet, indent=2), encoding="utf-8")
+    # The run has already ended with its outcome; a packet that cannot be written must not turn
+    # that into a crash, so the failure is logged and `run.json` says no packet was left.
+    try:
+        raw = None
+        if state.view is not None:
+            state.view[0].image.save(cfg.out / HANDOFF_RAW)  # the screen in memory, not a new capture
+            raw = HANDOFF_RAW
+        packet = handoff_packet(cfg, ctx, state, raw)
+        (cfg.out / HANDOFF_FILE).write_text(json.dumps(packet, indent=2), encoding="utf-8")
+    except Exception:
+        log(f"handoff not written:\n{traceback.format_exc().rstrip()}")
+        return
     state.handed_on = True
     log(f"handoff: {cfg.out / HANDOFF_FILE}")
     log.event("handoff", file=str(cfg.out / HANDOFF_FILE), **packet)
