@@ -71,13 +71,36 @@ two runs' files.
 After each cloud run, `scripts/osworld-gcp` appends one JSON line per task to
 `benchmarks/osworld/<run>.jsonl`: the score, steps, time, outcome, and tokens per model (for Luna,
 also its model time and reasoning effort; for this agent, where its trees came from and how many fell back
-to OSWorld's fetch), with the commit the run synced, whether the synced copy
+to OSWorld's fetch, and whether the run was offered the moves beyond clicking and typing, `moves`, and
+who decided, `moves_by`), with the commit the run synced, whether the synced copy
 differed from it (and a hash of the difference), OSWorld's pinned commit, the command, and the
 machine. Rows are never edited; a rerun is a new file. They are not committed for you: committing a
 run's file is what makes it part of the record, and a row from a dirty copy says so. A pull the
 tunnel drops is tried again; when the results still do not come back, the run records no rows, which
 would say that no task came back, and prints the command that records them after `pull-results`.
 Screenshots and recordings stay in `results/`, out of git.
+
+### Comparing the moves
+
+Whether the moves beyond clicking and typing (shortcuts, right, double and triple clicks, drag; see
+[how a step works](how-a-step-works.md#moves-beyond-clicking-and-typing)) raise the score is a
+question only a scored run answers. `CLICKER_MOVES` settles the gate for a whole run, so the same
+tasks can run once in each arm:
+
+```
+CLICKER_MOVES=off scripts/osworld-gcp run-jev chrome/<id> chrome/<id> --ocr rapidocr   # none offered
+CLICKER_MOVES=on  scripts/osworld-gcp run-jev chrome/<id> chrome/<id> --ocr rapidocr   # offered to every task
+CLICKER_MOVES=auto scripts/osworld-gcp run-jev chrome/<id> chrome/<id> --ocr rapidocr  # the gate decides (the default)
+```
+
+`scripts/osworld-gcp` sends the variable to the machine with the command, so `.env` stays as it is
+(a shell variable does not cross SSH, and the one on the command line beats `.env`). On a Linux
+machine of your own, `CLICKER_MOVES=off scripts/osworld run-jev ...` does the same. Each task's row
+carries `moves`, `moves_by`, and the command with the variable in it, so the arms are told apart by
+the data, not by memory. Each arm is a new file in `benchmarks/osworld/`, written right after its
+run; the second arm moves the first's results to `results/archive/`, and the first's rows stay.
+A few tasks in an arm is a smoke test, not a measurement: most tasks score 0 or 1, and the same
+task repeated can differ.
 
 OSWorld keeps no accessibility tree. With `JEV_OSWORLD_SAVE_A11Y=1` (in the environment or `.env`),
 the agent saves each observation's raw tree, the one it read, in its run folder as `obs-NNN-a11y.xml`,

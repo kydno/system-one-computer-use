@@ -2291,6 +2291,75 @@ def test_l77_a_gate_the_model_would_not_answer_is_a_closed_gate(monkeypatch, tmp
     assert "moves: unknown (no answer), so none are offered" in (tmp_path / "run" / "run.log").read_text()
 
 
+def refuse_to_ask(monkeypatch):
+    """Make the gate's own question fail the test if it is put."""
+    from typesafe_computer_use import runner
+
+    def asked(client, goal):
+        raise AssertionError("the goal was asked about although CLICKER_MOVES settled it")
+
+    monkeypatch.setattr(runner, "needs_moves", asked)
+
+
+def test_l77b_clicker_moves_on_opens_the_gate_without_asking_the_model(monkeypatch, tmp_path):
+    from typesafe_computer_use.writer import ANSWER_SYSTEM_MOVES
+
+    monkeypatch.setenv("CLICKER_MOVES", "on")
+    refuse_to_ask(monkeypatch)
+    world = copy_world()
+    writer = FakeWriter(reviews=[{"answer": "Copy it.", "focus": "Press the copy shortcut"}])
+    state = drive(
+        world, scripted(("click_item", "Total 4,210"), ("press_shortcut", "select_all")), goal="read me the total",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer, moves=False,
+    )  # fmt: skip
+
+    assert state.moves is True and state.moves_by == "CLICKER_MOVES"
+    decisions = [q for q in world.fake.asked if "kind" in q]
+    assert decisions and all("press_shortcut" in q["kind"].criteria for q in decisions)
+    assert asked_for_the_answer(writer)[0]["system"] == ANSWER_SYSTEM_MOVES
+    summary = json.loads((tmp_path / "run" / "run.json").read_text())
+    assert (summary["moves"], summary["moves_by"]) == (True, "CLICKER_MOVES")
+    assert "moves: offered (CLICKER_MOVES=on, so the goal is not asked about)" in (tmp_path / "run" / "run.log").read_text()
+
+
+def test_l77c_clicker_moves_off_closes_the_gate_a_goal_that_needs_the_moves_would_have_opened(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLICKER_MOVES", "off")
+    refuse_to_ask(monkeypatch)
+    world = copy_world()
+    state = drive(
+        world, scripted(("click_item", "Total 4,210")), goal="copy the whole note",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True,
+    )  # fmt: skip
+
+    assert state.moves is False and state.moves_by == "CLICKER_MOVES"
+    assert all("press_shortcut" not in q["kind"].criteria for q in world.fake.asked if "kind" in q)
+    assert world.apart and not any(world.apart)  # and the perception is the one a run without the moves has
+    summary = json.loads((tmp_path / "run" / "run.json").read_text())
+    assert (summary["moves"], summary["moves_by"]) == (False, "CLICKER_MOVES")
+    assert "moves: not offered (CLICKER_MOVES=off, so the goal is not asked about)" in (tmp_path / "run" / "run.log").read_text()
+
+
+@pytest.mark.parametrize("value", ["", "auto", " AUTO "])
+def test_l77d_auto_or_nothing_leaves_the_gate_to_the_model(monkeypatch, tmp_path, value):
+    monkeypatch.setenv("CLICKER_MOVES", value)
+    world = copy_world()
+    state = drive(
+        world, scripted(("done", None)), goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True
+    )
+
+    assert state.moves is True and state.moves_by == "gate"
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["moves_by"] == "gate"
+    assert "moves: offered (1.00)" in (tmp_path / "run" / "run.log").read_text()
+
+
+def test_l77e_a_misspelled_clicker_moves_stops_the_run_instead_of_quietly_asking(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLICKER_MOVES", "of")
+    world = copy_world()
+    with pytest.raises(ValueError, match="CLICKER_MOVES must be auto, on or off, not 'of'"):
+        drive(world, scripted(("done", None)), goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path)
+    assert "crashed" in (tmp_path / "run" / "run.log").read_text()
+
+
 def files_world() -> World:
     return World(
         [

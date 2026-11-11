@@ -191,6 +191,13 @@ when the run was offered them, so it does not send the classifier to a move it l
 `moves` in `run.json` and the log. `clicker-eval size --moves` and `decisions --moves` measure the
 requests of a run that was offered them; without the flag they are the requests of any other run.
 
+`CLICKER_MOVES=on` offers every run the moves and `off` offers none, whatever the goal says, and
+neither asks the decision model about the goal (one request fewer). `auto`, or nothing, is the gate
+above. The setting exists for a benchmark that must run the same tasks with the moves in and out of
+the kind question, without the gate's one-call guess deciding for it; a value other than these three
+stops the run rather than quietly asking. `run.json` says who settled it, `moves_by`: `gate` or
+`CLICKER_MOVES`.
+
 A selection leaves nothing on the screen the request reads, so a run offered the moves is told what is
 selected: the focused field's `selected_text` (the accessibility value of the selection, up to 200
 characters, left out when nothing is selected, and never sent to a run that was not offered the moves).

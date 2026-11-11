@@ -212,6 +212,17 @@ def custom_writer_endpoint() -> bool:
     return bool(url) and urlparse(url).hostname != ANTHROPIC_HOST
 
 
+def moves_override() -> bool | None:
+    """CLICKER_MOVES: `on` offers every run the moves beyond clicking and typing, `off` offers none,
+    whatever the goal says. `auto`, or nothing, leaves it to the decision model (the gate), which is
+    how a run decides when nobody forces it. Forcing exists so a benchmark can run the same tasks
+    with the moves in and out of the kind question, without the gate's one-call guess in between."""
+    raw = os.environ.get("CLICKER_MOVES", "").strip().lower() or "auto"
+    if raw not in ("auto", "on", "off"):
+        raise ValueError(f"CLICKER_MOVES must be auto, on or off, not {raw!r}")
+    return {"on": True, "off": False}.get(raw)
+
+
 def writer_vision() -> bool:
     """Whether the answer model gets the screenshot. Off for a model that reads text only."""
     raw = os.environ.get("CLICKER_WRITER_VISION", "").strip().lower() or "true"
