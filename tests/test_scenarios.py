@@ -13,7 +13,7 @@ import json
 import pytest
 from world import LOADING, FakeWriter, Page, World, drive, scripted
 
-from typesafe_computer_use.runner import MAX_REPEATS, MAX_STALLS, STOPPED, WAITING
+from typesafe_computer_use.runner import MAX_REPEATS, MAX_REVISITS, MAX_STALLS, STOPPED, WAITING
 
 GOAL = "buy a ticket to the next show"
 
@@ -935,6 +935,31 @@ def test_l32b_a_feed_that_never_grows_is_a_stall(monkeypatch, tmp_path):
     # Three clicks either way: the repeat rule fires on the third, and with it gone the idle rule
     # would stop step 4 before it acted. The two rules agree here; L10 and L16 tell them apart.
     assert state.history == ["clicked 'Load more'"] * 3
+
+
+def test_l32c_the_same_site_opened_again_and_again_is_a_stall_though_the_page_reads_differently_each_time(monkeypatch, tmp_path):
+    # The rule that counts actions already taken on the same screen cannot see this: each capture
+    # differs by a line, so every open looks like a first. The destination is the same all the same.
+    world = World([Page(name="feed", items=growing_feed, url="https://example.com/feed")])
+    policy = scripted(*[("use_browser", "github")] * 8)
+
+    state = drive(world, policy, goal=GOAL, monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.outcome == "stalled"
+    assert state.history == ["opened https://github.com/"] * (MAX_REVISITS + 1)
+
+
+def test_l32d_opening_a_site_again_after_something_else_is_not_a_revisit(monkeypatch, tmp_path):
+    world = World([Page(name="feed", items=growing_feed, url="https://example.com/feed")])
+    policy = scripted(
+        ("use_browser", "github"), ("click_item", "Load more"), ("use_browser", "github"), ("click_item", "Load more"),
+        ("use_browser", "github"),
+    )  # fmt: skip
+
+    state = drive(world, policy, goal=GOAL, monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.outcome == "done"
+    assert state.history.count("opened https://github.com/") == 3
 
 
 def coldplay_policy(state: dict, questions: dict) -> tuple:
