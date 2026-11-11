@@ -308,6 +308,7 @@ def click_at(point: tuple[float, float], button: str = "left", count: int = 1) -
     if button not in BUTTON_EVENTS or not 1 <= count <= MAX_CLICKS:
         raise ValueError(f"cannot click {count} times with the {button!r} button")
     down, up = BUTTON_EVENTS[button]
+    check_abort()
     _reach(point)
     for n in range(count):
         if n:
@@ -365,7 +366,10 @@ def press(key: str, command: bool = False, shift: bool = False, option: bool = F
                 held = [h for h in held if h[0] != vk]
     finally:
         for vk, flags in reversed(held):
-            _send(_key(vk=vk, flags=flags | KEYEVENTF_KEYUP))
+            # One that cannot be let go (the input desktop is still locked) must not leave the others held,
+            # and must not hide the error that got us here.
+            with suppress(OSError):
+                _send(_key(vk=vk, flags=flags | KEYEVENTF_KEYUP))
 
 
 def type_text(text: str) -> None:
