@@ -165,7 +165,7 @@ def test_a_click_lands_only_where_the_cursor_went():
 def test_a_click_that_did_not_land_presses_nothing(monkeypatch):
     sent = []
     monkeypatch.setattr(windows, "_move", lambda point: None)
-    monkeypatch.setattr(windows, "mouse_location", lambda: (0.0, 0.0))
+    monkeypatch.setattr(windows, "mouse_location", lambda: (300.0, 300.0))
     monkeypatch.setattr(windows, "_send", sent.append)
     with pytest.raises(Missed, match="not \\(640, 480\\)"):
         windows.click_at((640.0, 480.0))
@@ -285,6 +285,30 @@ def test_a_press_that_fails_part_way_lets_go_of_the_keys_it_holds(monkeypatch):
     with pytest.raises(OSError):
         windows.press("c", command=True)
     assert sent[0] == (0x11, 0) and sent[-1] == (0x11, KEYEVENTF_KEYUP)  # Ctrl went down, and is up again after the failure
+
+
+def test_a_release_that_fails_does_not_leave_the_other_keys_held_or_hide_the_first_error(monkeypatch):
+    sent = []
+
+    def send(event):
+        sent.append((event.u.ki.wVk, event.u.ki.dwFlags))
+        if len(sent) == 3:  # Ctrl and Shift are down, the key itself fails
+            raise OSError("the input desktop is locked")
+        if event.u.ki.dwFlags & KEYEVENTF_KEYUP and event.u.ki.wVk == 0x10:
+            raise OSError("and the release of Shift fails too")
+
+    monkeypatch.setattr(windows, "_send", send)
+    with pytest.raises(OSError, match="the input desktop is locked"):
+        windows.press("c", command=True, shift=True)
+    ups = [vk for vk, flags in sent if flags & KEYEVENTF_KEYUP]
+    assert 0x11 in ups and 0x10 in ups  # both were tried, in reverse, whatever happened to one of them
+
+
+def test_the_abort_corner_stops_a_click_before_the_cursor_moves(monkeypatch):
+    log = windows_input(monkeypatch, cursor=lambda: (0.0, 0.0))
+    with pytest.raises(Abort):
+        windows.click_at((640.0, 480.0))
+    assert log == []
 
 
 def test_a_command_chord_cannot_also_hold_option_or_control():

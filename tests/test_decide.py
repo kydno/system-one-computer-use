@@ -402,6 +402,15 @@ def test_the_item_question_names_the_other_clicks_only_when_they_are_offered(scr
     )
 
 
+def test_selecting_an_items_text_is_offered_for_copying_and_not_for_replacing_it():
+    """Typing adds to a text area and sets a whole single-line field: it never acts on a selection."""
+    says = POINTING["select_item_text"]
+    assert "copied" in says and "does not act on the selection" in says
+    for promise in ("replace", "typing over", "type over"):
+        assert promise not in says.lower().replace("does not act", "")
+    assert "select the word" not in POINTING["double_click_item"]
+
+
 @pytest.mark.parametrize("kind", list(POINTING))
 def test_a_right_double_or_triple_click_is_chosen_with_an_item_and_counts_the_item_confidence(kind):
     d = Decision(kind=answer(kind, 0.9), item=answer("12", 0.6), site=answer("none", 1.0))

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from typesafe_computer_use import actions
+from typesafe_computer_use import actions, perception
 from typesafe_computer_use.actions import click_item, fill_field, press_offscreen
 from typesafe_computer_use.models import AxNode, Field, Item, Missed, Popup
 from typesafe_computer_use.platform_adapter import desktop
@@ -220,6 +220,23 @@ def test_a_second_click_is_refused_on_a_control_that_one_click_activates(screen,
     control = replace(ORGANISE, role=role)
     said = actions.perform(pointing(kind, 3), screen, [control], context())
     assert said == f"{kind} refused: 'Organise' is a {role}, one click activates it"
+    assert pointer == []
+
+
+@pytest.mark.parametrize(
+    "ax_role, word",
+    [("AXMenuItem", "menu item"), ("AXDisclosureTriangle", "disclosure"), ("AXButton", "button"), ("AXLink", "link")],
+)
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+def test_a_second_click_is_refused_on_what_the_tree_calls_a_menu_entry_or_a_disclosure_triangle(
+    screen, pointer, ax_role, word, kind
+):
+    """Through the role mapping, not with a role word written into the item: a gap in the map would show here."""
+    node = AxNode(role=ax_role, label="Copy", x=1888.0 / 2 - 20, y=142.0 / 2 - 8, w=40.0, h=16.0, pressable=True)
+    (item,) = perception.to_ax_items([node], 2.0)
+    assert item.role == word
+    said = actions.perform(pointing(kind, 0), screen, [item], context())
+    assert said == f"{kind} refused: 'Copy' is a {word}, one click activates it"
     assert pointer == []
 
 
@@ -548,6 +565,7 @@ def test_the_configured_browser_counts_as_a_browser_whatever_its_name(screen, pr
         ("AXTextField", "Password", ""),
         ("AXTextField", "", "Card number"),
         ("AXTextField", "One-time code", ""),
+        ("AXTextField", "Login", "Password"),  # an innocent label does not hide a placeholder that is not
     ],
 )
 def test_paste_and_cut_are_refused_in_a_field_that_looks_like_a_credential(screen, pressed, name, role, label, placeholder):

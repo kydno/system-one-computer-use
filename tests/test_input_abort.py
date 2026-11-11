@@ -239,6 +239,48 @@ def test_the_abort_corner_half_way_through_a_drag_goes_back_and_lets_go_where_th
     assert input_events[-2][1] == AT and input_events[-1][1] == AT  # back at the start, not dropped on what it passed over
 
 
+def test_ctrl_c_half_way_through_a_drag_goes_back_and_lets_go_where_the_item_was_taken(input_events, monkeypatch):
+    def post(event):
+        input_events.append(event)
+        if event[0] == "drag" and sum(e[0] == "drag" for e in input_events) == 3:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(macos, "_post", post)
+    with pytest.raises(KeyboardInterrupt):
+        macos.drag(AT, TO)
+    assert [e[0] for e in input_events][-2:] == ["drag", "up"] and input_events[-1][1] == AT == input_events[-2][1]
+
+
+def test_a_move_back_that_fails_still_lets_go_of_the_button_and_the_error_is_the_first_one(input_events, monkeypatch):
+    def post(event):
+        input_events.append(event)
+        if event[0] == "drag" and event[1] == AT and len([e for e in input_events if e[0] == "drag"]) > 1:
+            raise OSError("the event tap is gone")  # the way back, after at least one step out
+
+    monkeypatch.setattr(macos, "mouse_location", lambda: (0, 0) if sum(e[0] == "drag" for e in input_events) >= 2 else (500, 500))
+    monkeypatch.setattr(macos, "_post", post)
+    with pytest.raises(OSError):  # the failed way back replaces the abort, but the button is still released
+        macos.drag(AT, TO)
+    assert input_events[-1][0] == "up"  # the release after the failed way back
+
+
+@pytest.mark.parametrize("hold", [1, 2])
+def test_the_abort_corner_during_a_hold_of_the_drag_lets_go_at_the_start(input_events, monkeypatch, hold):
+    """The press is held a moment before the move and again before the release: a corner then must not drop it."""
+    holds = []
+
+    def sleep_watching(seconds):
+        holds.append(seconds)
+        if len(holds) == hold:
+            raise Abort("mouse in top-left corner")
+
+    monkeypatch.setattr(macos, "sleep_watching", sleep_watching)
+    with pytest.raises(Abort):
+        macos.drag(AT, TO)
+    assert input_events[-1] == ("up", AT)
+    assert input_events[1] == ("down", AT)
+
+
 def test_the_corner_stops_a_drag_before_the_pointer_moves(input_events, monkeypatch):
     monkeypatch.setattr(macos, "mouse_location", lambda: (0, 0))
     with pytest.raises(Abort):
