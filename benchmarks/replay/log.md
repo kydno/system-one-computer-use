@@ -258,3 +258,13 @@ instructions ($0.02, text only): goals that name a key 4 of 6 open the gate to 6
 synthetic goals that need a move 19 to 20 (lowest score 0.49 to 0.65), the 16 plain ones 0 to 0, saved runs' goals 13 to 12 of 69,
 OSWorld 195 to 199 of 369. Naming the arrows or Page Down opened the gate for "scroll down and read the paragraph" (0.68, 0.81)
 and on OSWorld opened 17 to 23 more goals, so only the Tab key is named.
+
+The drag (`20261110-195830`, approved): a goal to drag one scratch file onto a scratch folder in Finder. The gate opened (0.98),
+step 1 chose `drag_item` at 0.99 with the file at 0.69 and the folder as the target at 0.99, and the Quartz drag moved the file: it is
+inside the folder on disk and gone from the folder it was in. Step 2 wanted to drag again and stopped at 0.38 under the floor; the answer
+model judged the goal achieved. That is every move now run on hardware: the chord, the right button, the click counts, the
+drag, a shortcut from the wider catalog through the kind question, and a shut gate. Not run on hardware: Tab (the gate was shut
+when that run was made; it names the key now), the Windows and OSWorld adapters.
+
+Spent in batch3 so far: $0.03 of $1.00, no iteration used (the iteration of this entry's change to the history line and the gate
+wording will be counted when the maintainer says what to measure next).
