@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from conftest import item
 
-from typesafe_computer_use.config import SITES
+from typesafe_computer_use.config import SHORTCUTS, SITES
 from typesafe_computer_use.decide import (
     Decision,
     app_criteria,
@@ -12,8 +12,10 @@ from typesafe_computer_use.decide import (
     decide,
     item_criteria,
     kind_criteria,
+    needs_moves,
     offscreen_criteria,
     row_mates,
+    shortcut_criteria,
     site_criteria,
     verify_typed,
 )
@@ -257,6 +259,118 @@ def test_the_app_is_asked_in_a_second_request_only_once_open_app_is_chosen(scree
     state, questions = requests[1]
     assert state == {"goal": goal, "current_focus": "open Photos", "frontmost_app": "Google Chrome"}
     assert list(questions["app"].criteria) == ["Photos", "Notes", "none"]
+
+
+def test_press_shortcut_is_offered_only_to_a_run_whose_goal_needs_the_moves_and_the_catalog_ends_with_none():
+    assert "press_shortcut" not in kind_criteria("Google Chrome", None)
+    assert "press_shortcut" in kind_criteria("Google Chrome", None, moves=True)
+    assert list(shortcut_criteria()) == [*SHORTCUTS, "none"]
+    assert all(text.endswith(".") for text in shortcut_criteria().values())
+
+
+def test_a_closed_gate_leaves_the_kind_question_as_it_was_before_the_moves_existed():
+    shut, open_ = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
+    assert {k: v for k, v in open_.items() if k != "press_shortcut"} == shut
+    assert list(shut) == [
+        "click_item",
+        "use_browser",
+        "type_text",
+        "press_enter",
+        "press_escape",
+        "go_back",
+        "scroll_down",
+        "scroll_up",
+        "wait",
+        "done",
+        "none",
+    ]
+
+
+def test_the_goal_is_asked_once_whether_it_needs_a_move_beyond_clicks_and_typing():
+    asked = []
+
+    def system_one(state, questions):
+        asked.append((state, questions))
+        return SimpleNamespace(answers={"moves": SimpleNamespace(noul=0.9)})
+
+    assert needs_moves(SimpleNamespace(system_one=system_one), "copy the total") == 0.9
+    ((state, questions),) = asked
+    assert state == {"goal": "copy the total"} and list(questions) == ["moves"]
+    assert "keyboard shortcut" in questions["moves"].wire()["instructions"]
+
+
+def test_the_shortcut_is_asked_in_a_second_request_only_once_press_shortcut_is_chosen(screen):
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "shortcut" in questions:
+            return SimpleNamespace(answers={"shortcut": answer("copy", 0.7)})
+        return SimpleNamespace(answers={"kind": answer(kind, 0.95), "site": answer("none", 1.0)})
+
+    client = SimpleNamespace(system_one=system_one)
+    kind = "click_item"
+    assert decide(client, "g", screen, [], [], "Google Chrome", None).shortcut is None
+    assert len(requests) == 1 and "shortcut" not in requests[0][1]
+
+    requests.clear()
+    kind = "press_shortcut"
+    d = decide(client, "copy the figure", screen, [], [], "Google Chrome", None, guidance=Guidance(focus="copy it"), moves=True)
+    assert d.pressing_shortcut and d.chosen == "press_shortcut" and d.shortcut.choice == "copy"
+    assert d.confidence == 0.7  # a wrong shortcut is not always undone, so a split on it counts
+    state, questions = requests[1]
+    assert state == {
+        "goal": "copy the figure",
+        "current_focus": "copy it",
+        "frontmost_app": "Google Chrome",
+        "focused_field": None,
+        "previous_actions": [],
+    }
+    assert list(questions["shortcut"].criteria) == [*SHORTCUTS, "none"]
+
+
+def test_the_shortcut_question_sees_what_was_pressed_and_what_is_selected_so_a_goal_of_several_goes_on(screen):
+    """A goal that takes select all, then copy, then paste was answered 'select all' every step: the follow-up
+    saw the goal alone, and nothing on the screen looks different once text is selected."""
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "shortcut" in questions:
+            return SimpleNamespace(answers={"shortcut": answer("copy", 0.9)})
+        return SimpleNamespace(answers={"kind": answer("press_shortcut", 0.95), "site": answer("none", 1.0)})
+
+    box = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10, selected="a b")
+    live = replace(screen, field=box)
+    decide(
+        SimpleNamespace(system_one=system_one),
+        "copy it",
+        live,
+        [],
+        ["pressed the select all shortcut"],
+        "Google Chrome",
+        None,
+        moves=True,
+    )
+
+    kind_state, (shortcut_state, _) = requests[0][0], requests[1]
+    for state in (kind_state, shortcut_state):
+        assert state["focused_field"]["selected_text"] == "a b"
+        assert state["previous_actions"] == ["pressed the select all shortcut"]
+
+
+def test_the_selected_text_is_in_the_field_only_for_a_run_offered_the_moves_that_select():
+    box = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10, selected="a b")
+    plain = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10)
+    assert "selected_text" not in box.summary() and box.summary(selection=True)["selected_text"] == "a b"
+    assert plain.summary(selection=True) == plain.summary()  # nothing selected: the request is the one it always was
+    assert Field(**box.record()) == box
+    assert Field(**{k: v for k, v in box.record().items() if k != "selected"}).selected == ""  # a step saved before this
+
+
+def test_a_shortcut_answer_for_any_other_kind_is_ignored():
+    d = Decision(kind=answer("click_item", 0.9), item=answer("3", 0.8), site=answer("none", 1.0), shortcut=answer("copy", 0.1))
+    assert not d.pressing_shortcut and d.chosen == "3" and d.confidence == 0.8
 
 
 def test_browser_criteria_say_which_is_in_front_and_which_is_the_default():

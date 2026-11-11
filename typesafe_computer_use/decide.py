@@ -6,12 +6,21 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from .config import SITES
+from .config import SHORTCUTS, SITES
 from .dates import date_hints, now_context
 from .decisions import Choice, ChoiceAnswer, DecisionClient, DecisionError, Noul, Refusal
 from .models import AxNode, Field, Guidance, Item, Screen
 
 STOP_KINDS = ("done", "none")
+SHORTCUT_KIND = (
+    "Press a keyboard shortcut from a short list: the shortcut question that follows says which. "
+    "Use it for a command the goal needs that no control on screen does, or that the keys do "
+    "in one step: copy or paste a selection, select all, undo, find on the page, switch tabs. "
+    "Not for Return, Escape, or going back, which have actions of their own, not to open a website "
+    "(use_browser does that), and not when a button on screen does the same thing."
+)
+# What the goal question lists, so that it opens for the moves the run is offered and no others.
+MOVES_ASKED = "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs)"
 OFFSCREEN_PREFIX = "offscreen:"
 # The questions a step is asked again without when the model refuses one, each with the one kind
 # of action that cannot go ahead without its answer.
@@ -29,8 +38,12 @@ FOCUS_RULE = (
 )
 
 
-def fixed_actions(browser: str, email: str | None, browsers: Sequence[str] = (), apps: Sequence[str] = ()) -> dict[str, str]:
-    """Deterministic actions offered alongside click_item. Keep them mutually exclusive."""
+def fixed_actions(
+    browser: str, email: str | None, browsers: Sequence[str] = (), apps: Sequence[str] = (), moves: bool = False
+) -> dict[str, str]:
+    """Deterministic actions offered alongside click_item. Keep them mutually exclusive.
+
+    `moves` offers the moves beyond clicking and typing, for a run whose goal needs them (see `needs_moves`)."""
     where = "a web browser (the browser question says which)" if len(browser_names(browser, browsers)) > 1 else browser
     actions = {
         "use_browser": (
@@ -72,6 +85,8 @@ def fixed_actions(browser: str, email: str | None, browsers: Sequence[str] = (),
         "done": "The goal is already achieved.",
         "none": "Nothing on screen or in this list helps with the goal.",
     }
+    if moves:
+        actions = {**actions, "press_shortcut": SHORTCUT_KIND}
     if email:
         actions["type_email"] = (
             "Type the user's email address into the focused text field. Use this, not type_text, "
@@ -81,12 +96,17 @@ def fixed_actions(browser: str, email: str | None, browsers: Sequence[str] = (),
 
 
 def kind_criteria(
-    browser: str, email: str | None, offscreen: bool = False, browsers: Sequence[str] = (), apps: Sequence[str] = ()
+    browser: str,
+    email: str | None,
+    offscreen: bool = False,
+    browsers: Sequence[str] = (),
+    apps: Sequence[str] = (),
+    moves: bool = False,
 ) -> dict[str, str]:
     clicks = {"click_item": "Click one of the on-screen text items (chosen in the item question)."}
     if offscreen:
         clicks["press_offscreen"] = PRESS_OFFSCREEN
-    return {**clicks, **fixed_actions(browser, email, browsers, apps)}
+    return {**clicks, **fixed_actions(browser, email, browsers, apps, moves)}
 
 
 ROW_MATES = 3  # how many neighbours name a duplicated item's row in a criterion; the history line takes them all
@@ -171,6 +191,14 @@ def app_criteria(apps: Sequence[str], frontmost: str) -> dict[str, str]:
     }
 
 
+def shortcut_criteria() -> dict[str, str]:
+    """Which shortcut press_shortcut presses. The catalog, plus one key for none of them."""
+    return {
+        **{name: shortcut.says for name, shortcut in SHORTCUTS.items()},
+        "none": "None of these shortcuts is what the goal needs.",
+    }
+
+
 def base_state(
     goal: str,
     screen: Screen,
@@ -178,10 +206,13 @@ def base_state(
     history: list[str],
     tried: list[str] | None = None,
     guidance: Guidance | None = None,
+    moves: bool = False,
 ) -> dict:
     """The facts the classifier reads. `tried` lists the actions already taken on this same screen
     earlier in the run, each of which led back here: a fact the code knows and the model cannot.
-    `guidance` is what the writer and the user added to the goal when the classifier last stopped."""
+    `guidance` is what the writer and the user added to the goal when the classifier last stopped.
+    `moves` is whether the run is offered the moves beyond clicking and typing: then the field says what
+    text is selected in it, which a selection leaves no other trace of."""
     hints = date_hints(items, screen)
     mates = row_mates(items)
     return {
@@ -190,7 +221,7 @@ def base_state(
         "now": now_context(),
         "frontmost_app": screen.app,
         "browser_active_tab_url": screen.url,
-        "focused_field": screen.field.summary() if screen.field else None,
+        "focused_field": screen.field.summary(selection=moves) if screen.field else None,
         "previous_actions": history[-8:],
         "already_tried_on_this_screen": list(tried or []),
         "screen_items_in_reading_order": [
@@ -217,6 +248,7 @@ class Decision:
     offscreen: ChoiceAnswer | None = None
     browser: ChoiceAnswer | None = None  # asked only when more than one browser is installed
     app: ChoiceAnswer | None = None  # asked only once open_app is chosen
+    shortcut: ChoiceAnswer | None = None  # asked only once press_shortcut is chosen
     refused: str | None = None  # a question the model refused, so the step was decided without it
 
     @property
@@ -226,6 +258,10 @@ class Decision:
     @property
     def pressing_offscreen(self) -> bool:
         return self.kind.choice == "press_offscreen" and self.offscreen is not None
+
+    @property
+    def pressing_shortcut(self) -> bool:
+        return self.kind.choice == "press_shortcut" and self.shortcut is not None
 
     @property
     def chosen(self) -> str:
@@ -245,6 +281,8 @@ class Decision:
             return min(self.kind.confidence, self.item.confidence)
         if self.pressing_offscreen:
             return min(self.kind.confidence, self.offscreen.confidence)
+        if self.pressing_shortcut:
+            return min(self.kind.confidence, self.shortcut.confidence)  # a wrong shortcut is not always undone
         return self.kind.confidence
 
     @property
@@ -260,6 +298,7 @@ def build_questions(
     guidance: Guidance | None = None,
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
+    moves: bool = False,
 ) -> dict[str, Choice]:
     """The questions one step asks, apart from the app question, which a request of its own follows
     only once open_app is chosen. `decide` sends them, and the eval kit builds them the same way to
@@ -273,7 +312,7 @@ def build_questions(
                 "tried on this screen: each of those led straight back here."
                 + (FOCUS_RULE if guidance and guidance.focus else "")
             ),
-            criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps),
+            criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves),
         ),
         "site": Choice(
             instructions=(
@@ -330,9 +369,11 @@ def decide(
     guidance: Guidance | None = None,
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
+    moves: bool = False,
 ) -> Decision:
     """One request for the step's decision, and a second, small one for the app only when the first
-    chose open_app: the list of installed apps is long, and most steps open none.
+    chose open_app: the list of installed apps is long, and most steps open none. A shortcut is asked
+    the same way, once press_shortcut is chosen.
 
     Luna refuses the item question now and then, the one whose labels are text read off the screen,
     and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
@@ -340,8 +381,8 @@ def decide(
     item, so the step is asked again without it, and only a click is left without a decision. It
     refuses the off-screen question the same way, and only pressing one of those controls needs it.
     """
-    questions = build_questions(screen, items, browser, email, guidance, browsers, apps)
-    state = base_state(goal, screen, items, history, tried, guidance)
+    questions = build_questions(screen, items, browser, email, guidance, browsers, apps, moves)
+    state = base_state(goal, screen, items, history, tried, guidance, moves)
     refused = None
     try:
         answers = client.system_one(state=state, questions=questions).answers
@@ -359,6 +400,18 @@ def decide(
             state={"goal": goal, **(guidance.state() if guidance else {}), "frontmost_app": screen.app},
             questions={"app": app_question(apps, screen.app)},
         ).answers["app"]
+    shortcut = None
+    if answers["kind"].choice == "press_shortcut":
+        shortcut = client.system_one(
+            state={
+                "goal": goal,
+                **(guidance.state() if guidance else {}),
+                "frontmost_app": screen.app,
+                "focused_field": screen.field.summary(selection=True) if screen.field else None,
+                "previous_actions": history[-8:],
+            },
+            questions={"shortcut": shortcut_question()},
+        ).answers["shortcut"]
     return Decision(
         kind=answers["kind"],
         item=answers.get("item"),
@@ -366,6 +419,7 @@ def decide(
         offscreen=answers.get("offscreen"),
         browser=answers.get("browser"),
         app=app,
+        shortcut=shortcut,
         refused=refused,
     )
 
@@ -378,6 +432,35 @@ def app_question(apps: Sequence[str], frontmost: str) -> Choice:
         ),
         criteria=app_criteria(apps, frontmost),
     )
+
+
+def shortcut_question() -> Choice:
+    return Choice(
+        instructions=(
+            "A keyboard shortcut is to be pressed this step. Which one does the goal, or the current "
+            "focus, need? The one that does what it describes; 'none' when no shortcut in the list does. "
+            "A goal can take several in turn, such as select all, then copy, then paste: choose the next one "
+            "that is still to be pressed, going by the previous actions and by what is selected in the focused "
+            "field, and never one whose effect is already there."
+        ),
+        criteria=shortcut_criteria(),
+    )
+
+
+def needs_moves(client: DecisionClient, goal: str) -> float:
+    """Probability that the goal needs a move beyond clicking and typing: a shortcut, and the like.
+
+    Asked once a run, of the goal alone, as `read_only` is. The moves sit in the kind question only
+    for a run that needs them: offered on every step, a new kind pulled the classifier off picks it
+    had right on steps that needed none of them, by 2.6 points of agreement on saved steps.
+    """
+    question = Noul(
+        instructions=(
+            "Does reaching this goal need a move that clicking links and buttons and typing into fields cannot "
+            f"make: {MOVES_ASKED}?"
+        )
+    )
+    return client.system_one(state={"goal": goal}, questions={"moves": question}).answers["moves"].noul
 
 
 def read_only(client: DecisionClient, goal: str) -> float:

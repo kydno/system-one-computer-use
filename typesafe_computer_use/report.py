@@ -16,6 +16,7 @@ from .decide import (
     item_criteria,
     kind_criteria,
     offscreen_criteria,
+    shortcut_criteria,
     site_criteria,
 )
 from .events import Events
@@ -70,18 +71,19 @@ def render_payload(
     guidance: Guidance | None = None,
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
+    moves: bool = False,
 ) -> str:
     """Exactly what goes to the classifier for this screen, plus a table of every item."""
     parts = [
         RULE,
         "STATE  (sent as `state`)",
         RULE,
-        json.dumps(base_state(goal, screen, items, history, tried, guidance), indent=2),
+        json.dumps(base_state(goal, screen, items, history, tried, guidance, moves), indent=2),
         "",
         RULE,
         "QUESTION kind  (Choice criteria)",
         RULE,
-        json.dumps(kind_criteria(browser, email, bool(screen.offscreen), browsers, apps), indent=2),
+        json.dumps(kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves), indent=2),
         "",
         RULE,
         "QUESTION item  (Choice criteria)",
@@ -108,6 +110,14 @@ def render_payload(
             "QUESTION app  (Choice criteria; a request of its own, sent only once kind is open_app)",
             RULE,
             json.dumps(app_criteria(apps, screen.app), indent=2),
+            "",
+        ]
+    if moves:
+        parts += [
+            RULE,
+            "QUESTION shortcut  (Choice criteria; a request of its own, sent only once kind is press_shortcut)",
+            RULE,
+            json.dumps(shortcut_criteria(), indent=2),
             "",
         ]
     if screen.offscreen:

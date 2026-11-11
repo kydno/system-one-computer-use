@@ -19,11 +19,12 @@ from .config import (
     DEFAULT_READ_ONLY_CONFIDENCE,
     DEFAULT_STEPS,
     MAX_OPTIONS,
+    MOVES_NOUL,
     READ_ONLY_NOUL,
     answer_model,
     writer_model,
 )
-from .decide import Decision, browser_names, decide, offscreen_records, read_only
+from .decide import Decision, browser_names, decide, needs_moves, offscreen_records, read_only
 from .decisions import DecisionClient, DecisionError
 from .events import Events
 from .models import Abort, EarlierTask, Field, Guidance, Item, Screen, Signature, same_screen, signature
@@ -141,6 +142,7 @@ class RunState:
     calls: Calls = field(default_factory=Calls)  # requests to each model, over the whole run
     clicked: Clicked | None = None  # the last action's click on page text, for the screen right after it
     read_only: bool = False  # the goal only asks to find something out, so the lower floor applies
+    moves: bool = False  # the goal needs a move beyond clicking and typing, so the run is offered the moves that are
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -164,6 +166,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             models = configured_models(typesafe, ctx)
             log(f"models: decisions {models['decisions']}, writer {models['writer']}, answer {models['answer']}")
             state.read_only = goal_only_looks(ctx, cfg.goal, log)
+            state.moves = goal_needs_moves(ctx, cfg.goal, log)
             for step in range(1, cfg.steps + 1):
                 ctx = replace(ctx, guidance=state.guidance)  # a handoff sets the focus, and the action it asked for spends it
                 if run_step(cfg, ctx, state, step, log):
@@ -192,6 +195,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "seconds": round(time.time() - started, 1),
             "models": models,
             "read_only": state.read_only,
+            "moves": state.moves,
             "calls": state.calls.summary(),
             "usage": state.calls.tokens(),
             "usage_by_role": state.calls.by_role(),
@@ -233,6 +237,19 @@ def goal_only_looks(ctx: Context, goal: str, log: Log) -> bool:
     looks = p >= READ_ONLY_NOUL
     log(f"read-only: {'yes' if looks else 'no'} ({p:.2f})")
     return looks
+
+
+def goal_needs_moves(ctx: Context, goal: str, log: Log) -> bool:
+    """Whether the goal needs a move beyond clicking and typing, by the decision model. Unsure, or no
+    answer, is a goal that needs none: the requests stay as they were, which is the safe side."""
+    try:
+        p = needs_moves(ctx.typesafe, goal)
+    except DecisionError as e:
+        log(f"moves: unknown ({e}), so none are offered")
+        return False
+    needs = p >= MOVES_NOUL
+    log(f"moves: {'offered' if needs else 'not offered'} ({p:.2f})")
+    return needs
 
 
 def metered(ctx: Context, calls: Calls) -> Context:
@@ -422,7 +439,7 @@ def review(cfg: RunConfig, ctx: Context, state: RunState, stopped: str, can_ask:
         {"after_action": h.actions, "why": STOPPED[h.outcome], "you_said": h.said, "focus_given": h.focus} for h in state.handoffs
     ]
     return compose_answer(
-        ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask
+        ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask, state.moves
     )
 
 
@@ -467,7 +484,17 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     screen.image.save(prefix.with_name(prefix.name + "-raw.png"))
     prefix.with_name(prefix.name + "-payload.txt").write_text(
         render_payload(
-            cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance, ctx.browsers, ctx.apps
+            cfg.goal,
+            screen,
+            items,
+            state.history,
+            ctx.browser,
+            ctx.email,
+            tried,
+            ctx.guidance,
+            ctx.browsers,
+            ctx.apps,
+            state.moves,
         ),
         encoding="utf-8",
     )
@@ -486,6 +513,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 ctx.guidance,
                 ctx.browsers,
                 ctx.apps,
+                state.moves,
             )
     except DecisionError as e:
         # A refusal or an outage is not a guess to act on: the writer reads this screen instead.
@@ -504,6 +532,11 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         f"site={decision.site.choice}"
         + (f" browser={decision.browser.choice!r} ({decision.browser.confidence:.2f})" if decision.browser is not None else "")
         + (f" open={decision.app.choice!r} ({decision.app.confidence:.2f})" if decision.app is not None else "")
+        + (
+            f" shortcut={decision.shortcut.choice!r} ({decision.shortcut.confidence:.2f})"
+            if decision.shortcut is not None
+            else ""
+        )
         + (f" refused={decision.refused}, asked again without it" if decision.refused else "")
     )
     for key, p in top(decision.kind, 4):
@@ -570,7 +603,9 @@ def resolve(
         log(f"  model says {decision.kind.choice!r}; stopping")
         state.outcome = "done" if decision.kind.choice == "done" else "nothing helps"
         return False
-    floor = cfg.read_only_confidence if state.read_only else cfg.min_confidence
+    # The low floor is for a goal where a wrong click only opens the wrong page. A shortcut is not that: cut, paste
+    # and close tab are not always undone, and a goal that only looks things up is as likely as any to open the moves.
+    floor = cfg.read_only_confidence if state.read_only and not decision.pressing_shortcut else cfg.min_confidence
     if decision.confidence < floor:
         named = named_by_focus(decision, items, state.guidance.focus)
         if named is None or decision.kind.confidence < floor:
@@ -685,6 +720,8 @@ def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
         return f"click {item.text!r}" if item is not None else decision.chosen
     if decision.pressing_offscreen:
         return f"press {screen.offscreen[int(decision.offscreen.choice)].label!r}"
+    if decision.pressing_shortcut:
+        return f"press the {decision.shortcut.choice.replace('_', ' ')} shortcut"
     return decision.kind.choice.replace("_", " ")
 
 
@@ -767,6 +804,11 @@ def answers(
             else {}
         ),
         **({"app_to_open": decision.app.choice, "app_to_open_probabilities": decision.app.probabilities} if decision.app else {}),
+        **(
+            {"shortcut": decision.shortcut.choice, "shortcut_probabilities": decision.shortcut.probabilities}
+            if decision.shortcut
+            else {}
+        ),
         "offscreen": decision.offscreen.choice if decision.offscreen else None,
         "offscreen_probabilities": decision.offscreen.probabilities if decision.offscreen else None,
         "offscreen_controls": offscreen_records(screen.offscreen),

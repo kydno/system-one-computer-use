@@ -501,6 +501,7 @@ def focused_field(pid: int | None = None) -> Field | None:
     label = _ax_attr(element, AS.kAXTitleAttribute) or _ax_attr(element, AS.kAXDescriptionAttribute) or ""
     role = str(_ax_attr(element, AS.kAXRoleAttribute) or "")
     selected = _ax_attr(element, "AXSelectedTextRange")
+    selected_text = _ax_attr(element, "AXSelectedText")
     caret = None
     if selected is not None:
         _, span = AS.AXValueGetValue(selected, AS.kAXValueCFRangeType, None)  # PyObjC: (location, length)
@@ -516,6 +517,7 @@ def focused_field(pid: int | None = None) -> Field | None:
         h=h,
         ref=element,
         caret=caret,
+        selected=selected_text if isinstance(selected_text, str) else "",
         editor=role not in TEXT_ROLES
         and (
             _ax_attr(element, EDITABLE_ANCESTOR) is not None

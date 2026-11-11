@@ -17,6 +17,7 @@ from PIL import Image
 
 from .calls import reviewing
 from .config import (
+    SHORTCUTS,
     answer_model,
     answer_reasoning,
     answer_sort,
@@ -458,6 +459,27 @@ ANSWER_SYSTEM = (
 )
 
 
+# For a run whose goal needs them (see `decide.needs_moves`), the agent has the moves the kind question
+# offers, and the answer model is told so; otherwise it is told the agent has none, and does not ask for one.
+_NO_MOVES = (
+    "It has no other key or shortcut and cannot right-click, double-click, or select text, so a focus "
+    "that needs one of those is refused: name the button, menu, or link on screen that does the same."
+)
+_MOVES = (
+    "It can press one keyboard shortcut from a short list ("
+    + ", ".join(name.replace("_", " ") for name in SHORTCUTS)
+    + ") and no other key. It cannot right-click, double-click, or select text with the mouse, so a focus that needs "
+    "one of those is refused: name the button, menu, or link on screen that does the same."
+)
+assert _NO_MOVES in ANSWER_SYSTEM
+ANSWER_SYSTEM_MOVES = ANSWER_SYSTEM.replace(_NO_MOVES, _MOVES)
+
+
+def answer_system(moves: bool = False) -> str:
+    """The answer model's instructions, with the agent's moves as the run was offered them."""
+    return ANSWER_SYSTEM_MOVES if moves else ANSWER_SYSTEM
+
+
 def compose_answer(
     writer: Writer,
     goal: str,
@@ -469,6 +491,7 @@ def compose_answer(
     guidance: Guidance | None = None,
     earlier_stops: list[dict] | None = None,
     can_ask: bool = False,
+    moves: bool = False,
 ) -> Answer:
     """What to tell the user now that the classifier has stopped, and how the run could go on.
 
@@ -498,7 +521,7 @@ def compose_answer(
     }
     data = _structured(
         writer,
-        system=ANSWER_SYSTEM,
+        system=answer_system(moves),
         packet=packet,
         properties={
             "achieved": {"type": "boolean"},

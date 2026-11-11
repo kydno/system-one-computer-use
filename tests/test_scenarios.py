@@ -1733,13 +1733,13 @@ def test_l52_the_run_counts_the_requests_each_model_took(monkeypatch, tmp_path):
     )
 
     assert world.page.name == "checkout"
-    # Whether the goal only looks, five decisions, and the check of what was typed; the typed text
-    # and two readings of a stopped screen.
-    assert state.calls.count == {"classifier": 7, "writer": 3}
+    # Whether the goal only looks, whether it needs a move beyond clicks, five decisions, and the check
+    # of what was typed; the typed text and two readings of a stopped screen.
+    assert state.calls.count == {"classifier": 8, "writer": 3}
     summary = json.loads((tmp_path / "run" / "run.json").read_text())
-    assert summary["calls"]["classifier"]["calls"] == 7 and summary["calls"]["classifier"]["share"] == 0.7
-    assert summary["calls"]["writer"]["calls"] == 3 and summary["calls"]["writer"]["share"] == 0.3
-    assert "calls: classifier 7 (70%, " in (tmp_path / "run" / "run.log").read_text()
+    assert summary["calls"]["classifier"]["calls"] == 8 and summary["calls"]["classifier"]["share"] == round(8 / 11, 3)
+    assert summary["calls"]["writer"]["calls"] == 3 and summary["calls"]["writer"]["share"] == round(3 / 11, 3)
+    assert "calls: classifier 8 (73%, " in (tmp_path / "run" / "run.log").read_text()
 
 
 def test_l53_unverified_keystrokes_stay_when_the_field_will_not_take_a_value(monkeypatch, tmp_path):
@@ -1854,7 +1854,10 @@ def test_l56_a_name_the_writer_submits_is_typed_and_saved_in_one_step(monkeypatc
     assert state.outcome == "done" and world.page.name == "saved"
     assert state.history == ["typed 'Favorites' into 'Name' via accessibility and pressed Return"]
     assert world.log == ["type:Favorites", "enter"]
-    assert state.calls.count == {"classifier": 3, "writer": 2}  # the goal, two decisions and no check; the name and the answer
+    assert state.calls.count == {
+        "classifier": 4,
+        "writer": 2,
+    }  # the goal twice, two decisions and no check; the name and the answer
 
 
 def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_step(monkeypatch, tmp_path):
@@ -1891,7 +1894,7 @@ def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_s
     (organise,) = [it for it in world.fake.states[0]["screen_items_in_reading_order"] if it["text"] == "Organise"]
     assert organise["under"] == "'Restore pages?'"
     assert "under 'Restore pages?'" in world.fake.asked[0]["item"].criteria[str(organise["i"])]
-    assert state.calls.count["classifier"] == 3  # the goal, one decision to open the menu, one to stop
+    assert state.calls.count["classifier"] == 4  # the goal twice, one decision to open the menu, one to stop
 
 
 CREDITS = "https://openrouter.ai/settings/credits"
@@ -2191,3 +2194,189 @@ def test_l66_the_writer_scrolls_the_page_itself_when_the_classifier_would_not(mo
     assert world.wheel[0] is not None and world.wheel[0] == world.wheel[1]
     assert state.history == ["scrolled to the top over 'Cloud Messaging' (1 scroll)", "clicked 'Google Analytics'"]
     assert [(h.focus, h.said) for h in state.handoffs] == [("scroll top over '“Cloud Messaging”'", "The export is further up.")]
+
+
+def copy_world() -> World:
+    return World(
+        [
+            Page(
+                name="doc",
+                items=["Quarterly figures", "Total 4,210"],
+                app="Notes",
+                on={"key:cmd+a": "all", "key:cmd+c": "doc"},
+            ),
+            Page(name="all", items=["Quarterly figures", "Total 4,210", "(selected)"], app="Notes", on={"key:cmd+c": "copied"}),
+            Page(name="copied", items=["Quarterly figures", "Total 4,210", "(selected)", "Copied"], app="Notes"),
+        ]
+    )
+
+
+def test_l68_a_shortcut_is_asked_for_in_its_own_request_and_pressed_with_its_modifiers(monkeypatch, tmp_path):
+    world = copy_world()
+    policy = scripted(("press_shortcut", "select_all"), ("press_shortcut", "copy"))
+
+    state = drive(world, policy, goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "done" and world.page.name == "copied"
+    assert world.log == ["key:cmd+a", "key:cmd+c"]
+    assert state.history == ["pressed the select all shortcut", "pressed the copy shortcut"]
+    assert "press_shortcut" in world.fake.asked[0]["kind"].criteria
+    follow_ups = [q for q in world.fake.asked if set(q) == {"shortcut"}]
+    assert len(follow_ups) == 2 and list(follow_ups[0]["shortcut"].criteria)[-1] == "none"
+    assert len(world.fake.states) == 3  # the two decisions and the final done; the follow-ups are not decisions
+
+
+def test_l68b_the_shortcut_is_decided_from_what_the_follow_up_was_sent_select_all_then_copy(monkeypatch, tmp_path):
+    """The follow-up is its own request and sees only its own state. Here the fake picks from that state alone, as the
+    model must: select all until the history says it was pressed, then copy."""
+    world = copy_world()
+
+    def next_shortcut(state: dict) -> str:
+        return "copy" if "pressed the select all shortcut" in state["previous_actions"] else "select_all"
+
+    state = drive(
+        world, scripted(("press_shortcut", None), ("press_shortcut", None)), goal="copy the whole note",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True, shortcuts=next_shortcut,
+    )  # fmt: skip
+
+    assert world.log == ["key:cmd+a", "key:cmd+c"] and state.outcome == "done"
+    assert [f["previous_actions"] for f in world.fake.follow_ups] == [[], ["pressed the select all shortcut"]]
+    assert all({"goal", "frontmost_app", "focused_field", "previous_actions"} <= set(f) for f in world.fake.follow_ups)
+
+
+def test_l69_a_shortcut_the_classifier_is_unsure_of_stops_the_run_before_any_key_is_pressed(monkeypatch, tmp_path):
+    world = copy_world()
+    policy = scripted(("press_shortcut", "copy", (0.9, 0.2)))
+
+    state = drive(world, policy, goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "low confidence" and world.log == []
+
+
+def test_l70_a_shortcut_with_nothing_in_the_list_to_press_is_refused_and_not_asked_for_again(monkeypatch, tmp_path):
+    world = copy_world()
+    policy = scripted(*[("press_shortcut", "none")] * 6)
+
+    state = drive(world, policy, goal="quit the app", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert world.log == []
+    assert state.history[0] == "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    assert state.outcome == "stalled"  # the same refusal on the same screen is a repeat, as any refused action is
+
+
+def test_l69b_a_read_only_goal_does_not_lower_the_floor_for_a_shortcut(monkeypatch, tmp_path):
+    """The 0.15 floor is for a click that only opens the wrong page. A close-tab at 0.3 is not that."""
+    world = copy_world()
+    policy = scripted(("press_shortcut", "close_tab", 0.3))
+
+    state = drive(
+        world, policy, goal="find the total on this page", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True, read_only=True
+    )
+
+    assert state.read_only and state.outcome == "low confidence" and world.log == []
+
+
+def test_l70b_paste_into_a_field_that_looks_like_a_credential_is_refused_and_presses_nothing(monkeypatch, tmp_path):
+    world = World(
+        [
+            Page(
+                name="login",
+                items=["Sign in", "Password"],
+                app="Notes",
+                field="Password",
+                on={"key:cmd+v": "pasted"},
+            ),
+            Page(name="pasted", items=["Sign in", "Password"], app="Notes"),
+        ]
+    )
+
+    state = drive(
+        world, scripted(("press_shortcut", "paste")), goal="sign in", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True
+    )
+
+    assert world.log == []
+    assert state.history[0] == "press_shortcut refused: paste would act on a field that looks like a credential"
+
+
+def test_l70c_a_browser_shortcut_is_refused_where_the_same_keys_do_something_else(monkeypatch, tmp_path):
+    world = copy_world()  # Notes is in front: Cmd-W would close the document window
+
+    state = drive(
+        world,
+        scripted(("press_shortcut", "close_tab")),
+        goal="close the tab",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        moves=True,
+    )
+
+    assert world.log == []
+    assert state.history[0] == "press_shortcut refused: close tab works in a browser, and Notes is in front"
+
+
+def asked_for_the_answer(writer: FakeWriter) -> list[dict]:
+    return [r for r in writer.requests if "achieved" in r["output_config"]["format"]["schema"]["properties"]]
+
+
+def test_l75_the_gate_is_asked_of_the_goal_alone_and_a_closed_gate_leaves_the_requests_as_they_were(monkeypatch, tmp_path):
+    from typesafe_computer_use.writer import ANSWER_SYSTEM
+
+    world = copy_world()
+    writer = FakeWriter(reviews=[{"answer": "Select it and copy it.", "focus": "Press the copy shortcut"}])
+    state = drive(
+        world,
+        scripted(("click_item", "Total 4,210")),
+        goal="copy the whole note",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        writer=writer,
+    )
+
+    assert all("press_shortcut" not in criteria["kind"].criteria for criteria in world.fake.asked)  # no step was offered it
+    assert all(set(q) != {"shortcut"} for q in world.fake.asked)
+    (answer_request,) = asked_for_the_answer(writer)[:1]
+    assert (
+        answer_request["system"].startswith(ANSWER_SYSTEM[:200])
+        and "keyboard shortcut from a short list" not in answer_request["system"]
+    )
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["moves"] is False
+    assert state.outcome in (
+        "done",
+        "stalled",
+        "unfollowed",
+        "stuck",
+        "low confidence",
+        "nothing helps",
+    )  # it ended, it did not crash
+
+
+def test_l76_an_open_gate_offers_the_shortcut_every_step_and_tells_the_answer_model_the_agent_has_it(monkeypatch, tmp_path):
+    from typesafe_computer_use.writer import ANSWER_SYSTEM_MOVES
+
+    world = copy_world()
+    writer = FakeWriter(reviews=[{"answer": "Copy it.", "focus": "Press the copy shortcut"}])
+    state = drive(
+        world, scripted(("click_item", "Total 4,210"), ("press_shortcut", "select_all")), goal="copy the whole note",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer, moves=True,
+    )  # fmt: skip
+
+    decisions = [q for q in world.fake.asked if "kind" in q]
+    assert decisions and all("press_shortcut" in q["kind"].criteria for q in decisions)
+    assert asked_for_the_answer(writer)[0]["system"] == ANSWER_SYSTEM_MOVES
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["moves"] is True and state.history
+
+
+def test_l77_a_gate_the_model_would_not_answer_is_a_closed_gate(monkeypatch, tmp_path):
+    from typesafe_computer_use import runner
+    from typesafe_computer_use.decisions import DecisionError
+
+    world = copy_world()
+
+    def refuse(client, goal):
+        raise DecisionError("no answer")
+
+    monkeypatch.setattr(runner, "needs_moves", refuse)
+    state = drive(world, scripted(("done", None)), goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.moves is False and state.outcome == "done"
+    assert "moves: unknown (no answer), so none are offered" in (tmp_path / "run" / "run.log").read_text()
