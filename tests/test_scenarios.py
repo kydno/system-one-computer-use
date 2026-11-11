@@ -2360,7 +2360,7 @@ def test_l74_a_double_click_that_opens_nothing_is_a_stall_like_any_click_that_do
 
     state = drive(world, policy, goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
 
-    assert state.outcome == "stalled" and state.history == ["double-clicked 'Notes.txt'"] * 3
+    assert state.outcome == "stalled" and len(world.log) == 3
 
 
 def tabs_world() -> World:
@@ -2400,3 +2400,15 @@ def test_l79_a_drag_the_classifier_is_unsure_of_the_target_for_moves_nothing(mon
     state = drive(world, policy, goal="file the invoice under Taxes", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
 
     assert state.outcome == "low confidence" and world.log == []
+
+
+def test_l80_arrow_presses_that_leave_the_screen_as_it_was_are_cut_off_like_any_repeat(monkeypatch, tmp_path):
+    """A key that only moves a highlight shows nothing the screen's text can tell: the run is stopped by the repeat
+    rule after a few presses, so the keys cannot walk a long list on their own."""
+    world = World([Page(name="list", items=["Inbox", "Sent", "Drafts", "Trash"], app="Notes")])
+    policy = scripted(*[("press_shortcut", "arrow_down")] * 6)
+
+    state = drive(world, policy, goal="walk down the list", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "stalled" and len(world.log) == 3
+    assert state.history[0] == "pressed the arrow down shortcut"

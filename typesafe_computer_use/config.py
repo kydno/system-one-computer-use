@@ -103,7 +103,10 @@ SHORTCUTS: dict[str, Shortcut] = {
     "new_window": Shortcut("n", "Open a new window, or a new document, in the app.", command=True),
     "open_file": Shortcut("o", "Open the dialog that asks which file to open.", command=True),
     "save_as": Shortcut(
-        "s", "Save the document under a new name or in another place (the save as dialog).", command=True, shift=True
+        "s",
+        "Open the save as dialog, to save the document under a new name or in another place (in some Mac apps this key duplicates the document instead).",
+        command=True,
+        shift=True,
     ),
     "print": Shortcut("p", "Open the print dialog for the document or page.", command=True),
     "bold": Shortcut("b", "Make the selected text bold, or turn bold on or off at the cursor.", command=True),

@@ -184,7 +184,11 @@ Supervised, on this code (runs `20261110-191418` and `-191556`, each command app
 - The writer's reviews took 65 to 77 s each in these runs (`openai/gpt-6-luna`, reasoning `none`), against 8 to 25 s
   of the classifier's whole work in the run. If speed is the next goal, the writer's latency is the largest piece.
 
-## 2026-11-10: the moves gate on OSWorld's tasks, and a wider shortcut catalog (no iteration; $0.01)
+## 2026-11-10: the moves gate on OSWorld's tasks, and a wider shortcut catalog (after batch2's two iterations were used; $0.03)
+
+The model calls in this entry and the two after it ($0.03 in all, text-only requests) were made after batch2's two
+iterations were used, inside its $1.00 cap; they are not an iteration of their own, and no model call will be made until the
+maintainer opens a new batch.
 
 Cluster: the one OSWorld task this agent has ever failed in `benchmarks/osworld/` (of 7 distinct tasks, all in the
 Chrome domain) is "bring back the last tab I shut down", which is one chord (reopen the closed tab) that the catalog of
@@ -206,12 +210,17 @@ fifteen did not hold. The gate (`needs_moves`) was run over the instructions of 
   file, save as, print, bold, italic, underline. They sit in the shortcut question only, a request of its own, so
   the kind question and the measured numbers above are untouched. Asked of Jev with a goal written for each of the
   fourteen entries tried (three repeats, the new and the old alike): 42 of 42 picks right, the OSWorld task's goal
-  at 1.00 for `reopen_tab`.
+  at 1.00 for `reopen_tab`. That is the shortcut question alone, sent the goal and nothing else: it shows the follow-up names
+  the right entry, not that a run gets there. The kind question must choose `press_shortcut` first, its wording still
+  names only copy, paste, select all, undo, find and switching tabs, and `scroll_down` and `click_item` compete with
+  Page Down and Tab. The kind question was not measured for any new entry.
 
 Also in the catalog, to a total of thirty-three: the keys that only move the focus or the cursor, so as safe as a scroll:
 Tab and Shift-Tab (the next and previous field, form control or spreadsheet cell), the four arrows, Page Up and Page
-Down. The agent had Return and Escape and no other key, so filling a form or a sheet cell by cell, or walking a list,
-meant a click on every item. Asked again of Jev with the whole catalog and a goal for twenty of its entries, three
+Down. The agent had Return and Escape and no other key, so filling a form or a sheet cell by cell
+meant a click on every item. A key that only moves a highlight leaves the screen's text as it was, so the repeat rule counts
+it: three presses of the Down arrow on a page that does not change end the run as stalled (scenario `l80`), so the arrows
+cannot walk a long list; Tab changes the focused field, which the screen signature does see. Asked again of Jev with the whole catalog and a goal for twenty of its entries, three
 repeats each: 60 of 60 right (`bold` and `arrow_left` the least sure, 0.65 to 0.86). The key tables of the Mac and Windows
 adapters and the OSWorld mapping each got the new keys, with a test that every catalog key has a key code on both.
 Not run on hardware: a run that fills a form with Tab.
