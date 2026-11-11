@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from typesafe_computer_use import actions, perception
+from typesafe_computer_use import actions, perception, runner
 from typesafe_computer_use.actions import click_item, fill_field, press_offscreen
 from typesafe_computer_use.models import AxNode, Field, Guidance, Item, Missed, Popup
 from typesafe_computer_use.platform_adapter import desktop
@@ -95,6 +95,22 @@ def test_a_click_that_could_not_be_aimed_is_refused_and_the_run_goes_on(screen, 
     monkeypatch.setattr(desktop, "click_at", miss)
     item = Item(3, "Register Now", 0.9, 100.0, 100.0, 300.0, 140.0)
     assert click_item(item, screen) == "click refused: 'Register Now' was not clicked, the cursor went to (0, 0), not (100, 60)"
+
+
+def test_a_click_refused_after_a_press_says_the_press_went_out(page, monkeypatch):
+    """The press may still be loading something, so the line must not read as an action that did nothing."""
+    live, _ = page
+
+    def miss(point):
+        raise Missed("the cursor went to (0, 0)")
+
+    monkeypatch.setattr(desktop, "click_at", miss)
+    what = click_item(REGISTER, live)
+    assert (
+        what
+        == "accessibility press showed nothing, then click refused: 'Register Now' was not clicked, the cursor went to (0, 0)"
+    )
+    assert not runner.REFUSED.match(what) and "click refused" in what
 
 
 def test_an_off_screen_control_is_pressed_through_accessibility(screen, calls, monkeypatch):
@@ -692,7 +708,7 @@ def test_the_field_record_leaves_the_element_out_so_a_run_can_be_written():
     assert "ref" not in record and json.loads(json.dumps(record))["value"] == "hello"
 
 
-def test_a_wait_gives_the_page_time_before_the_step_delay(monkeypatch):
+def test_a_wait_gives_the_page_time_and_is_the_whole_of_it(monkeypatch):
     slept = []
     monkeypatch.setattr(desktop, "sleep_watching", slept.append)
     assert actions._HANDLERS["wait"](None, None, [], None) == "waited"
@@ -775,6 +791,23 @@ def test_a_scroll_with_no_item_to_aim_at_goes_to_the_window_center(screen, wheel
     what = actions.perform(scrolling(item), replace(screen, window=window), [APPLE_MENU, LISTING, MAP_LABEL], None)
     assert what == "scrolled down"
     assert log == [(-10, None)]
+
+
+def test_a_scroll_keeps_what_its_check_saw_for_the_settle(screen, wheel):
+    """A list at its end leaves no settle to wait out; one that moved is the settle's first look."""
+    _, shown = wheel
+    actions.perform(scrolling(LISTING), screen, [LISTING, MAP_LABEL], None)
+    assert actions.last_look() == actions.Look(shown["image"], changed=False)
+    shown["image"] = screen.image.copy()
+    shown["image"].paste((255, 255, 255), (0, 900, 700, 1200))
+    actions.perform(scrolling(LISTING), screen, [LISTING, MAP_LABEL], None)
+    assert actions.last_look() == actions.Look(shown["image"], changed=True)
+
+
+def test_the_writers_scroll_keeps_its_last_look(screen, wheel):
+    _, shown = wheel
+    actions.writer_scroll("up", "Google Analytics", screen, [LISTING, MAP_LABEL])
+    assert actions.last_look() == actions.Look(shown["image"], changed=False)
 
 
 def test_a_scroll_at_the_window_center_that_changed_nothing_says_so(screen, wheel):

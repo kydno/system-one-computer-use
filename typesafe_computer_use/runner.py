@@ -10,7 +10,9 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from .actions import Context, moved, perform, wait, writer_scroll
+from PIL import Image
+
+from .actions import Context, Look, last_look, moved, perform, wait, writer_scroll
 from .calls import Calls, MeteredClassifier, MeteredWriter
 from .config import (
     DEFAULT_DELAY,
@@ -43,6 +45,11 @@ MAX_REVISITS = 2  # consecutive navigations to the place the action before alrea
 NAVIGATIONS = ("use_browser", "open_app")  # the actions that go to a place, not to something on the screen
 MAX_STALLS = 3  # stalls with no new page between them; the last is final, since two focuses from the writer did not free the run
 SETTLE_LOOK = 0.25  # between two looks at a screen that may still be moving; each look is a capture of its own
+# The most a kind of action waits to settle, below `--delay`, for the kinds whose own check already looked.
+# No scroll on the saved runs that settled on its own took past 1.7 s, and a 1.5 s limit still lets the look
+# that ends there start; past it, a scrolled screen that never holds still is something playing beside it.
+SETTLE_CAPS = {"scroll_down": 1.5, "scroll_up": 1.5}
+REFUSED = re.compile(r"[a-z_]+ refused: ")  # an action that did nothing; one that closed a popup first starts otherwise
 EARLIER_LINES = 600  # lines of text from the screens before the last one that the answer may also be read from
 MAX_QUESTIONS = 3  # questions the writer may put to the user in one run; an empty reply ends the asking sooner
 FOCUS_LEAD = 2.0  # how many times likelier the item a focus names must be than another item of the same text
@@ -386,7 +393,7 @@ def unfollowed(state: RunState) -> bool:
 
 def wait_for_screen(cfg: RunConfig, ctx: Context, state: RunState, log: Log) -> None:
     """Take the wait the writer called for as a wait the classifier chose is taken: an action in the
-    history, never one to repeat (see `repeating`), and settled before the next step reads the screen."""
+    history, never one to repeat (see `repeating`), with no settle after it (see `settle_action`)."""
     screen, items = state.view
     what = wait(screen, items, ctx)
     state.view = None
@@ -394,7 +401,6 @@ def wait_for_screen(cfg: RunConfig, ctx: Context, state: RunState, log: Log) -> 
     state.seen.append((state.last, None))
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
-    settle(screen, cfg.delay)
 
 
 def scroll_for_writer(cfg: RunConfig, state: RunState, answer: Answer, log: Log) -> None:
@@ -407,7 +413,8 @@ def scroll_for_writer(cfg: RunConfig, state: RunState, answer: Answer, log: Log)
     state.seen.append((state.last, None))
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
-    settle(screen, cfg.delay)
+    kind = "scroll_up" if answer.scroll in ("up", "top") else "scroll_down"
+    settle_action(screen, cfg.delay, kind, what, last_look())
 
 
 def stuck(state: RunState, log: Log) -> None:
@@ -572,7 +579,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     timing.setdefault("act", 0.0)
     if state.view is None:  # an action ran: let the screen settle before the next step, or the answer, reads it
         with phase(timing, "settle"):
-            settle(screen, cfg.delay)
+            settle_action(screen, cfg.delay, decision.kind.choice, state.history[-1], last_look())
     timing["total"] = round(time.perf_counter() - started, 3)
     state.timings.append(timing)
 
@@ -584,7 +591,21 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     return keep_going
 
 
-def settle(before: Screen, limit: float) -> None:
+def settle_action(before: Screen, limit: float, kind: str, what: str, look: Look | None) -> None:
+    """Settle after an action of `kind` that `what` describes, given what its own check saw.
+
+    Over 604 saved steps settle was a third of all step time, and an action that is already done
+    waited out the whole limit like one that is not. So no settle follows a wait, which is itself
+    the time to wait; a refusal, which did nothing; or a scroll its own check saw change nothing
+    (a list at its end). A check that saw the change is the settle's first look. A press that showed
+    nothing is not one of these: a pointer click followed it, and its effect has not been looked at.
+    """
+    if kind == "wait" or REFUSED.match(what) or (look is not None and not look.changed):
+        return
+    settle(before, min(limit, SETTLE_CAPS.get(kind, limit)), look.image if look is not None else None)
+
+
+def settle(before: Screen, limit: float, seen: Image.Image | None = None) -> None:
     """Wait for what an action did to finish showing, for `limit` seconds at most.
 
     A fixed pause cost every action the whole limit, 20 s of a 116 s run on Google Flights, though
@@ -592,12 +613,13 @@ def settle(before: Screen, limit: float) -> None:
     from the capture the action was decided on and then holds still for one look, it has settled.
     A screen that has not changed at all may be waiting on the network, and one that never holds
     still is loading or playing something, so both get the whole limit, as before. No limit means
-    no looks, as on OSWorld, where each one would be a round trip.
+    no looks, as on OSWorld, where each one would be a round trip. `seen` is a capture the action's
+    own check already took after acting: it counts as the first look.
     """
     if limit <= 0:
         return
     end = time.monotonic() + limit
-    last = None
+    last = seen
     while (left := end - time.monotonic()) > 0:
         desktop.sleep_watching(min(SETTLE_LOOK, left))
         now = desktop.screenshot()
