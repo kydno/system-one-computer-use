@@ -106,6 +106,11 @@ def test_clicker_moves_in_the_shell_goes_to_the_machine_with_the_command_and_int
     assert '"command": "CLICKER_MOVES=off run-jev chrome/a --ocr rapidocr"' in line
 
 
+def test_clicker_moves_is_read_as_the_python_side_reads_it(tmp_path):
+    printed = dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr", env={"CLICKER_MOVES": " OFF "})
+    assert "osworld-exec env CLICKER_MOVES=off scripts/osworld run-jev chrome/a --ocr rapidocr" in printed
+
+
 def test_a_cloud_run_without_clicker_moves_sends_the_command_as_it_was(tmp_path):
     printed = dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr")
     assert "CLICKER_MOVES" not in printed

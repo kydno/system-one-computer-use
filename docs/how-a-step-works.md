@@ -44,7 +44,7 @@ stands for it: two options for one click would only split the vote. An `ax` item
 `role` (`button`, `menu`) in its row of the state's `screen_items_in_reading_order`, so the
 classifier can tell a real control from a line of text. A label that appears more than once
 carries its row as well, `"beside": ["Coldplay", "Oct 2"]`, since the label says nothing
-about which and the layout does. Each item goes out once, in that list: the item question's
+about which and the layout does. The history line of a click names the whole row, so a click on one of three Buys is not a repeat of another; a row of more than eight items (a strip of tabs, a toolbar) is named by its first three, a count, and a four-character tag of the whole row (`beside 'a', 'b', 'c' and 30 more (row 3f2a)`), since 33 tab titles in a line that rides in every later request steered the shortcut question wrong, and the tag keeps two long rows that open alike from reading as the same action to the repeat rule. Each item goes out once, in that list: the item question's
 criteria are only pointers to its rows (`"14": "Item 14."`). They used to repeat every row, and the
 two copies were 85% of a request; the copy in the criteria was 8.5 KB of 23.2 KB, and with a pointer in
 its place a request is 26% smaller and its input tokens 17%, the same items picked (silver agreement

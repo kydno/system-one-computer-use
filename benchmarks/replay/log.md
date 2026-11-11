@@ -157,7 +157,11 @@ current code (agreement 0.598, 63 cases mostly right, 32 confident and wrong, 10
   picked differ by two, and confident-and-wrong picks fall from 32 to 28 (right-but-below-the-floor 27 to 24).
   Same pick in all three repeats 0.860 against 0.869, inside the noise band.
 - The item question's instruction is unchanged, so the pass measured the code that is kept. It still says items are
-  "marked with a role"; the role is in the state's rows. Rewording it is a separate pass.
+  "marked with a role"; the role is in the state's rows. It is left as measured on purpose: any change to the words
+  re-keys every cached reply, so rewording it waits for a pass of its own.
+- The two rejected variants have no row in this directory. They ran as in-process patches of the kept code
+  (scratch scripts, not a commit), so a row recorded now would stamp them with a commit that does not contain
+  them. The kept variant's row is `20261110T222801Z.jsonl`; the figures of the other two are in the table.
 - Only Jev was measured. Another decision model (see `docs/decision-models.md`) may read the pointer worse, and
   would need its own pass before it runs on this.
 - Every saved case's item criteria now differ from what it was sent with (`clicker-eval check`: 0 of 827 exact; the
@@ -243,7 +247,7 @@ moving them to a follow-up for the 14% of steps that open a site would save that
 
 ## 2026-11-10: batch3 iteration 1, the history line of a long row (kept)
 
-Supervised (approved), runs `20261110-194859`: a goal to close the example.com tab and then reopen it, in the maintainer's
+Supervised (approved), runs `20261110-194859`: a goal to close a scratch page's tab and then reopen it, in the maintainer's
 browser window of about thirty-five tabs. Step 1 closed the tab by pressing its Close button, step 3 pressed the `reopen_tab`
 shortcut (0.93) and the page came back; the answer model judged it achieved. The first run of the kind question with a new
 catalog entry: it chose `press_shortcut` at 0.66 once the review's focus said to.

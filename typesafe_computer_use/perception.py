@@ -121,7 +121,13 @@ def perceive(
         nodes = [node for node in nodes if node not in blank]
         hidden = hidden + blank
         controls = to_ax_items(nodes, screen.scale)
-    content = [block for block in blocks if apart and in_text_area(screen, (block.x1, block.y1, block.x2, block.y2))]
+    # A line a control of the app already covers (an editor that publishes its text through accessibility) takes
+    # the ordinary merge with it, so it is one item and not an OCR line beside an accessibility twin of itself.
+    content = [
+        block
+        for block in blocks
+        if apart and in_text_area(screen, (block.x1, block.y1, block.x2, block.y2)) and not covered_by_a_control(block, controls)
+    ]
     held = {id(block) for block in content}
     rest = [block for block in blocks if id(block) not in held and not in_field(block, screen)]
     merged = merge_with_origins(rest, controls, budget, content)
@@ -694,6 +700,11 @@ def merge_with_origins(
     kept = [merged[i] for i in kept_by_budget([it for it, _ in merged], budget)]
     order = reading_order([it for it, _ in kept])
     return [(replace(kept[j][0], index=i), kept[j][1]) for i, j in enumerate(order)]
+
+
+def covered_by_a_control(block: Item, controls: list[Item]) -> bool:
+    """Whether a control of the app is the same thing as this OCR block: the test the merge makes."""
+    return any(box_overlap(control, block) >= MIN_BOX_OVERLAP and texts_match(control.text, block.text) for control in controls)
 
 
 def is_icon(block: Item, controls: list[Item]) -> bool:

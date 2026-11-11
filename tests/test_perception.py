@@ -304,6 +304,24 @@ def test_the_lines_of_a_text_area_are_one_block_unless_the_run_points_at_text(mo
     )
 
 
+def test_a_line_the_accessibility_tree_also_publishes_is_one_item_not_two(monkeypatch):
+    """An editor that exposes its text: the OCR line and the control are the same line, as the merge decides."""
+    lines = [
+        ("Quarterly figures", 1.0, (310.0, 208.0, 480.0, 230.0)),
+        ("Total 4,210", 1.0, (310.0, 234.0, 420.0, 256.0)),
+    ]
+    twin = AxNode(role="AXLink", label="Total 4,210", x=155.0, y=117.0, w=55.0, h=11.0, pressable=True, ref=object())
+    monkeypatch.setattr(perception, "ocr_lines", lambda screen, cache: (lines, 100.0, 1))
+    monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: ([twin], [], False))
+    screen = Screen(image=busy_page((1000, 600)), scale=2.0, app="TextEdit", field=BODY, url=None, pid=7)
+
+    items = perception.perceive(screen, 255, "goal", None, None, True)
+
+    assert sorted(it.text for it in items) == ["Quarterly figures", "Total 4,210"]  # not "Total 4,210" twice
+    total = next(it for it in items if it.text == "Total 4,210")
+    assert total.source == "ax+ocr" and screen.ax_refs[total.index] is twin.ref
+
+
 def test_keeping_lines_apart_touches_only_the_body_of_the_focused_text_area(monkeypatch):
     block = "Quarterly figures Total 4,210 Prepared by the scratch test"
     assert block in document_items(monkeypatch, None, apart=True)  # nothing focused: the lines merge as ever

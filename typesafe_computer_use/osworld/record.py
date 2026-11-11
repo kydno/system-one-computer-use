@@ -44,10 +44,9 @@ def rows(root: Path, model: str, tasks: list[str], settings: dict) -> list[dict]
                 "agent_seconds": result.jev.seconds if result.jev else None,
                 "tree": result.jev.tree if result.jev else None,  # where jev's accessibility trees came from
                 "tree_fallbacks": result.jev.tree_fallbacks if result.jev else None,
-                "moves": result.jev.moves
-                if result.jev
-                else None,  # whether the run was offered the moves beyond clicking and typing
-                "moves_by": result.jev.moves_by if result.jev else None,  # the gate's question about the goal, or CLICKER_MOVES
+                # whether the run was offered the moves beyond clicking and typing, and who decided: the gate or CLICKER_MOVES
+                "moves": result.jev.moves if result.jev else None,
+                "moves_by": result.jev.moves_by if result.jev else None,
                 "model_seconds": result.model_seconds,  # usage.json's model time, for an agent that is not jev
                 "agent_settings": result.settings,  # usage.json's settings, such as Luna's reasoning effort
                 "usage": {name: asdict(used) for name, used in result.usage.items()},

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -143,22 +144,22 @@ def kind_criteria(
     return {**clicks, **fixed_actions(browser, email, browsers, apps, moves)}
 
 
-ROW_MATES = 3  # how many neighbours name a duplicated item's row in a criterion; the history line takes them all
-
-
-HISTORY_MATES = (
-    8  # the longest row a history line names whole; a longer one (a strip of tabs, a toolbar) is cut to three and a count
-)
+ROW_MATES = 3  # how many neighbours name a duplicated item's row in the state; the history line takes more
+HISTORY_MATES = 8  # the longest row a history line names whole; a longer one (a strip of tabs, a toolbar) is cut
+HISTORY_SHOWN = 3  # to this many of its items, a count of the rest, and a tag that stands for the whole row
 
 
 def beside(mates: list[str]) -> str:
-    """The row, as a history line names it: the whole row, so that two rows that open alike get lines of their own,
-    until it is longer than HISTORY_MATES. A long row tells its items apart no better (every Close button of a
-    strip of tabs read the same), and the line was sent with every request after it: 33 tab titles in it
-    steered the shortcut question to close_tab, on a goal that had already closed the tab, at 0.38 to 0.46."""
+    """The row, as a history line names it. The whole row while it is HISTORY_MATES items or fewer, so that two
+    rows that open alike get lines of their own. A longer one tells its items apart no better and was sent with
+    every request after it (33 tab titles in one line steered the shortcut question to close_tab, on a goal that
+    had already closed the tab, at 0.38 to 0.46), so it is cut to its first items and a count, and a short tag of
+    the whole row keeps two long rows that open alike, each with a Delete, from reading as the same action to
+    the repeat rule."""
     if len(mates) <= HISTORY_MATES:
         return ", ".join(repr(m) for m in mates)
-    return ", ".join(repr(m) for m in mates[:3]) + f" and {len(mates) - 3} more"
+    tag = hashlib.blake2s("\x1f".join(mates).encode(), digest_size=2).hexdigest()
+    return ", ".join(repr(m) for m in mates[:HISTORY_SHOWN]) + f" and {len(mates) - HISTORY_SHOWN} more (row {tag})"
 
 
 def row_mates(items: list[Item], limit: int | None = ROW_MATES) -> dict[int, list[str]]:
@@ -437,11 +438,13 @@ def decide(
     chose open_app: the list of installed apps is long, and most steps open none. A shortcut is asked
     the same way, once press_shortcut is chosen, and so is the item a drag drops on.
 
-    Luna refuses the item question now and then, the one whose labels are text read off the screen,
-    and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
-    IAM roles, a run never got as far as opening the browser the goal named. Most moves need no
-    item, so the step is asked again without it, and only a click is left without a decision. It
-    refuses the off-screen question the same way, and only pressing one of those controls needs it.
+    Luna refused the item question now and then when its labels were the text read off the screen, and
+    OpenRouter loses every other answer with it: on a Claude window full of a conversation about IAM roles,
+    a run never got as far as opening the browser the goal named. Most moves need no item, so the step is
+    asked again without it, and only a click is left without a decision. It refuses the off-screen question
+    the same way, and only pressing one of those controls needs it. The item labels are pointers to the
+    state's rows now (`Item N.`) and the screen text sits in the state, so whether Luna still refuses this
+    question has not been measured; the fallback stays until it has.
     """
     questions = build_questions(screen, items, browser, email, guidance, browsers, apps, moves)
     state = base_state(goal, screen, items, history, tried, guidance, moves)

@@ -575,8 +575,19 @@ def test_an_unknown_answer_to_the_read_only_question_keeps_the_floor():
     assert lines == ["read-only: unknown (openrouter answered 502), so the floor stays"]
 
 
-def test_a_history_line_names_a_short_row_whole_and_cuts_a_long_one_to_three_and_a_count():
+def test_a_history_line_names_a_short_row_whole_and_cuts_a_long_one_to_three_a_count_and_a_tag():
     row = ["a", "b", "c", "d", "e", "f", "g", "h"]
     assert beside(row) == "'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'"  # up to eight, whole, as before
     strip = [f"Tab {i}" for i in range(33)]
-    assert beside(strip) == "'Tab 0', 'Tab 1', 'Tab 2' and 30 more"  # a strip of tabs is not named title by title
+    cut = beside(strip)
+    assert cut.startswith("'Tab 0', 'Tab 1', 'Tab 2' and 30 more (row ") and "Tab 5" not in cut  # not named title by title
+    assert beside(strip) == cut  # and the same row reads the same each time
+
+
+def test_two_long_rows_that_open_alike_get_lines_of_their_own_so_the_second_is_not_a_repeat_of_the_first():
+    head = ["Mars", "Sep 25", "Seat 4"]
+    one = [*head, "a", "b", "c", "d", "e", "f", "Delete"]
+    two = [*head, "a", "b", "c", "d", "x", "f", "Delete"]  # the same first three, the same length, one cell different
+    assert len(one) == len(two) > 8
+    assert beside(one) != beside(two)
+    assert beside(one).split(" and ")[0] == beside(two).split(" and ")[0]  # what the model reads first is alike

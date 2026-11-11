@@ -291,10 +291,11 @@ run_task() {
   # CLICKER_MOVES in this shell goes to the machine with the command (the shell's variables do not
   # cross SSH, and the environment beats .env there), so each arm of an A/B is one command and
   # .env stays as it is. The row records it as part of the command, and as the run's own `moves_by`.
-  local setting=""
-  if [[ -n ${CLICKER_MOVES:-} ]]; then
-    [[ $CLICKER_MOVES =~ ^(auto|on|off)$ ]] || die "CLICKER_MOVES must be auto, on or off, not '$CLICKER_MOVES'"
-    setting="CLICKER_MOVES=$CLICKER_MOVES "
+  local setting="" moves
+  moves=$(printf '%s' "${CLICKER_MOVES:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]') # as the Python side reads it
+  if [[ -n $moves ]]; then
+    [[ $moves =~ ^(auto|on|off)$ ]] || die "CLICKER_MOVES must be auto, on or off, not '$CLICKER_MOVES'"
+    setting="CLICKER_MOVES=$moves "
   fi
 
   load
