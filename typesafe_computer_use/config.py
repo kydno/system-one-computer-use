@@ -100,6 +100,35 @@ SHORTCUTS: dict[str, Shortcut] = {
     "reload": Shortcut("r", "Reload the page.", command=True, browser=True),
     "zoom_in": Shortcut("=", "Make the page or document larger.", command=True),
     "zoom_out": Shortcut("-", "Make the page or document smaller.", command=True),
+    # Added after the one OSWorld task this agent failed, bringing back the last tab that was closed, which no
+    # entry above does. They sit in the shortcut question only, a request of its own: the kind question,
+    # where each extra entry split the vote, is as it was.
+    "reopen_tab": Shortcut("t", "Reopen the tab or window that was closed last.", command=True, shift=True, browser=True),
+    "address_bar": Shortcut(
+        "l", "Put the cursor in the browser's address bar, with its text selected.", command=True, browser=True
+    ),
+    "bookmark_page": Shortcut("d", "Bookmark the page that is open.", command=True, browser=True),
+    "new_window": Shortcut("n", "Open a new window, or a new document, in the app.", command=True),
+    "open_file": Shortcut("o", "Open the dialog that asks which file to open.", command=True),
+    "save_as": Shortcut(
+        "s",
+        "Open the save as dialog, to save the document under a new name or in another place (in some Mac apps this key duplicates the document instead).",
+        command=True,
+        shift=True,
+    ),
+    "print": Shortcut("p", "Open the print dialog for the document or page.", command=True),
+    "bold": Shortcut("b", "Make the selected text bold, or turn bold on or off at the cursor.", command=True),
+    "italic": Shortcut("i", "Make the selected text italic, or turn italics on or off at the cursor.", command=True),
+    "underline": Shortcut("u", "Underline the selected text, or turn underline on or off at the cursor.", command=True),
+    # Plain navigation keys: they move the focus or the cursor and change nothing, so they are as safe as a scroll.
+    "next_field": Shortcut("tab", "Press the Tab key: move the focus to the next field, control, or spreadsheet cell."),
+    "previous_field": Shortcut("tab", "Press Shift and Tab: move the focus to the previous field, control, or cell.", shift=True),
+    "arrow_up": Shortcut("up", "Press the Up arrow once: move the cursor or the selection up one line, row, or item."),
+    "arrow_down": Shortcut("down", "Press the Down arrow once: move the cursor or the selection down one line, row, or item."),
+    "arrow_left": Shortcut("left", "Press the Left arrow once: move the cursor or the selection one character or cell left."),
+    "arrow_right": Shortcut("right", "Press the Right arrow once: move the cursor or the selection one character or cell right."),
+    "page_up": Shortcut("page_up", "Press Page Up: move up by one screen in a document, list, or sheet."),
+    "page_down": Shortcut("page_down", "Press Page Down: move down by one screen in a document, list, or sheet."),
 }
 
 
@@ -189,6 +218,17 @@ def custom_writer_endpoint() -> bool:
         return True
     url = writer_base_url() or os.environ.get("ANTHROPIC_BASE_URL")
     return bool(url) and urlparse(url).hostname != ANTHROPIC_HOST
+
+
+def moves_override() -> bool | None:
+    """CLICKER_MOVES: `on` offers every run the moves beyond clicking and typing, `off` offers none,
+    whatever the goal says. `auto`, or nothing, leaves it to the decision model (the gate), which is
+    how a run decides when nobody forces it. Forcing exists so a benchmark can run the same tasks
+    with the moves in and out of the kind question, without the gate's one-call guess in between."""
+    raw = os.environ.get("CLICKER_MOVES", "").strip().lower() or "auto"
+    if raw not in ("auto", "on", "off"):
+        raise ValueError(f"CLICKER_MOVES must be auto, on or off, not {raw!r}")
+    return {"on": True, "off": False}.get(raw)
 
 
 def writer_vision() -> bool:

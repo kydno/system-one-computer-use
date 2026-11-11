@@ -75,14 +75,16 @@ BROWSER_EXES = {"Google Chrome": "chrome", "Microsoft Edge": "msedge", "Firefox"
 # Virtual keys for the keys the actions press. macOS's Command becomes Control, except Command-[,
 # a browser's Back, which is Alt-Left on Windows.
 VK = {
-    "return": 0x0D, "tab": 0x09, "escape": 0x1B, "delete": 0x2E, "left": 0x25, "right": 0x27,
+    "return": 0x0D, "tab": 0x09, "escape": 0x1B, "delete": 0x2E, "left": 0x25, "right": 0x27, "up": 0x26, "down": 0x28,
+    "page_up": 0x21, "page_down": 0x22,
     "[": 0xDB, "]": 0xDD, "=": 0xBB, "-": 0xBD,
-    "a": 0x41, "c": 0x43, "f": 0x46, "r": 0x52, "s": 0x53, "t": 0x54, "v": 0x56, "w": 0x57, "x": 0x58, "z": 0x5A,
+    "a": 0x41, "b": 0x42, "c": 0x43, "d": 0x44, "f": 0x46, "i": 0x49, "l": 0x4C, "n": 0x4E, "o": 0x4F, "p": 0x50,
+    "r": 0x52, "s": 0x53, "t": 0x54, "u": 0x55, "v": 0x56, "w": 0x57, "x": 0x58, "z": 0x5A,
 }  # fmt: skip
 VK_CONTROL = 0x11
 VK_SHIFT = 0x10
 VK_ALT = 0x12
-EXTENDED_KEYS = {0x2E, 0x25, 0x27}  # Delete and the arrows live on the extended keypad
+EXTENDED_KEYS = {0x2E, 0x25, 0x26, 0x27, 0x28, 0x21, 0x22}  # Delete, the arrows and Page Up and Down: the extended keypad
 COMMAND_CHORDS = {"[": (VK_ALT, VK["left"])}
 
 INPUT_MOUSE = 0

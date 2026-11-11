@@ -218,8 +218,10 @@ def test_an_item_under_a_popup_is_clicked_in_the_action_that_closes_the_popup(je
     assert actions == ["pyautogui.click(1891, 139)\ntime.sleep(0.5)\npyautogui.click(1888, 142)"]
     assert response == "click_item 'Organise' (0.90)"
     payload = (tmp_path / "jev" / "step-001-payload.txt").read_text()
-    assert "\"button 'Organise' (top-right; under 'Restore pages?')\"" in payload
-    assert payload.count("under 'Restore pages?'") == 1, "the bubble's own controls are not under it"
+    assert '"under": "\'Restore pages?\'"' in payload
+    assert payload.count("under 'Restore pages?'") == 0 and payload.count('"under"') == 1, (
+        "the bubble's own controls are not under it"
+    )
 
     assert agent.predict(GOAL, captured)[1] == ["DONE"]
     assert run_json(tmp_path)["history"] == ["closed 'Restore pages?' then clicked 'Organise'"]
@@ -501,6 +503,9 @@ def test_keys_map_onto_pyautogui():
     desktop.press("a", command=True)
     desktop.press("tab")
     desktop.press("delete")
+    desktop.press("page_down")
+    desktop.press("down")
+    desktop.press("tab", shift=True)
     (code,) = desktop.actions
     assert code.splitlines() == [
         "pyautogui.press('enter')",
@@ -509,6 +514,9 @@ def test_keys_map_onto_pyautogui():
         "pyautogui.hotkey('ctrl', 'a')",
         "pyautogui.press('tab')",
         "pyautogui.press('backspace')",
+        "pyautogui.press('pagedown')",
+        "pyautogui.press('down')",
+        "pyautogui.hotkey('shift', 'tab')",
     ]
 
 

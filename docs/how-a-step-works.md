@@ -17,7 +17,7 @@ AppleScript   ─► frontmost app and pid, active tab URL
 clock         ─► local date and time
 dates.py      ─► "dated 2026-10-13 (in 27 days)" on any block containing a date,
                  "near a line dated ..." on its neighbours, none from the menu bar's clock
-layout        ─► "in the row of ..." on any label that appears more than once
+layout        ─► "beside" (the row's other labels) on any label that appears more than once
 runner.py     ─► the actions already tried on this same screen, each of which led back here
                      │
                      ▼
@@ -40,15 +40,20 @@ runner.py     ─► the actions already tried on this same screen, each of whic
 Items carry where they came from: `ocr` for a text block, `ax` for a control the app
 declared, `ax+ocr` when both found the same thing. A symbol OCR reads off a button or
 link, `←` on Back or `☆` on the bookmark star, is that control's icon, and the control
-stands for it: two options for one click would only split the vote. An `ax` item reads as
-`button 'Share' (top-right)` in the criteria, so the classifier can tell a real control
-from a line of text. A label that appears more than once carries its row as well:
-`'Buy' (middle-right; in the row of 'Coldplay', 'Oct 2')`, since the label says nothing
-about which and the layout does. Text read inside the focused one-line field is not an
+stands for it: two options for one click would only split the vote. An `ax` item has a
+`role` (`button`, `menu`) in its row of the state's `screen_items_in_reading_order`, so the
+classifier can tell a real control from a line of text. A label that appears more than once
+carries its row as well, `"beside": ["Coldplay", "Oct 2"]`, since the label says nothing
+about which and the layout does. The history line of a click names the whole row, so a click on one of three Buys is not a repeat of another; a row of more than eight items (a strip of tabs, a toolbar) is named by its first three, a count, and a four-character tag of the whole row (`beside 'a', 'b', 'c' and 30 more (row 3f2a)`), since 33 tab titles in a line that rides in every later request steered the shortcut question wrong, and the tag keeps two long rows that open alike from reading as the same action to the repeat rule. Each item goes out once, in that list: the item question's
+criteria are only pointers to its rows (`"14": "Item 14."`). They used to repeat every row, and the
+two copies were 85% of a request; the copy in the criteria was 8.5 KB of 23.2 KB, and with a pointer in
+its place a request is 26% smaller and its input tokens 17%, the same items picked (silver agreement
+0.598 both ways on `~typesafe/jev-latest`). Dropping the state's list instead saves more and loses the kind
+question the screen: agreement 0.446, `scroll_down` picked twice as often. Text read inside the focused one-line field is not an
 item: it is the field's value or placeholder, the state carries the value, and the field
 is an item of its own when the app declares it. A text area keeps its lines.
 
-A control under a popup says which: `button 'Organise' (top-right; under 'Restore pages?')`.
+A control under a popup says which, in its row: `"under": "'Restore pages?'"`.
 Chrome draws its bubbles, menus, and dialogs as windows of their own, in front of the page, so a
 click on the page there lands on the popup. Picking such an item closes the popup first, with its
 own close button, or with Escape when it has none, and never with its other buttons ('Restore'
@@ -164,7 +169,7 @@ on the app, and the node and time caps bind first on a big tree: Notes and Chrom
 | `open_app` | bring the app the `app` answer names to the front, starting it when it is not running, with up to 10 s to get there. The `app` question is a request of its own, sent only once `kind` is `open_app`, since the list is long and most steps open no app: it carries the goal, the focus, and the app in front, and lists every app bundle in `/Applications`, `~/Applications`, `/System/Applications` and the `Utilities` inside each, except the browsers `use_browser` reaches, plus `none`. `none`, or the app already in front, is refused in the history line. Offered only where the adapter lists apps: macOS, not Windows or the OSWorld VM |
 | `type_text` | the writer composes the string; it is set on the focused element through the accessibility tree, with keystrokes as the fallback when the value does not read back, and a Noul then checks the field's value; text the writer submits gets Return at once instead, and the next screen is the check. Into a stand-in field (see above) the text goes by keystrokes, and the Noul checks the text OCR reads across the box's row instead of a value. Into a rich-text editor that is no form field, such as a Google Doc (a focused element with an `AXEditableAncestor` and no text role), the text goes in at the caret by keystrokes, never after Select All and Delete, and the Noul checks the screen lines that share a word with it |
 | `type_email` | fills in `$CLICKER_EMAIL` the same way; refused unless a text field is focused |
-| `press_shortcut` | (offered only to a run whose goal needs the moves beyond clicking and typing; see below) press the shortcut the `shortcut` answer names, from the catalog `SHORTCUTS` in `config.py` (copy, cut, paste, select all, undo, redo, save, find, new tab, close tab, next and previous tab, reload, zoom in and out; nothing that quits, logs out, or types), each written for a Mac and turned by the adapter into the keys of its platform (Command is Control on Windows and in the OSWorld VM). The `shortcut` question is a request of its own, sent only once `kind` is `press_shortcut`, and lists the catalog plus `none`; `none` is refused in the history line. The follow-up is sent the goal, the guidance, the frontmost app, the focused field (with its `selected_text` when the element says what is selected) and the last eight history lines, so a goal that takes select all, then copy, then paste is asked what is still to press. Unlike an app, a wrong shortcut is not always undone (cut, close tab), so a split on the shortcut answer lowers the step's confidence as a split on an item does, and a read-only goal's lower floor does not apply to it: a shortcut needs `min_confidence` whatever the goal. Code refuses, with the reason in the history line, a browser shortcut (new tab, close tab, next and previous tab, reload) when the frontmost app is not a browser (`BROWSER_APPS`, or the configured one), since the same keys close a document or reply to a mail elsewhere, and paste or cut when the focused field is a secure field or its label or placeholder names a password, code or card. What the keys did shows on the next capture; a copy changes nothing on screen, and the idle count bounds a run that only copies |
+| `press_shortcut` | (offered only to a run whose goal needs the moves beyond clicking and typing; see below) press the shortcut the `shortcut` answer names, from the catalog `SHORTCUTS` in `config.py` (copy, cut, paste, select all, undo, redo, save, save as, find, new tab, reopen the closed tab, close tab, next and previous tab, address bar, bookmark, new window, open a file, print, reload, zoom in and out, bold, italic, underline, and the plain navigation keys: Tab and Shift-Tab between fields or cells, the four arrows, Page Up and Down; nothing that quits, logs out, or types), each written for a Mac and turned by the adapter into the keys of its platform (Command is Control on Windows and in the OSWorld VM). The `shortcut` question is a request of its own, sent only once `kind` is `press_shortcut`, and lists the catalog plus `none`; `none` is refused in the history line. The follow-up is sent the goal, the guidance, the frontmost app, the focused field (with its `selected_text` when the element says what is selected) and the last eight history lines, so a goal that takes select all, then copy, then paste is asked what is still to press. Unlike an app, a wrong shortcut is not always undone (cut, close tab), so a split on the shortcut answer lowers the step's confidence as a split on an item does, and a read-only goal's lower floor does not apply to it: a shortcut needs `min_confidence` whatever the goal. Code refuses, with the reason in the history line, a browser shortcut (new tab, reopen the closed tab, close tab, next and previous tab, address bar, bookmark, reload) when the frontmost app is not a browser (`BROWSER_APPS`, or the configured one), since the same keys close a document or reply to a mail elsewhere, and paste or cut when the focused field is a secure field or its label or placeholder names a password, code or card. What the keys did shows on the next capture; a copy changes nothing on screen, and the idle count bounds a run that only copies |
 | `press_enter`, `press_escape` | keyboard |
 | `go_back` | Cmd-[, the browser's Back, when the last click led somewhere unhelpful |
 | `scroll_down`, `scroll_up` | 10 lines, after parking the cursor over the item the `item` answer names, since a wheel scrolls whatever is under it: on Google Maps the window's center is the map, which zoomed out while the results list beside it stayed put. With no item, or one in the menu bar or outside the frontmost window, the cursor goes to the window's center. 0.4 s later the screen around the cursor is compared with the capture, and a scroll that changed nothing there says so in the history (`scrolled down over 'X' (nothing there moved)`) |
@@ -187,6 +192,26 @@ when the run was offered them, so it does not send the classifier to a move it l
 was asked, with the moves when its run was offered them; `--moves` offers them in every case and
 `--no-moves` in none. A saved pass says which: `moves_mode` (`own`, `on` or `off`) and `moves_cases`, how
 many of its cases were asked with them.
+
+`CLICKER_MOVES=on` offers every run the moves and `off` offers none, whatever the goal says, and
+neither asks the decision model about the goal (one request fewer). `auto`, or nothing, is the gate
+above. The setting exists for a benchmark that must run the same tasks with the moves in and out of
+the kind question, without the gate's one-call guess deciding for it; a value other than these three
+stops the run rather than quietly asking. `run.json` says who settled it, `moves_by`: `gate` or
+`CLICKER_MOVES`.
+
+A selection leaves nothing on the screen the request reads, so a run offered the moves is told what is
+selected: the focused field's `selected_text` (the accessibility value of the selection, up to 200
+characters, left out when nothing is selected, and never sent to a run that was not offered the moves).
+Only the Mac adapter reads it so far; Windows and the OSWorld VM leave it empty, so there a selection is
+still invisible to the request.
+The clicks land on the middle of an item, and OCR reads close lines of a document as one block, so
+"the second line" was out of reach: a run offered the moves keeps the lines of the focused text area apart
+(`perceive(..., apart=True)`), one item each, and every other run reads the blocks it always did. A word
+inside a line is still not an item.
+The `shortcut` follow-up gets the previous actions and the focused field as well as the goal, and is told
+that a goal can take several shortcuts in turn: without them it answered "select all" six times in a
+row on a goal of select all, copy, paste, since the goal was all it saw.
 
 After any action the screen gets time to settle before the next step reads it. It is looked at
 every 0.25 s: once it differs from the capture the action was decided on and then holds still for

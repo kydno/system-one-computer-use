@@ -40,9 +40,11 @@ failed check of typed text keeps the text and says it was not verified.
 OpenRouter answers a Luna request that Luna refuses any part of with a 502 for the whole request,
 so on Luna a refusal reaches the agent as an error rather than as one refused answer, and every
 other answer in the request is lost with it. The message names the question, and a refusal is not
-retried as an outage is. Luna refuses the item question now and then, the one whose labels are text
-read off the screen: on a Claude window full of a conversation about IAM roles, a run never got as
-far as opening the browser its goal named. So a refused item is asked again without it. Opening a
+retried as an outage is. Luna refused the item question now and then while its labels were the text
+read off the screen: on a chat window full of text it would not read, a run never got as
+far as opening the browser its goal named. The labels are pointers to the state's rows now (`Item N.`)
+and that text lives in the state, so whether Luna still refuses it is unmeasured. A refused item is
+asked again without it, as before. Opening a
 site or an app, typing, scrolling, and waiting need no item and go ahead; a click is left without a
 decision. The step's log line and `answers.json` say `refused`.
 

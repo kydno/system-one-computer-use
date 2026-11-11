@@ -1005,7 +1005,7 @@ def test_l33_duplicate_labels_are_told_apart_by_their_row(monkeypatch, tmp_path)
     listing = world.fake.states[0]["screen_items_in_reading_order"]
     chosen = next(it for it in listing if it["text"] == "Buy" and "Coldplay" in it.get("beside", []))
     assert chosen["beside"] == ["Coldplay", "Oct 2"]
-    assert "in the row of 'Coldplay', 'Oct 2'" in world.fake.asked[0]["item"].criteria[str(chosen["i"])]
+    assert world.fake.asked[0]["item"].criteria[str(chosen["i"])] == f"Item {chosen['i']}."  # the row is told once, in the state
     unique = next(it for it in listing if it["text"] == "Coldplay")
     assert "beside" not in unique  # nothing else on screen reads 'Coldplay', so the row says nothing new
 
@@ -1893,7 +1893,7 @@ def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_s
     assert world.log == ["click:Close", "click:Organise"]
     (organise,) = [it for it in world.fake.states[0]["screen_items_in_reading_order"] if it["text"] == "Organise"]
     assert organise["under"] == "'Restore pages?'"
-    assert "under 'Restore pages?'" in world.fake.asked[0]["item"].criteria[str(organise["i"])]
+    assert world.fake.asked[0]["item"].criteria[str(organise["i"])] == f"Item {organise['i']}."  # told once, in the state
     assert state.calls.count["classifier"] == 4  # the goal twice, one decision to open the menu, one to stop
 
 
@@ -2224,6 +2224,7 @@ def test_l68_a_shortcut_is_asked_for_in_its_own_request_and_pressed_with_its_mod
     follow_ups = [q for q in world.fake.asked if set(q) == {"shortcut"}]
     assert len(follow_ups) == 2 and list(follow_ups[0]["shortcut"].criteria)[-1] == "none"
     assert len(world.fake.states) == 3  # the two decisions and the final done; the follow-ups are not decisions
+    assert world.apart and all(world.apart)  # a run offered the moves reads the lines of a text area one by one
 
 
 def test_l68b_the_shortcut_is_decided_from_what_the_follow_up_was_sent_select_all_then_copy(monkeypatch, tmp_path):
@@ -2333,6 +2334,7 @@ def test_l75_the_gate_is_asked_of_the_goal_alone_and_a_closed_gate_leaves_the_re
     )
 
     assert all("press_shortcut" not in criteria["kind"].criteria for criteria in world.fake.asked)  # no step was offered it
+    assert world.apart and not any(world.apart)  # and its perception is the one every run had
     assert all(set(q) != {"shortcut"} for q in world.fake.asked)
     (answer_request,) = asked_for_the_answer(writer)[:1]
     assert (
@@ -2380,6 +2382,75 @@ def test_l77_a_gate_the_model_would_not_answer_is_a_closed_gate(monkeypatch, tmp
 
     assert state.moves is False and state.outcome == "done"
     assert "moves: unknown (no answer), so none are offered" in (tmp_path / "run" / "run.log").read_text()
+
+
+def refuse_to_ask(monkeypatch):
+    """Make the gate's own question fail the test if it is put."""
+    from typesafe_computer_use import runner
+
+    def asked(client, goal):
+        raise AssertionError("the goal was asked about although CLICKER_MOVES settled it")
+
+    monkeypatch.setattr(runner, "needs_moves", asked)
+
+
+def test_l77b_clicker_moves_on_opens_the_gate_without_asking_the_model(monkeypatch, tmp_path):
+    from typesafe_computer_use.writer import ANSWER_SYSTEM_MOVES
+
+    monkeypatch.setenv("CLICKER_MOVES", "on")
+    refuse_to_ask(monkeypatch)
+    world = copy_world()
+    writer = FakeWriter(reviews=[{"answer": "Copy it.", "focus": "Press the copy shortcut"}])
+    state = drive(
+        world, scripted(("click_item", "Total 4,210"), ("press_shortcut", "select_all")), goal="read me the total",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, writer=writer, moves=False,
+    )  # fmt: skip
+
+    assert state.moves is True and state.moves_by == "CLICKER_MOVES"
+    decisions = [q for q in world.fake.asked if "kind" in q]
+    assert decisions and all("press_shortcut" in q["kind"].criteria for q in decisions)
+    assert asked_for_the_answer(writer)[0]["system"] == ANSWER_SYSTEM_MOVES
+    summary = json.loads((tmp_path / "run" / "run.json").read_text())
+    assert (summary["moves"], summary["moves_by"]) == (True, "CLICKER_MOVES")
+    assert "moves: offered (CLICKER_MOVES=on, so the goal is not asked about)" in (tmp_path / "run" / "run.log").read_text()
+
+
+def test_l77c_clicker_moves_off_closes_the_gate_a_goal_that_needs_the_moves_would_have_opened(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLICKER_MOVES", "off")
+    refuse_to_ask(monkeypatch)
+    world = copy_world()
+    state = drive(
+        world, scripted(("click_item", "Total 4,210")), goal="copy the whole note",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True,
+    )  # fmt: skip
+
+    assert state.moves is False and state.moves_by == "CLICKER_MOVES"
+    assert all("press_shortcut" not in q["kind"].criteria for q in world.fake.asked if "kind" in q)
+    assert world.apart and not any(world.apart)  # and the perception is the one a run without the moves has
+    summary = json.loads((tmp_path / "run" / "run.json").read_text())
+    assert (summary["moves"], summary["moves_by"]) == (False, "CLICKER_MOVES")
+    assert "moves: not offered (CLICKER_MOVES=off, so the goal is not asked about)" in (tmp_path / "run" / "run.log").read_text()
+
+
+@pytest.mark.parametrize("value", ["", "auto", " AUTO "])
+def test_l77d_auto_or_nothing_leaves_the_gate_to_the_model(monkeypatch, tmp_path, value):
+    monkeypatch.setenv("CLICKER_MOVES", value)
+    world = copy_world()
+    state = drive(
+        world, scripted(("done", None)), goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True
+    )
+
+    assert state.moves is True and state.moves_by == "gate"
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["moves_by"] == "gate"
+    assert "moves: offered (1.00)" in (tmp_path / "run" / "run.log").read_text()
+
+
+def test_l77e_a_misspelled_clicker_moves_stops_the_run_instead_of_quietly_asking(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLICKER_MOVES", "of")
+    world = copy_world()
+    with pytest.raises(ValueError, match="CLICKER_MOVES must be auto, on or off, not 'of'"):
+        drive(world, scripted(("done", None)), goal="copy the whole note", monkeypatch=monkeypatch, tmp_path=tmp_path)
+    assert "crashed" in (tmp_path / "run" / "run.log").read_text()
 
 
 def files_world() -> World:
@@ -2470,7 +2541,7 @@ def test_l74_a_double_click_that_opens_nothing_is_a_stall_like_any_click_that_do
 
     state = drive(world, policy, goal="open Notes.txt", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
 
-    assert state.outcome == "stalled" and state.history == ["double-clicked 'Notes.txt'"] * 3
+    assert state.outcome == "stalled" and len(world.log) == 3
 
 
 def folders_world() -> World:
@@ -2496,7 +2567,10 @@ def test_l78_a_file_is_dragged_onto_a_folder_with_the_target_asked_in_its_own_re
     assert state.outcome == "done" and world.page.name == "filed" and world.log == ["drag:Invoice.pdf>Taxes"]
     assert state.history == ["dragged 'Invoice.pdf' onto 'Taxes'"]
     (follow_up,) = [q for q in world.fake.asked if set(q) == {"target"}]
-    assert next(iter(follow_up["target"].criteria.values())).startswith("'Taxes'")  # the dragged file is not a choice
+    listing = world.fake.states[0]["screen_items_in_reading_order"]
+    dragged = next(it["i"] for it in listing if it["text"] == "Invoice.pdf")
+    assert str(dragged) not in follow_up["target"].criteria  # the dragged file is not a choice
+    assert len(follow_up["target"].criteria) == len(listing) - 1
     assert len(world.fake.states) == 2  # the drag and the stop; the target is not a decision of its own
 
 
@@ -2507,3 +2581,15 @@ def test_l79_a_drag_the_classifier_is_unsure_of_the_target_for_moves_nothing(mon
     state = drive(world, policy, goal="file the invoice under Taxes", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
 
     assert state.outcome == "low confidence" and world.log == []
+
+
+def test_l80_arrow_presses_that_leave_the_screen_as_it_was_are_cut_off_like_any_repeat(monkeypatch, tmp_path):
+    """A key that only moves a highlight shows nothing the screen's text can tell: the run is stopped by the repeat
+    rule after a few presses, so the keys cannot walk a long list on their own."""
+    world = World([Page(name="list", items=["Inbox", "Sent", "Drafts", "Trash"], app="Notes")])
+    policy = scripted(*[("press_shortcut", "arrow_down")] * 6)
+
+    state = drive(world, policy, goal="walk down the list", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
+
+    assert state.outcome == "stalled" and len(world.log) == 3
+    assert state.history[0] == "pressed the arrow down shortcut"

@@ -58,6 +58,8 @@ class Jev:
     usage: dict[str, Usage] = field(default_factory=dict)
     tree: str | None = None  # "jev-light" when jev fetched its own trees, "osworld" when they came with the observations
     tree_fallbacks: int | None = None  # jev's own fetches that OSWorld's fetch stood in for
+    moves: bool | None = None  # whether the run was offered the moves beyond clicking and typing
+    moves_by: str | None = None  # "gate" when the goal was asked about, "CLICKER_MOVES" when the variable settled it
 
 
 @dataclass(frozen=True)
@@ -170,6 +172,8 @@ def _jev(path: Path) -> Jev | None:
         usage=usage,
         tree=osworld.get("tree"),
         tree_fallbacks=fallbacks if isinstance(fallbacks, int) else None,
+        moves=summary["moves"] if isinstance(summary.get("moves"), bool) else None,
+        moves_by=summary["moves_by"] if isinstance(summary.get("moves_by"), str) else None,
     )
 
 
@@ -225,7 +229,12 @@ def describe(result: TaskResult) -> list[str]:
             tree = f", tree {jev.tree}"
             if jev.tree_fallbacks:
                 tree += f" ({jev.tree_fallbacks} fell back to OSWorld's fetch)"
-        row("jev", f"{ended}; ocr {jev.ocr}, provider {jev.provider}, architecture {jev.architecture}{tree}")
+        moves = ""
+        if jev.moves is not None:
+            moves = f", moves {'offered' if jev.moves else 'not offered'}"
+            if jev.moves_by and jev.moves_by != "gate":
+                moves += f" by {jev.moves_by}"
+        row("jev", f"{ended}; ocr {jev.ocr}, provider {jev.provider}, architecture {jev.architecture}{tree}{moves}")
     agent = [f"{name} {value}" for name, value in sorted(result.settings.items())]
     if result.model_seconds is not None:
         agent.insert(0, f"{duration(result.model_seconds)} of model time")

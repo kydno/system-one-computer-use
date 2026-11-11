@@ -22,6 +22,7 @@ from .config import (
     MOVES_NOUL,
     READ_ONLY_NOUL,
     answer_model,
+    moves_override,
     writer_model,
 )
 from .decide import Decision, browser_names, decide, needs_moves, offscreen_records, read_only
@@ -143,6 +144,7 @@ class RunState:
     clicked: Clicked | None = None  # the last action's click on page text, for the screen right after it
     read_only: bool = False  # the goal only asks to find something out, so the lower floor applies
     moves: bool = False  # the goal needs a move beyond clicking and typing, so the run is offered the moves that are
+    moves_by: str = "gate"  # who settled it: the gate's question about the goal, or CLICKER_MOVES
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -167,6 +169,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             log(f"models: decisions {models['decisions']}, writer {models['writer']}, answer {models['answer']}")
             state.read_only = goal_only_looks(ctx, cfg.goal, log)
             state.moves = goal_needs_moves(ctx, cfg.goal, log)
+            state.moves_by = "CLICKER_MOVES" if moves_override() is not None else "gate"
             for step in range(1, cfg.steps + 1):
                 ctx = replace(ctx, guidance=state.guidance)  # a handoff sets the focus, and the action it asked for spends it
                 if run_step(cfg, ctx, state, step, log):
@@ -196,6 +199,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "models": models,
             "read_only": state.read_only,
             "moves": state.moves,
+            "moves_by": state.moves_by,
             "calls": state.calls.summary(),
             "usage": state.calls.tokens(),
             "usage_by_role": state.calls.by_role(),
@@ -241,7 +245,14 @@ def goal_only_looks(ctx: Context, goal: str, log: Log) -> bool:
 
 def goal_needs_moves(ctx: Context, goal: str, log: Log) -> bool:
     """Whether the goal needs a move beyond clicking and typing, by the decision model. Unsure, or no
-    answer, is a goal that needs none: the requests stay as they were, which is the safe side."""
+    answer, is a goal that needs none: the requests stay as they were, which is the safe side.
+    CLICKER_MOVES=on or off settles it without asking, for a run that must not depend on the guess."""
+    forced = moves_override()
+    if forced is not None:
+        log(
+            f"moves: {'offered' if forced else 'not offered'} (CLICKER_MOVES={'on' if forced else 'off'}, so the goal is not asked about)"
+        )
+        return forced
     try:
         p = needs_moves(ctx.typesafe, goal)
     except DecisionError as e:
@@ -475,7 +486,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         )
     screen = with_clicked_field(screen, state.clicked, browser_names(ctx.browser, ctx.browsers))
     state.clicked = None
-    items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache)
+    items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache, apart=state.moves)
     state.view = (screen, items)
     if not screen_moved(state, screen, items, log):
         return False

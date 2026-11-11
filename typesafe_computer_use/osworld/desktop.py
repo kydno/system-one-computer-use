@@ -55,7 +55,7 @@ RAISE_SECONDS = 0.5  # for the window manager to hand the raised window the keyb
 WAIT = "WAIT"  # the action OSWorld sleeps on in the VM
 
 # macOS key names, as the loop presses them, onto pyautogui's. The Mac's delete key erases backwards.
-KEYS = {"return": "enter", "escape": "esc", "delete": "backspace"}
+KEYS = {"return": "enter", "escape": "esc", "delete": "backspace", "page_up": "pageup", "page_down": "pagedown"}
 
 
 class OSWorldDesktop:

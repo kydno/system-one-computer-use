@@ -88,11 +88,37 @@ def test_a_jev_run_says_where_its_trees_came_from_and_how_many_fell_back(tmp_pat
     assert "architecture x86_64, tree jev-light (2 fell back to OSWorld's fetch)" in text
 
 
+def test_a_jev_run_says_whether_it_was_offered_the_moves_and_who_decided(tmp_path):
+    folder = task_folder(tmp_path, "jev", "screenshot_a11y_tree")
+    jev_run(folder)
+    summary = json.loads((folder / "jev" / "run.json").read_text(encoding="utf-8"))
+    summary.update(moves=True, moves_by="CLICKER_MOVES")
+    (folder / "jev" / "run.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    (result,) = results.read(tmp_path)
+
+    assert (result.jev.moves, result.jev.moves_by) == (True, "CLICKER_MOVES")
+    assert "architecture x86_64, moves offered by CLICKER_MOVES\n" in "\n".join(results.describe(result)) + "\n"
+
+
+def test_a_run_the_gate_decided_says_only_what_it_was_offered(tmp_path):
+    folder = task_folder(tmp_path, "jev", "screenshot_a11y_tree")
+    jev_run(folder)
+    summary = json.loads((folder / "jev" / "run.json").read_text(encoding="utf-8"))
+    summary.update(moves=False, moves_by="gate")
+    (folder / "jev" / "run.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    (result,) = results.read(tmp_path)
+
+    assert "architecture x86_64, moves not offered\n" in "\n".join(results.describe(result)) + "\n"
+
+
 def test_an_earlier_jev_run_names_no_tree(tmp_path):
     folder = task_folder(tmp_path, "jev", "screenshot_a11y_tree")
     jev_run(folder)
     (result,) = results.read(tmp_path)
     assert (result.jev.tree, result.jev.tree_fallbacks) == (None, None)
+    assert (result.jev.moves, result.jev.moves_by) == (None, None)
     assert "architecture x86_64\n" in "\n".join(results.describe(result)) + "\n"
 
 
