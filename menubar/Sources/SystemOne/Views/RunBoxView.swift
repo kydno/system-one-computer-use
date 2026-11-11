@@ -95,7 +95,8 @@ struct RunBoxView: View {
         return achieved ? "goal achieved" : "goal not achieved"
     }
 
-    /// `session` is what every run in the box cost together, shown under the latest one.
+    /// `session` is what every run in the box cost together, shown under the latest one. It is the
+    /// only cost the footer reports: a run's own is already in it.
     private func footer(_ run: RunRecord, session: Double? = nil) -> some View {
         HStack(spacing: K.InputBar.elementGap) {
             if let seconds = run.seconds {
@@ -104,18 +105,11 @@ struct RunBoxView: View {
                     .modifier(LabelStyle())
             }
             Spacer(minLength: 0)
-            if let cost = run.cost {
-                Text(String(format: "$%.4f", cost))
-                    .monospacedDigit()
-                    .modifier(LabelStyle())
-                    .help("What this run cost, as OpenRouter reported it")
-                Text("·").modifier(LabelStyle())
-            }
             if let session {
                 Text(String(format: "Session $%.4f", session))
                     .monospacedDigit()
                     .modifier(LabelStyle())
-                    .help("What every run in the box has cost together, since the last Clear")
+                    .help("What every run in the box has cost together, since the last Clear, as OpenRouter reported it")
                 Text("·").modifier(LabelStyle())
             }
             HoverButton(systemName: "folder", help: "Open the run folder") {

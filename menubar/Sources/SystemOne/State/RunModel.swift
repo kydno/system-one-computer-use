@@ -139,9 +139,8 @@ final class RunModel: ObservableObject {
     }
 
     /// What every run in the box has cost together, since the last Clear: the earlier ones and
-    /// this one. Nil while there is no earlier run to add up, or none reported a cost.
+    /// this one, which alone is the whole of it for the first. Nil while no run reported a cost.
     var sessionCost: Double? {
-        guard !past.isEmpty else { return nil }
         let costs = (past.map(\.cost) + [current?.cost]).compactMap { $0 }
         return costs.isEmpty ? nil : costs.reduce(0, +)
     }

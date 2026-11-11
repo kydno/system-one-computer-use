@@ -1,8 +1,9 @@
 import Foundation
 
-/// What each model does in a run, for what it cost. The names match `calls.ROLES`.
+/// What each model does in a run, for what it cost. The first three match `calls.ROLES`; `evals` is
+/// what `clicker-eval` batches paid, which no run folder holds.
 enum UsageRole: String, CaseIterable, Identifiable, Sendable {
-    case decision, reviewer, writer
+    case decision, reviewer, writer, evals
 
     var id: String { rawValue }
 
@@ -11,6 +12,7 @@ enum UsageRole: String, CaseIterable, Identifiable, Sendable {
         case .decision: return "Decision"
         case .reviewer: return "Reviewer"
         case .writer: return "Writer"
+        case .evals: return "Evals"
         }
     }
 }
@@ -83,6 +85,12 @@ struct Spend: Equatable, Sendable {
     }
 }
 
+/// One request an eval batch paid for, USD, from the eval ledger.
+struct EvalSpend: Equatable, Sendable {
+    var at: Date
+    var usd: Double
+}
+
 /// One run: when it ended, whether its goal was reached, and what each model took under each role,
 /// keyed by the model's short name.
 struct RunUsage: Equatable, Sendable {
@@ -152,6 +160,61 @@ enum UsageLedger {
             let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             return parse(object, folderName: folder.lastPathComponent, modified: modified)
         }
+    }
+
+    /// What `load` would read, in a few `stat`s: each finished run's folder and when its `run.json`
+    /// was last written. Two equal fingerprints mean no run has ended, changed or gone since. A run
+    /// still going has no `run.json` and is not in it: `clicker` writes one when the run ends,
+    /// from the terminal as from the app, so that is when a run is counted.
+    static func fingerprint(root: URL) -> [String: Date] {
+        let runs = root.appendingPathComponent(K.Usage.runsFolder, isDirectory: true)
+        let folders = (try? FileManager.default.contentsOfDirectory(
+            at: runs, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )) ?? []
+        var stamps: [String: Date] = [:]
+        for folder in folders {
+            let file = folder.appendingPathComponent("run.json")
+            if let written = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
+                stamps[folder.lastPathComponent] = written
+            }
+        }
+        // Not a run folder's name, so it cannot collide with one.
+        let ledger = root.appendingPathComponent(K.Usage.evalLedger)
+        if let written = (try? ledger.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate {
+            stamps["evals"] = written
+        }
+        return stamps
+    }
+
+    /// Every request the eval batches paid for. The ledger is append-only JSON lines; a line that is
+    /// not a spend, or is cut short by a write in progress, is skipped.
+    static func loadEvals(root: URL) -> [EvalSpend] {
+        let file = root.appendingPathComponent(K.Usage.evalLedger)
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        let stamp = ISO8601DateFormatter()
+        return text.split(separator: "\n").compactMap { line in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  object["event"] as? String == "spend",
+                  let usd = (object["usd"] as? NSNumber)?.doubleValue,
+                  let at = (object["at"] as? String).flatMap(stamp.date(from:))
+            else { return nil }
+            return EvalSpend(at: at, usd: usd)
+        }
+    }
+
+    /// What the eval batches paid within `window`.
+    static func evalCost(_ evals: [EvalSpend], _ window: UsageWindow, now: Date = Date()) -> Double {
+        let cutoff = window.cutoff(from: now)
+        return evals.filter { cutoff == nil || $0.at >= cutoff! }.reduce(0) { $0 + $1.usd }
+    }
+
+    /// How many of `runs` took tokens but saved no cost: runs from before `run.json` carried one,
+    /// or on models whose replies report none. A cost total leaves them out.
+    static func uncostedRuns(_ runs: [RunUsage]) -> Int {
+        runs.filter { run in
+            let spends = run.spend.values.flatMap { $0.values }
+            return spends.contains { $0.tokens > 0 } && !spends.contains { $0.cost != nil }
+        }.count
     }
 
     static func parse(_ run: [String: Any], folderName: String, modified: Date?) -> RunUsage? {

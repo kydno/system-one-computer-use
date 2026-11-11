@@ -159,8 +159,23 @@ enum K {
     enum Usage {
         /// Where `clicker` writes its run folders, in the checkout.
         static let runsFolder = "runs"
+        /// Where `clicker-eval` keeps what its batches paid for, in the checkout: one line per request.
+        /// The batch has no run folder, so this is the only place that spend is written down.
+        static let evalLedger = ".private/evals/ledger.jsonl"
+        /// The eval spend's one slice in the pie.
+        static let evalsLabel = "clicker-eval"
+        /// OpenRouter's own count of what the decision key has spent in all, which no file here adds up:
+        /// runs from before costs were saved, benchmarks, anything else the key was used for.
+        static let keyURL = URL(string: "https://openrouter.ai/api/v1/key")!
+        static let keyEnvName = "OPENROUTER_API_KEY"
+        static let keyRequestTimeout: TimeInterval = 10
+        /// Seconds between asking for it while the breakdown is open.
+        static let keyRefreshInterval: Double = 30
         /// A run folder's name starts with when it began.
         static let folderDateFormat = "yyyyMMdd-HHmmss"
+        /// Seconds between looks at the run folders while the breakdown is open and the panel is up:
+        /// a run that ends then, from this app or from a terminal, is counted without opening it again.
+        static let refreshInterval: Double = 2
         /// Tones a role's share of the pie splits into; past that, the smallest become "Other".
         static let tonesPerRole = 3
         static let otherLabel = "Other"
@@ -170,6 +185,8 @@ enum K {
         static let decisionHue: Double = 0.58
         static let reviewerHue: Double = 0.91
         static let writerHue: Double = 0.25
+        /// Orange for the evals, a fourth hue between the green and the blue's far side.
+        static let evalsHue: Double = 0.08
         /// Each tone of a role, its biggest model first: (saturation, brightness).
         static let tones: [(Double, Double)] = [(0.72, 0.95), (0.85, 0.72), (0.95, 0.50)]
 
