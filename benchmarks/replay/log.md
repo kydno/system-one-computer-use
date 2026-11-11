@@ -266,5 +266,5 @@ model judged the goal achieved. That is every move now run on hardware: the chor
 drag, a shortcut from the wider catalog through the kind question, and a shut gate. Not run on hardware: Tab (the gate was shut
 when that run was made; it names the key now), the Windows and OSWorld adapters.
 
-Spent in batch3 so far: $0.03 of $1.00, no iteration used (the iteration of this entry's change to the history line and the gate
-wording will be counted when the maintainer says what to measure next).
+Spent in batch3: $0.03 of $1.00, two of two iterations (the history line of a long row; the gate question naming Tab). The kind
+question's routing to the new shortcuts, measured on saved steps, and issue 14 are still not done: they need a new batch.
