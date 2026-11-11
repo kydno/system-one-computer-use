@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from typesafe_computer_use import actions
+from typesafe_computer_use import actions, perception
 from typesafe_computer_use.actions import click_item, fill_field, press_offscreen
 from typesafe_computer_use.models import AxNode, Field, Item, Missed, Popup
 from typesafe_computer_use.platform_adapter import desktop
@@ -184,6 +184,98 @@ def test_an_item_pressed_through_accessibility_leaves_the_popup_alone(screen, ca
     live = replace(screen, ax_refs={3: object()}, covered={3: BUBBLE})
     assert click_item(ORGANISE, live) == "pressed 'Organise' via accessibility"
     assert calls == [] and keys_and_pauses == []
+
+
+@pytest.fixture
+def pointer(monkeypatch):
+    """Every pointer click the desktop was asked for, with its button and how many times."""
+    log: list[tuple] = []
+    monkeypatch.setattr(desktop, "click_at", lambda point, button="left", count=1: log.append((point, button, count)))
+    return log
+
+
+def pointing(kind: str, index: int | None) -> SimpleNamespace:
+    item = SimpleNamespace(choice=str(index)) if index is not None else None
+    return SimpleNamespace(chosen=kind, kind=SimpleNamespace(choice=kind), item=item)
+
+
+@pytest.mark.parametrize(
+    "kind, said, button, count",
+    [
+        ("right_click_item", "right-clicked 'Organise'", "right", 1),
+        ("double_click_item", "double-clicked 'Organise'", "left", 2),
+        ("select_item_text", "selected the text of 'Organise'", "left", 3),
+    ],
+)
+def test_the_other_clicks_are_pointer_clicks_even_on_a_control_the_tree_could_press(screen, pointer, kind, said, button, count):
+    row = replace(ORGANISE, role="cell")  # a list row the tree could press; a double click opens it
+    live = replace(screen, ax_refs={3: object()})  # a press would be a single left click, so none is made
+    assert actions.perform(pointing(kind, 3), live, [row], context()) == said
+    assert pointer == [((1888.0, 142.0), button, count)]
+
+
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+@pytest.mark.parametrize("role", ["button", "link", "checkbox", "radio", "popup", "menu", "tab"])
+def test_a_second_click_is_refused_on_a_control_that_one_click_activates(screen, pointer, kind, role):
+    control = replace(ORGANISE, role=role)
+    said = actions.perform(pointing(kind, 3), screen, [control], context())
+    assert said == f"{kind} refused: 'Organise' is a {role}, one click activates it"
+    assert pointer == []
+
+
+@pytest.mark.parametrize(
+    "ax_role, word",
+    [("AXMenuItem", "menu item"), ("AXDisclosureTriangle", "disclosure"), ("AXButton", "button"), ("AXLink", "link")],
+)
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+def test_a_second_click_is_refused_on_what_the_tree_calls_a_menu_entry_or_a_disclosure_triangle(
+    screen, pointer, ax_role, word, kind
+):
+    """Through the role mapping, not with a role word written into the item: a gap in the map would show here."""
+    node = AxNode(role=ax_role, label="Copy", x=1888.0 / 2 - 20, y=142.0 / 2 - 8, w=40.0, h=16.0, pressable=True)
+    (item,) = perception.to_ax_items([node], 2.0)
+    assert item.role == word
+    said = actions.perform(pointing(kind, 0), screen, [item], context())
+    assert said == f"{kind} refused: 'Copy' is a {word}, one click activates it"
+    assert pointer == []
+
+
+def test_a_right_click_is_fine_on_a_button(screen, pointer):
+    assert actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context()) == "right-clicked 'Organise'"
+    assert pointer == [((1888.0, 142.0), "right", 1)]
+
+
+def test_the_other_clicks_name_the_row_when_a_label_repeats(screen, pointer):
+    buy = [
+        Item(0, "Buy", 1.0, 3000.0, 100.0, 3100.0, 130.0),
+        Item(1, "Mars", 1.0, 100.0, 100.0, 300.0, 130.0),
+        Item(2, "Buy", 1.0, 3000.0, 500.0, 3100.0, 530.0),
+    ]
+    assert actions.perform(pointing("double_click_item", 0), screen, buy, context()) == "double-clicked 'Buy' beside 'Mars'"
+
+
+def test_the_other_clicks_close_the_popup_in_front_of_the_item_first(screen, pointer, keys_and_pauses):
+    live = replace(screen, covered={3: BUBBLE})
+    said = actions.perform(pointing("right_click_item", 3), live, [ORGANISE], context())
+    assert said.startswith("closed ") and said.endswith(" then right-clicked 'Organise'")
+    assert pointer[-1][1:] == ("right", 1)
+
+
+@pytest.mark.parametrize("index", [None, 9])
+def test_the_other_clicks_refuse_when_no_item_on_screen_was_chosen(screen, pointer, index):
+    assert actions.perform(pointing("select_item_text", index), screen, [ORGANISE], context()) == (
+        "select_item_text refused: no item on screen was chosen"
+    )
+    assert pointer == []
+
+
+def test_a_pointer_that_never_got_there_clicks_nothing_and_says_so(screen, monkeypatch):
+    def miss(point, button="left", count=1):
+        raise Missed("the cursor went to (0, 0)")
+
+    monkeypatch.setattr(desktop, "click_at", miss)
+    said = actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context())
+    assert said == "right_click_item refused: 'Organise' was not clicked, the cursor went to (0, 0)"
 
 
 def context(writer=None) -> actions.Context:
@@ -421,6 +513,7 @@ def test_the_configured_browser_counts_as_a_browser_whatever_its_name(screen, pr
         ("AXTextField", "Password", ""),
         ("AXTextField", "", "Card number"),
         ("AXTextField", "One-time code", ""),
+        ("AXTextField", "Login", "Password"),  # an innocent label does not hide a placeholder that is not
     ],
 )
 def test_paste_and_cut_are_refused_in_a_field_that_looks_like_a_credential(screen, pressed, name, role, label, placeholder):

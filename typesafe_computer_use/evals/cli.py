@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from .. import config
+from .. import config, decide
 from . import budget, cases, decisions, digest, report, size
 from .store import Home, append_jsonl, checkout_root, now_iso, stamp
 
@@ -160,12 +160,12 @@ def do_label(home: Home, args: argparse.Namespace) -> None:
     if args.kind not in allowed:
         raise ValueError(f"{args.kind!r} was not offered at this step; it offered {sorted(allowed)}")
     expect: dict = {"kind": args.kind}
-    if args.kind == "click_item":
+    if args.kind in ("click_item", *decide.POINTING):  # each acts on the item the item question picks
         if args.item is not None:
             hit = next((i for i in case.items if str(i["index"]) == str(args.item)), None)
         else:
             if not args.text:
-                raise ValueError("click_item needs --item INDEX or --text TEXT")
+                raise ValueError(f"{args.kind} needs --item INDEX or --text TEXT")
             found = [i for i in case.items if i["text"] == args.text]
             if len(found) != 1:
                 raise ValueError(f"{len(found)} items read {args.text!r}: name the one by --item INDEX (see `show`)")

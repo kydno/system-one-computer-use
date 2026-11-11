@@ -93,6 +93,38 @@ def click_item(item: Item, screen: Screen) -> str:
     return f"{closed}clicked {item.text!r} (accessibility press did not take)"
 
 
+# What an accessibility control is called (`Item.role`) when one click already does what it is for.
+ACTIVATED_BY_ONE_CLICK = frozenset({"button", "link", "checkbox", "radio", "popup", "menu", "menu item", "disclosure", "tab"})
+
+
+def _point(button: str, count: int, said: str):
+    """A right click, a double click, or a triple click on the item the item answer named.
+
+    These are always pointer clicks. A press through accessibility is a single left click, and what
+    these do (open a menu, open a file, select text) is what a pointer does and a press does not.
+    A popup in front of the item is closed first, as for a click.
+    """
+
+    def handler(decision: Decision, screen: Screen, items: list[Item], ctx: Context) -> str:
+        item = next((it for it in items if decision.item is not None and str(it.index) == decision.item.choice), None)
+        if item is None:
+            return f"{decision.kind.choice} refused: no item on screen was chosen"
+        if count > 1 and item.role in ACTIVATED_BY_ONE_CLICK:
+            # A second click submits twice, toggles a checkbox back, or lands on whatever the next page shows there.
+            return f"{decision.kind.choice} refused: {item.text!r} is a {item.role}, one click activates it"
+        popup = screen.covered.get(item.index)
+        closed = f"{close_popup(popup)} then " if popup is not None else ""
+        try:
+            desktop.click_at(screen.to_points(item), button=button, count=count)
+        except Missed as e:
+            return f"{closed}{decision.kind.choice} refused: {item.text!r} was not clicked, {e}"
+        mates = row_mates(items, limit=None).get(item.index)
+        beside = f" beside {', '.join(repr(m) for m in mates)}" if mates else ""
+        return f"{closed}{said} {item.text!r}{beside}"
+
+    return handler
+
+
 def press_showed(screen: Screen) -> bool:
     """Whether the screen changed after an accessibility press on a web page.
 
@@ -343,7 +375,9 @@ CLIPBOARD_OUT_OF_REACH = ("paste", "cut")  # never into, or out of, a field that
 
 def looks_like_a_credential_field(field: Field | None) -> bool:
     """A field the system calls secure, or one whose label or placeholder names a password, a code, a card."""
-    return field is not None and (field.role == "AXSecureTextField" or looks_credential(field.label or field.placeholder))
+    return field is not None and (
+        field.role == "AXSecureTextField" or looks_credential(field.label) or looks_credential(field.placeholder)
+    )
 
 
 def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
@@ -552,6 +586,9 @@ def wait(screen: Screen, items: list[Item], ctx: Context) -> str:
 
 
 _HANDLERS = {
+    "right_click_item": _point("right", 1, "right-clicked"),
+    "double_click_item": _point("left", 2, "double-clicked"),
+    "select_item_text": _point("left", 3, "selected the text of"),
     "use_browser": _use_browser,
     "open_app": _open_app,
     "press_shortcut": _press_shortcut,

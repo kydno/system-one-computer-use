@@ -20,11 +20,32 @@ SHORTCUT_KIND = (
     "(use_browser does that), and not when a button on screen does the same thing."
 )
 # What the goal question lists, so that it opens for the moves the run is offered and no others.
-MOVES_ASKED = "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs)"
+MOVES_ASKED = (
+    "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs), the context menu of "
+    "an item (a right click), a double click, or selecting the text of an item"
+)
 OFFSCREEN_PREFIX = "offscreen:"
 # The questions a step is asked again without when the model refuses one, each with the one kind
 # of action that cannot go ahead without its answer.
-SPARED = {"item": "click_item", "offscreen": "press_offscreen"}
+# The kinds of click other than a single one, each acting on the item the item question picks.
+POINTING = {
+    "right_click_item": (
+        "Open the context menu of one of the on-screen items (chosen in the item question). Use only when the "
+        "goal needs an option that only a context menu offers, such as opening a link in a new tab or copying "
+        "a link. The menu's entries are on screen at the next step."
+    ),
+    "double_click_item": (
+        "Double-click one of the on-screen items (chosen in the item question): to open a file or folder in a "
+        "list that opens its items by double-click. Not for a link, a button, a checkbox, or anything that one "
+        "click already activates."
+    ),
+    "select_item_text": (
+        "Select the whole line or paragraph of an on-screen text item with a triple click (chosen in the item "
+        "question), so that it can be copied. Use when the goal needs that text copied and no control on screen "
+        "selects it. Typing afterwards does not act on the selection."
+    ),
+}
+SPARED = {"item": ("click_item", *POINTING), "offscreen": ("press_offscreen",)}
 PRESS_OFFSCREEN = (
     "Activate a labelled control that the app exposes but that is not currently visible on screen "
     "(chosen in the offscreen question). Use when the needed control is known to exist but is "
@@ -103,7 +124,7 @@ def kind_criteria(
     apps: Sequence[str] = (),
     moves: bool = False,
 ) -> dict[str, str]:
-    clicks = {"click_item": "Click one of the on-screen text items (chosen in the item question)."}
+    clicks = {"click_item": "Click one of the on-screen text items (chosen in the item question).", **(POINTING if moves else {})}
     if offscreen:
         clicks["press_offscreen"] = PRESS_OFFSCREEN
     return {**clicks, **fixed_actions(browser, email, browsers, apps, moves)}
@@ -256,6 +277,11 @@ class Decision:
         return self.kind.choice == "click_item" and self.item is not None
 
     @property
+    def pointing(self) -> bool:
+        """A click of another kind than a single one, on the item the item question picked."""
+        return self.kind.choice in POINTING and self.item is not None
+
+    @property
     def pressing_offscreen(self) -> bool:
         return self.kind.choice == "press_offscreen" and self.offscreen is not None
 
@@ -277,7 +303,7 @@ class Decision:
         # somewhere, and the wrong somewhere is not undone. use_browser reads the site and browser
         # answers too, and open_app the app answer, but every outcome of them is a page or an app
         # the next step can leave, so a split there must not stop the run.
-        if self.clicking:
+        if self.clicking or self.pointing:
             return min(self.kind.confidence, self.item.confidence)
         if self.pressing_offscreen:
             return min(self.kind.confidence, self.offscreen.confidence)
@@ -334,7 +360,9 @@ def build_questions(
     if items:
         questions["item"] = Choice(
             instructions=(
-                "If clicking an on-screen item is the right move, which item? If scrolling is, which "
+                "If clicking an on-screen item is the right move,"
+                + (" by any click (single, right, double, or the triple click that selects its text)," if moves else "")
+                + " which item? If scrolling is, which "
                 "item sits in the list, panel, or page that should scroll? Pick a line of that content "
                 "itself, not a sidebar or menu entry that shares a word with the goal: the wheel turns "
                 "whatever is under the pointer, so over a sidebar link the sidebar scrolls, or its "
@@ -392,8 +420,8 @@ def decide(
         refused = e.question
         rest = {name: question for name, question in questions.items() if name != refused}
         answers = client.system_one(state=state, questions=rest).answers
-        if answers["kind"].choice == SPARED[refused]:
-            raise DecisionError(f"the model refused {refused!r}, then chose {SPARED[refused]} without it ({e})") from e
+        if answers["kind"].choice in SPARED[refused]:
+            raise DecisionError(f"the model refused {refused!r}, then chose {answers['kind'].choice} without it ({e})") from e
     app = None
     if answers["kind"].choice == "open_app" and apps:
         app = client.system_one(

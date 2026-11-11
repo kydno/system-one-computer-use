@@ -196,7 +196,7 @@ def expectation(picked: dict) -> dict:
     """What a pick stands for when it is taken as the right one: its kind, and for a click the item
     (its index, which is fixed in a frozen case, and its text) or for a browser the site."""
     kind = picked.get("kind")
-    clicked = kind == "click_item" and picked.get("item") is not None
+    clicked = kind in ("click_item", *decide.POINTING) and picked.get("item") is not None
     return {
         "kind": kind,
         **({"item": str(picked["item"]), "item_text": picked.get("item_text")} if clicked else {}),

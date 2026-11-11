@@ -1,10 +1,13 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from conftest import item
 
 from typesafe_computer_use.config import SHORTCUTS, SITES
 from typesafe_computer_use.decide import (
+    POINTING,
+    SPARED,
     Decision,
     app_criteria,
     base_state,
@@ -270,7 +273,7 @@ def test_press_shortcut_is_offered_only_to_a_run_whose_goal_needs_the_moves_and_
 
 def test_a_closed_gate_leaves_the_kind_question_as_it_was_before_the_moves_existed():
     shut, open_ = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
-    assert {k: v for k, v in open_.items() if k != "press_shortcut"} == shut
+    assert {k: v for k, v in open_.items() if k not in ("press_shortcut", *POINTING)} == shut
     assert list(shut) == [
         "click_item",
         "use_browser",
@@ -371,6 +374,60 @@ def test_the_selected_text_is_in_the_field_only_for_a_run_offered_the_moves_that
 def test_a_shortcut_answer_for_any_other_kind_is_ignored():
     d = Decision(kind=answer("click_item", 0.9), item=answer("3", 0.8), site=answer("none", 1.0), shortcut=answer("copy", 0.1))
     assert not d.pressing_shortcut and d.chosen == "3" and d.confidence == 0.8
+
+
+def test_the_other_clicks_are_offered_beside_click_item_to_a_run_that_needs_them_and_each_reuses_the_item_answer():
+    shut, kinds = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
+    assert list(POINTING) == ["right_click_item", "double_click_item", "select_item_text"]
+    assert not set(POINTING) & set(shut) and set(POINTING) <= set(kinds)
+    assert all("item question" in text for text in (kinds["click_item"], *(kinds[k] for k in POINTING)))
+    assert list(kinds)[:4] == ["click_item", *POINTING]  # beside the click they are variants of
+
+
+def test_the_item_question_names_the_other_clicks_only_when_they_are_offered(screen):
+    from typesafe_computer_use.decide import build_questions
+
+    shut = build_questions(screen, [item(0, "File")], "Google Chrome", None)["item"].instructions
+    open_ = build_questions(screen, [item(0, "File")], "Google Chrome", None, moves=True)["item"].instructions
+    assert "triple click" not in shut and shut.startswith("If clicking an on-screen item is the right move, which item?")
+    assert (
+        "triple click" in open_
+        and open_.replace(" by any click (single, right, double, or the triple click that selects its text),", "") == shut
+    )
+
+
+def test_selecting_an_items_text_is_offered_for_copying_and_not_for_replacing_it():
+    """Typing adds to a text area and sets a whole single-line field: it never acts on a selection."""
+    says = POINTING["select_item_text"]
+    assert "copied" in says and "does not act on the selection" in says
+    for promise in ("replace", "typing over", "type over"):
+        assert promise not in says.lower().replace("does not act", "")
+    assert "select the word" not in POINTING["double_click_item"]
+
+
+@pytest.mark.parametrize("kind", list(POINTING))
+def test_a_right_double_or_triple_click_is_chosen_with_an_item_and_counts_the_item_confidence(kind):
+    d = Decision(kind=answer(kind, 0.9), item=answer("12", 0.6), site=answer("none", 1.0))
+    assert d.pointing and not d.clicking and d.chosen == kind and d.confidence == 0.6 and not d.stops
+
+
+def test_the_other_clicks_need_an_item_to_be_a_decision_to_point():
+    assert not Decision(kind=answer("right_click_item", 0.9), item=None, site=answer("none", 1.0)).pointing
+    assert not Decision(kind=answer("click_item", 0.9), item=answer("1", 0.9), site=answer("none", 1.0)).pointing
+
+
+def test_a_refused_item_question_sinks_every_kind_that_needs_an_item(screen):
+    from typesafe_computer_use.decisions import Refusal
+
+    assert set(SPARED["item"]) == {"click_item", *POINTING}
+
+    def system_one(state, questions):
+        if "item" in questions:
+            raise Refusal("refused", "item")
+        return SimpleNamespace(answers={"kind": answer("double_click_item", 0.9), "site": answer("none", 1.0)})
+
+    with pytest.raises(DecisionError, match="chose double_click_item without it"):
+        decide(SimpleNamespace(system_one=system_one), "g", screen, [item(0, "File")], [], "Google Chrome", None, moves=True)
 
 
 def test_browser_criteria_say_which_is_in_front_and_which_is_the_default():

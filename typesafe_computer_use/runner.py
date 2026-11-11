@@ -521,7 +521,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         state.outcome = "no decision"
         return False
     by_index = {str(it.index): it for it in items}
-    annotate(screen, items, decision.chosen, prefix.with_suffix(".png"))
+    annotate(screen, items, decision.item.choice if decision.pointing else decision.chosen, prefix.with_suffix(".png"))
 
     field_desc = (
         f" field={'clicked' if screen.field.clicked else screen.field.role}:{screen.field.label!r}" if screen.field else ""
@@ -605,7 +605,11 @@ def resolve(
         return False
     # The low floor is for a goal where a wrong click only opens the wrong page. A shortcut is not that: cut, paste
     # and close tab are not always undone, and a goal that only looks things up is as likely as any to open the moves.
-    floor = cfg.read_only_confidence if state.read_only and not decision.pressing_shortcut else cfg.min_confidence
+    floor = (
+        cfg.read_only_confidence
+        if state.read_only and not (decision.pressing_shortcut or decision.pointing)
+        else cfg.min_confidence
+    )
     if decision.confidence < floor:
         named = named_by_focus(decision, items, state.guidance.focus)
         if named is None or decision.kind.confidence < floor:
@@ -713,11 +717,21 @@ def with_clicked_field(screen: Screen, clicked: Clicked | None, browsers: list[s
     return replace(screen, field=box)
 
 
+POINTING_WORDS = {
+    "right_click_item": "right-click",
+    "double_click_item": "double-click",
+    "select_item_text": "select the text of",
+}
+
+
 def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
     """What a dry run would have done, in words: a click names the text it would land on, not its index."""
     if decision.clicking:
         item = next((it for it in items if str(it.index) == decision.item.choice), None)
         return f"click {item.text!r}" if item is not None else decision.chosen
+    if decision.pointing:
+        item = next((it for it in items if str(it.index) == decision.item.choice), None)
+        return f"{POINTING_WORDS[decision.kind.choice]} {item.text!r}" if item is not None else decision.chosen
     if decision.pressing_offscreen:
         return f"press {screen.offscreen[int(decision.offscreen.choice)].label!r}"
     if decision.pressing_shortcut:
