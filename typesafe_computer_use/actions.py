@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from PIL import Image, ImageChops
 
 from .config import SHORTCUTS, SITES
-from .decide import OFFSCREEN_PREFIX, Decision, row_mates, verify_typed
+from .decide import OFFSCREEN_PREFIX, Decision, beside, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
@@ -56,8 +56,8 @@ def perform(decision: Decision, screen: Screen, items: list[Item], ctx: Context)
         what = click_item(by_index[key], screen)
         mates = row_mates(items, limit=None).get(int(key))
         # Three rows each end in a Buy: the line must say which, or trying one marks them all as tried.
-        # The whole row goes in, so two rows that open alike still get lines of their own.
-        return f"{what} beside {', '.join(repr(m) for m in mates)}" if mates else what
+        # The whole row goes in, so two rows that open alike still get lines of their own (see `beside`).
+        return f"{what} beside {beside(mates)}" if mates else what
     if key.startswith(OFFSCREEN_PREFIX):
         return press_offscreen(key[len(OFFSCREEN_PREFIX) :], screen)
     handler = _HANDLERS.get(key)
@@ -112,8 +112,8 @@ def _point(button: str, count: int, said: str):
         except Missed as e:
             return f"{closed}{decision.kind.choice} refused: {item.text!r} was not clicked, {e}"
         mates = row_mates(items, limit=None).get(item.index)
-        beside = f" beside {', '.join(repr(m) for m in mates)}" if mates else ""
-        return f"{closed}{said} {item.text!r}{beside}"
+        row = f" beside {beside(mates)}" if mates else ""
+        return f"{closed}{said} {item.text!r}{row}"
 
     return handler
 

@@ -231,3 +231,20 @@ already removed their second copy. Not worth the risk of cutting the phrase a go
 browser questions are 1.1 KB of 17.2 KB now (6.6%, up from 2.4% before the pointers), about 3% of the input tokens;
 moving them to a follow-up for the 14% of steps that open a site would save that on the rest and add a round trip
 (0.8 s a decide) to the 14%. A pass would settle whether the picks hold; it needs a batch iteration, so it waits.
+
+## 2026-11-10: batch3 iteration 1, the history line of a long row (kept)
+
+Supervised (approved), runs `20261110-194859`: a goal to close the example.com tab and then reopen it, in the maintainer's
+browser window of about thirty-five tabs. Step 1 closed the tab by pressing its Close button, step 3 pressed the `reopen_tab`
+shortcut (0.93) and the page came back; the answer model judged it achieved. The first run of the kind question with a new
+catalog entry: it chose `press_shortcut` at 0.66 once the review's focus said to.
+
+The near miss: at step 2 the shortcut follow-up leaned to `close_tab` (0.35, the step stopped at 0.28 under the floor
+before any key). The history line of step 1 read "pressed 'Close' via accessibility beside" followed by the title of every
+other tab in the strip, 1,412 characters, since a history line names the whole row. Asked the follow-up as the run was,
+three repeats: `close_tab` at 0.38, 0.40 and 0.46, which clears the floor twice and would have closed the maintainer's other
+tab. With the row cut to eight titles: `reopen_tab`, 0.76 to 0.78; with none, 0.98. A row of more than eight is now named by its
+first three items and a count (`beside 'a', 'b', 'c' and 30 more`): `reopen_tab` 0.86 to 0.90, three of three. Rows of up to eight
+read as before, which is every row the layout notes of the criteria were written for; a strip of tabs told its Close buttons
+apart no better, since each read the same. A history line rides in every request after it, so the cut also saves tokens on any
+run in a long row, and it stops other tab titles being sent along with each request.

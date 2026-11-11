@@ -11,6 +11,7 @@ from typesafe_computer_use.decide import (
     Decision,
     app_criteria,
     base_state,
+    beside,
     browser_criteria,
     decide,
     item_criteria,
@@ -516,3 +517,10 @@ def test_an_unknown_answer_to_the_read_only_question_keeps_the_floor():
     lines = []
     assert goal_only_looks(ctx, "confirm the export is on", lines.append) is False
     assert lines == ["read-only: unknown (openrouter answered 502), so the floor stays"]
+
+
+def test_a_history_line_names_a_short_row_whole_and_cuts_a_long_one_to_three_and_a_count():
+    row = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    assert beside(row) == "'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'"  # up to eight, whole, as before
+    strip = [f"Tab {i}" for i in range(33)]
+    assert beside(strip) == "'Tab 0', 'Tab 1', 'Tab 2' and 30 more"  # a strip of tabs is not named title by title

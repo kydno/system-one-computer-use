@@ -143,6 +143,21 @@ def kind_criteria(
 ROW_MATES = 3  # how many neighbours name a duplicated item's row in a criterion; the history line takes them all
 
 
+HISTORY_MATES = (
+    8  # the longest row a history line names whole; a longer one (a strip of tabs, a toolbar) is cut to three and a count
+)
+
+
+def beside(mates: list[str]) -> str:
+    """The row, as a history line names it: the whole row, so that two rows that open alike get lines of their own,
+    until it is longer than HISTORY_MATES. A long row tells its items apart no better (every Close button of a
+    strip of tabs read the same), and the line was sent with every request after it: 33 tab titles in it
+    steered the shortcut question to close_tab, on a goal that had already closed the tab, at 0.38 to 0.46."""
+    if len(mates) <= HISTORY_MATES:
+        return ", ".join(repr(m) for m in mates)
+    return ", ".join(repr(m) for m in mates[:3]) + f" and {len(mates) - 3} more"
+
+
 def row_mates(items: list[Item], limit: int | None = ROW_MATES) -> dict[int, list[str]]:
     """Item index -> the texts sharing its row, left to right, for every item whose text another item repeats.
 
