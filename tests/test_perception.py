@@ -322,6 +322,34 @@ def test_a_line_the_accessibility_tree_also_publishes_is_one_item_not_two(monkey
     assert total.source == "ax+ocr" and screen.ax_refs[total.index] is twin.ref
 
 
+def test_the_text_area_labelled_with_its_own_value_does_not_swallow_its_lines(monkeypatch):
+    """The focused text area is a control too, and with no name it is labelled with its value (when short). Every
+    line sits inside its box and inside its label, so the lines must stay apart, not merge into it."""
+    lines = [
+        ("Quarterly figures", 1.0, (310.0, 208.0, 480.0, 230.0)),
+        ("Total 4,210", 1.0, (310.0, 234.0, 420.0, 256.0)),
+        ("Prepared by the scratch test", 1.0, (310.0, 260.0, 682.0, 282.0)),
+    ]
+    area = AxNode(
+        role="AXTextArea",
+        label="Quarterly figures Total 4,210 Prepared by the scratch test",
+        x=146.0,
+        y=103.0,
+        w=656.0,
+        h=384.0,
+        pressable=True,
+        ref=object(),
+    )
+    monkeypatch.setattr(perception, "ocr_lines", lambda screen, cache: (lines, 100.0, 1))
+    monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: ([area], [], False))
+    screen = Screen(image=busy_page((1000, 600)), scale=2.0, app="TextEdit", field=BODY, url=None, pid=7)
+
+    items = perception.perceive(screen, 255, "goal", None, None, True)
+
+    texts = sorted(it.text for it in items if it.source != "ax")
+    assert texts == ["Prepared by the scratch test", "Quarterly figures", "Total 4,210"]  # three lines, none holding another
+
+
 def test_keeping_lines_apart_touches_only_the_body_of_the_focused_text_area(monkeypatch):
     block = "Quarterly figures Total 4,210 Prepared by the scratch test"
     assert block in document_items(monkeypatch, None, apart=True)  # nothing focused: the lines merge as ever

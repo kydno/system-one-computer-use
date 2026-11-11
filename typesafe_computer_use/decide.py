@@ -439,8 +439,8 @@ def decide(
     the same way, once press_shortcut is chosen, and so is the item a drag drops on.
 
     Luna refused the item question now and then when its labels were the text read off the screen, and
-    OpenRouter loses every other answer with it: on a Claude window full of a conversation about IAM roles,
-    a run never got as far as opening the browser the goal named. Most moves need no item, so the step is
+    OpenRouter loses every other answer with it: on a chat window full of text it would not read, a run
+    never got as far as opening the browser the goal named. Most moves need no item, so the step is
     asked again without it, and only a click is left without a decision. It refuses the off-screen question
     the same way, and only pressing one of those controls needs it. The item labels are pointers to the
     state's rows now (`Item N.`) and the screen text sits in the state, so whether Luna still refuses this

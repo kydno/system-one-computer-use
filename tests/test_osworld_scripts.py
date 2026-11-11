@@ -111,6 +111,12 @@ def test_clicker_moves_is_read_as_the_python_side_reads_it(tmp_path):
     assert "osworld-exec env CLICKER_MOVES=off scripts/osworld run-jev chrome/a --ocr rapidocr" in printed
 
 
+def test_clicker_moves_with_a_space_inside_is_refused_as_the_python_side_would(tmp_path):
+    with pytest.raises(subprocess.CalledProcessError) as stopped:
+        dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr", env={"CLICKER_MOVES": "o n"})
+    assert "CLICKER_MOVES must be auto, on or off" in stopped.value.stderr
+
+
 def test_a_cloud_run_without_clicker_moves_sends_the_command_as_it_was(tmp_path):
     printed = dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr")
     assert "CLICKER_MOVES" not in printed

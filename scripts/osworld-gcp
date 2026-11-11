@@ -292,7 +292,7 @@ run_task() {
   # cross SSH, and the environment beats .env there), so each arm of an A/B is one command and
   # .env stays as it is. The row records it as part of the command, and as the run's own `moves_by`.
   local setting="" moves
-  moves=$(printf '%s' "${CLICKER_MOVES:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]') # as the Python side reads it
+  moves=$(printf '%s' "${CLICKER_MOVES:-}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') # as .strip().lower()
   if [[ -n $moves ]]; then
     [[ $moves =~ ^(auto|on|off)$ ]] || die "CLICKER_MOVES must be auto, on or off, not '$CLICKER_MOVES'"
     setting="CLICKER_MOVES=$moves "

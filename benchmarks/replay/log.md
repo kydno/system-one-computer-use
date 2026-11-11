@@ -162,6 +162,8 @@ current code (agreement 0.598, 63 cases mostly right, 32 confident and wrong, 10
 - The two rejected variants have no row in this directory. They ran as in-process patches of the kept code
   (scratch scripts, not a commit), so a row recorded now would stamp them with a commit that does not contain
   them. The kept variant's row is `20261110T222801Z.jsonl`; the figures of the other two are in the table.
+- The `moves=True` request (pointers together with the wider item instruction and the `apart` lines) is not measured: the row is
+  `moves: false`, and no `decisions --moves` pass covers it. It is owed in the next approved batch.
 - Only Jev was measured. Another decision model (see `docs/decision-models.md`) may read the pointer worse, and
   would need its own pass before it runs on this.
 - Every saved case's item criteria now differ from what it was sent with (`clicker-eval check`: 0 of 827 exact; the

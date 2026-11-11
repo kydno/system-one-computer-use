@@ -703,8 +703,19 @@ def merge_with_origins(
 
 
 def covered_by_a_control(block: Item, controls: list[Item]) -> bool:
-    """Whether a control of the app is the same thing as this OCR block: the test the merge makes."""
-    return any(box_overlap(control, block) >= MIN_BOX_OVERLAP and texts_match(control.text, block.text) for control in controls)
+    """Whether a control of the app is this very line: about the same box, and the same text. Measured over the
+    larger of the two boxes, not the smaller as the merge does: the focused text area is a control itself, labelled
+    with its own value when it has no name, and its box holds every line, so over the smaller box each line would
+    read as covered by it, merge into it, and take the whole document's text."""
+    return any(same_box(control, block) and texts_match(control.text, block.text) for control in controls)
+
+
+def same_box(a: Item, b: Item) -> bool:
+    """Intersection over the larger box is at least MIN_BOX_OVERLAP."""
+    wide = min(a.x2, b.x2) - max(a.x1, b.x1)
+    tall = min(a.y2, b.y2) - max(a.y1, b.y1)
+    larger = max((a.x2 - a.x1) * (a.y2 - a.y1), (b.x2 - b.x1) * (b.y2 - b.y1))
+    return wide > 0 and tall > 0 and larger > 0 and wide * tall / larger >= MIN_BOX_OVERLAP
 
 
 def is_icon(block: Item, controls: list[Item]) -> bool:
