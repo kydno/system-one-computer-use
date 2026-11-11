@@ -94,7 +94,7 @@ def click_item(item: Item, screen: Screen) -> str:
 
 
 # What an accessibility control is called (`Item.role`) when one click already does what it is for.
-ACTIVATED_BY_ONE_CLICK = frozenset({"button", "link", "checkbox", "radio", "popup", "menu", "tab"})
+ACTIVATED_BY_ONE_CLICK = frozenset({"button", "link", "checkbox", "radio", "popup", "menu", "menu item", "disclosure", "tab"})
 
 
 def _point(button: str, count: int, said: str):

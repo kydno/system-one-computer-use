@@ -42,7 +42,7 @@ POINTING = {
     "select_item_text": (
         "Select the whole line or paragraph of an on-screen text item with a triple click (chosen in the item "
         "question), so that it can be copied. Use when the goal needs that text copied and no control on screen "
-        "selects it. Typing afterwards adds text and does not replace the selection."
+        "selects it. Typing afterwards does not act on the selection."
     ),
 }
 SPARED = {"item": ("click_item", *POINTING), "offscreen": ("press_offscreen",)}

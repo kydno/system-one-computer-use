@@ -204,12 +204,14 @@ def test_ax_items_convert_points_to_capture_pixels_and_name_the_role(screen, mon
     nodes = [
         AxNode(role="AXPopUpButton", label="View site information", x=126.0, y=89.0, w=24.0, h=24.0, pressable=True),
         AxNode(role="AXDisclosureTriangle", label="More", x=10.0, y=10.0, w=12.0, h=12.0, pressable=True),
+        AxNode(role="AXSomethingNew", label="Odd", x=40.0, y=10.0, w=12.0, h=12.0, pressable=True),
     ]
     monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: (nodes, [], False))
     items = perception.ax_items(replace(screen, pid=123), 255)
     assert [(it.role, it.source, it.text) for it in items] == [
         ("popup", "ax", "View site information"),
-        ("other", "ax", "More"),
+        ("disclosure", "ax", "More"),
+        ("other", "ax", "Odd"),  # a role with no word of its own
     ]
     assert (items[0].x1, items[0].y1, items[0].x2, items[0].y2) == (252.0, 178.0, 300.0, 226.0)
 
