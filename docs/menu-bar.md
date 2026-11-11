@@ -83,6 +83,7 @@ drive a run the same way.
 | `focus` | the writer sent the classifier back to work on one thing |
 | `question` | the writer asks the user; the reply is the next line on stdin |
 | `answer` | the writer's answer, and whether the goal was achieved |
+| `handoff` | the run stopped short of the goal: `handoff.json` (see [run-folder.md](run-folder.md)) and its path, for an outer agent to go on from; the app ignores it |
 | `end` | the run is over: `run.json`'s summary, the folder, and the outcome in words |
 
 ## What came from Menu-Bar-Chat

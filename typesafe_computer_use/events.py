@@ -11,6 +11,8 @@ among them. Each line on stdout is one object with an `event` key:
 - `focus`: the writer sent the classifier back to work on `focus`, having said `text`
 - `question`: the writer asks the user `text`; the run waits for one line on stdin
 - `answer`: the writer's answer, `text`, with whether the goal was `achieved`
+- `handoff`: the run stopped short of the goal; the rest is `handoff.json`, with its path as `file`,
+  for an outer agent to go on from the screen it ended on (see docs/run-folder.md)
 - `end`: the run is over; the rest is `run.json`, with the run `folder`
 
 The bytes a reply is read from belong to the front end, so nothing else in the run may read stdin.
