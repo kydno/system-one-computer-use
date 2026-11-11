@@ -21,8 +21,9 @@ SHORTCUT_KIND = (
 )
 # What the goal question lists, so that it opens for the moves the run is offered and no others.
 MOVES_ASKED = (
-    "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs), the context menu of "
-    "an item (a right click), a double click, selecting the text of an item, or dragging one item onto another"
+    "a keyboard shortcut or a named key (copy, paste, select all, undo, find on the page, switch or reopen tabs, "
+    "Tab between fields), the context menu of an item (a right click), a double click, selecting the text of an "
+    "item, or dragging one item onto another"
 )
 OFFSCREEN_PREFIX = "offscreen:"
 # The questions a step is asked again without when the model refuses one, each with the one kind

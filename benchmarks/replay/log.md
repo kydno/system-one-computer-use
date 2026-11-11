@@ -248,3 +248,13 @@ first three items and a count (`beside 'a', 'b', 'c' and 30 more`): `reopen_tab`
 read as before, which is every row the layout notes of the criteria were written for; a strip of tabs told its Close buttons
 apart no better, since each read the same. A history line rides in every request after it, so the cut also saves tokens on any
 run in a long row, and it stops other tab titles being sent along with each request.
+
+The same run, as a goal to type a first name, press Tab and type a last name in a form (`20261110-195229`): the gate stayed
+shut, 0.24, so the run was not offered the moves and went on by clicking the next field: typed, handed off, clicked, typed,
+the goal done. That is the first hardware run of a shut gate, and the request was the one a run without the moves sends. It
+also showed that the gate's question named no key but shortcuts, so a goal that says "press Tab" did not open it. Naming it,
+"a keyboard shortcut or a named key (... switch or reopen tabs, Tab between fields)", on the saved goals and OSWorld's
+instructions ($0.02, text only): goals that name a key 4 of 6 open the gate to 6 of 6 (the Tab goal 0.30 to 0.97), the 20
+synthetic goals that need a move 19 to 20 (lowest score 0.49 to 0.65), the 16 plain ones 0 to 0, saved runs' goals 13 to 12 of 69,
+OSWorld 195 to 199 of 369. Naming the arrows or Page Down opened the gate for "scroll down and read the paragraph" (0.68, 0.81)
+and on OSWorld opened 17 to 23 more goals, so only the Tab key is named.
