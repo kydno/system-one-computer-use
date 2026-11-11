@@ -215,3 +215,10 @@ meant a click on every item. Asked again of Jev with the whole catalog and a goa
 repeats each: 60 of 60 right (`bold` and `arrow_left` the least sure, 0.65 to 0.86). The key tables of the Mac and Windows
 adapters and the OSWorld mapping each got the new keys, with a test that every catalog key has a key code on both.
 Not run on hardware: a run that fills a form with Tab.
+
+Issues 13 and 14, sized after the pointers (bytes only, no model call, 827 saved requests, now 17.2 KB a request): capping
+each item's text in the state at 120 characters saves 165 bytes a request (1.0%), at 80 characters 311 bytes (1.8%), since the long items are few and the pointers
+already removed their second copy. Not worth the risk of cutting the phrase a goal names: issue 13 is not done. The site and
+browser questions are 1.1 KB of 17.2 KB now (6.6%, up from 2.4% before the pointers), about 3% of the input tokens;
+moving them to a follow-up for the 14% of steps that open a site would save that on the rest and add a round trip
+(0.8 s a decide) to the 14%. A pass would settle whether the picks hold; it needs a batch iteration, so it waits.
