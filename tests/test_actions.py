@@ -208,9 +208,24 @@ def pointing(kind: str, index: int | None) -> SimpleNamespace:
     ],
 )
 def test_the_other_clicks_are_pointer_clicks_even_on_a_control_the_tree_could_press(screen, pointer, kind, said, button, count):
+    row = replace(ORGANISE, role="cell")  # a list row the tree could press; a double click opens it
     live = replace(screen, ax_refs={3: object()})  # a press would be a single left click, so none is made
-    assert actions.perform(pointing(kind, 3), live, [ORGANISE], context()) == said
+    assert actions.perform(pointing(kind, 3), live, [row], context()) == said
     assert pointer == [((1888.0, 142.0), button, count)]
+
+
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+@pytest.mark.parametrize("role", ["button", "link", "checkbox", "radio", "popup", "menu", "tab"])
+def test_a_second_click_is_refused_on_a_control_that_one_click_activates(screen, pointer, kind, role):
+    control = replace(ORGANISE, role=role)
+    said = actions.perform(pointing(kind, 3), screen, [control], context())
+    assert said == f"{kind} refused: 'Organise' is a {role}, one click activates it"
+    assert pointer == []
+
+
+def test_a_right_click_is_fine_on_a_button(screen, pointer):
+    assert actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context()) == "right-clicked 'Organise'"
+    assert pointer == [((1888.0, 142.0), "right", 1)]
 
 
 def test_the_other_clicks_name_the_row_when_a_label_repeats(screen, pointer):
@@ -497,6 +512,55 @@ def pressed(monkeypatch):
 def test_a_shortcut_from_the_catalog_is_pressed_with_its_modifiers(screen, pressed, name, said, keys):
     assert actions.perform(shortcut_of(name), screen, [], context()) == said
     assert pressed == [keys]
+
+
+@pytest.mark.parametrize("name", ["new_tab", "close_tab", "next_tab", "previous_tab", "reload"])
+@pytest.mark.parametrize("app", ["Notes", "Mail", "TextEdit", ""])
+def test_a_browser_shortcut_is_refused_when_another_app_is_in_front(screen, pressed, name, app):
+    out = actions.perform(shortcut_of(name), replace(screen, app=app), [], context())
+    assert out == f"press_shortcut refused: {name.replace('_', ' ')} works in a browser, and {app or 'no app'} is in front"
+    assert pressed == []
+
+
+@pytest.mark.parametrize("app", ["Google Chrome", "Safari", "Firefox", "Arc"])
+def test_a_browser_shortcut_is_pressed_in_a_browser(screen, pressed, app):
+    assert actions.perform(shortcut_of("close_tab"), replace(screen, app=app), [], context()) == "pressed the close tab shortcut"
+    assert pressed == [("w", True, False, False, False)]
+
+
+def test_the_configured_browser_counts_as_a_browser_whatever_its_name(screen, pressed):
+    ctx = replace(context(), browser="Vivaldi")
+    assert actions.perform(shortcut_of("reload"), replace(screen, app="Vivaldi"), [], ctx) == "pressed the reload shortcut"
+
+
+@pytest.mark.parametrize("name", ["paste", "cut"])
+@pytest.mark.parametrize(
+    "role, label, placeholder",
+    [
+        ("AXSecureTextField", "", ""),
+        ("AXTextField", "Password", ""),
+        ("AXTextField", "", "Card number"),
+        ("AXTextField", "One-time code", ""),
+    ],
+)
+def test_paste_and_cut_are_refused_in_a_field_that_looks_like_a_credential(screen, pressed, name, role, label, placeholder):
+    box = Field(role=role, label=label, placeholder=placeholder, value="", x=0, y=0, w=10, h=10)
+    out = actions.perform(shortcut_of(name), replace(screen, field=box), [], context())
+    assert out == f"press_shortcut refused: {name} would act on a field that looks like a credential"
+    assert pressed == []
+
+
+def test_copy_and_the_other_shortcuts_are_not_held_back_by_a_credential_field(screen, pressed):
+    box = Field(role="AXSecureTextField", label="Password", placeholder="", value="", x=0, y=0, w=10, h=10)
+    assert (
+        actions.perform(shortcut_of("select_all"), replace(screen, field=box), [], context()) == "pressed the select all shortcut"
+    )
+
+
+def test_paste_goes_into_an_ordinary_field(screen, pressed):
+    box = Field(role="AXTextField", label="Search", placeholder="", value="", x=0, y=0, w=10, h=10)
+    assert actions.perform(shortcut_of("paste"), replace(screen, field=box), [], context()) == "pressed the paste shortcut"
+    assert pressed == [("v", True, False, False, False)]
 
 
 @pytest.mark.parametrize("name", ["none", "quit", "force_quit", "Cmd-Q", None])

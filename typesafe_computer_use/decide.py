@@ -16,8 +16,8 @@ SHORTCUT_KIND = (
     "Press a keyboard shortcut from a short list: the shortcut question that follows says which. "
     "Use it for a command the goal needs that no control on screen does, or that the keys do "
     "in one step: copy or paste a selection, select all, undo, find on the page, switch tabs. "
-    "Not for Return, Escape, or going back, which have actions of their own, and not when a "
-    "button on screen does the same thing."
+    "Not for Return, Escape, or going back, which have actions of their own, not to open a website "
+    "(use_browser does that), and not when a button on screen does the same thing."
 )
 # What the goal question lists, so that it opens for the moves the run is offered and no others.
 MOVES_ASKED = (
@@ -36,14 +36,14 @@ POINTING = {
     ),
     "double_click_item": (
         "Double-click one of the on-screen items (chosen in the item question): to open a file or folder in a "
-        "list that opens its items by double-click, or to select the word that was clicked. Not for a link, "
-        "a button, or anything that one click already activates."
+        "list that opens its items by double-click. Not for a link, a button, a checkbox, or anything that one "
+        "click already activates."
     ),
     "select_item_text": (
         "Select the whole line or paragraph of an on-screen text item with a triple click (chosen in the item "
-        "question), so that copying it or typing over it acts on that text. Use when the goal needs that text "
-        "copied or replaced and no control on screen selects it. Not when the focused field already shows that "
-        "text as selected."
+        "question), so that it can be copied. Use when the goal needs that text copied and no control on screen "
+        "selects it. Not when the focused field already shows that text as selected. Typing afterwards adds text "
+        "and does not replace the selection."
     ),
 }
 DRAG = (

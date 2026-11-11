@@ -198,9 +198,11 @@ WRITER_ENV = (
 )
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    """No writer configuration from the shell running the tests."""
+    """No writer configuration from the shell running the tests, so a maintainer's keys and endpoints
+    change no request a test reads (a custom endpoint appends the reply schema to every system prompt).
+    A test that needs one sets it itself, after this runs."""
     for name in WRITER_ENV:
         monkeypatch.delenv(name, raising=False)
     return monkeypatch

@@ -444,14 +444,23 @@ class FakeTypeSafe:
 
     endpoint = Endpoint("fake", "https://decisions.example.com/v1/decisions", "", "fake/decisions")
 
-    def __init__(self, policy: Policy, noul: float = 0.95, read_only: bool = False, moves: bool = False):
+    def __init__(
+        self,
+        policy: Policy,
+        noul: float = 0.95,
+        read_only: bool = False,
+        moves: bool = False,
+        shortcuts: Callable[[dict], str] | None = None,
+    ):
         self.policy = policy
+        self.shortcuts = shortcuts  # decides the shortcut from the follow-up's own state, when a scenario wants that
         self.noul = noul
         self.read_only = read_only  # how the goal question at the start of a run is answered
         self.moves = moves  # how the goal-needs-moves question is: closed unless a scenario opens it
         self.states: list[dict] = []
         self.asked: list[dict] = []  # the questions each decision was asked, so a test can read the criteria offered
         self.pending: tuple = (None, DEFAULT_CONFIDENCE)  # the last step's target and second confidence, for a follow-up question
+        self.follow_ups: list[dict] = []  # the state each shortcut follow-up was sent, which is all that request sees
 
     def __enter__(self) -> FakeTypeSafe:
         return self
@@ -472,12 +481,18 @@ class FakeTypeSafe:
             return SimpleNamespace(answers={"target": _answer(self._item_key(state, target), confidence)})
         if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
             self.asked.append(questions)
+            self.follow_ups.append(state)
             target, confidence = self.pending
+            if self.shortcuts is not None:
+                target = self.shortcuts(state)
             return SimpleNamespace(answers={"shortcut": _answer(target, confidence)})
         self.states.append(state)
         self.asked.append(questions)
         step = self.policy(state, questions)
         kind, target = step[0], step[1]
+        offered = questions["kind"].criteria if "kind" in questions else {}
+        if kind not in offered and kind not in ("done", "none"):
+            raise AssertionError(f"the scenario takes {kind!r}, which the kind question did not offer: {sorted(offered)}")
         confidence = step[2] if len(step) > 2 else DEFAULT_CONFIDENCE
         asked_again = confidence[1] if isinstance(confidence, tuple) else confidence
         self.pending = (target, asked_again)
@@ -604,6 +619,7 @@ def drive(
     act: bool = True,
     read_only: bool = False,
     moves: bool = False,
+    shortcuts: Callable[[dict], str] | None = None,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
@@ -612,7 +628,7 @@ def drive(
     With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
-    fake = FakeTypeSafe(policy, noul, read_only, moves)
+    fake = FakeTypeSafe(policy, noul, read_only, moves, shortcuts)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
     cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)
