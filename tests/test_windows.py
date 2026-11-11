@@ -1,6 +1,7 @@
 """The Windows adapter's pure rules. Nothing here touches Windows, so it runs everywhere."""
 
 import ctypes
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +31,41 @@ def test_control_types_map_onto_the_roles_the_shared_code_knows():
     assert role_for("EditControl") in TEXT_ROLES  # a focused edit box is a text field
     assert role_for("ComboBoxControl") in TEXT_ROLES
     assert role_for("TextControl") == "AXStaticText"  # where a list row's label is recovered from
+
+
+def test_a_password_box_is_a_secure_field_and_not_a_text_field():
+    """macOS reports AXSecureTextField, which is no text role: nothing types or pastes into it."""
+    assert role_for("EditControl", password=True) == "AXSecureTextField"
+    assert role_for("EditControl", password=True) not in TEXT_ROLES
+    assert role_for("EditControl", password=False) == "AXTextField"
+    assert role_for("ButtonControl", password=True) == "AXButton"  # only an edit box can be one
+
+
+class _Element:
+    ControlTypeName = "EditControl"
+    Name = "Account"
+    BoundingRectangle = None
+
+    def __init__(self, password):
+        self._password = password
+
+    @property
+    def IsPassword(self):
+        if isinstance(self._password, Exception):
+            raise self._password
+        return self._password
+
+
+@pytest.mark.parametrize(
+    ("password", "role"),
+    [(True, "AXSecureTextField"), (False, "AXTextField"), (OSError("gone"), "AXTextField")],
+)
+def test_the_focused_field_is_secure_when_the_element_says_it_is_a_password(monkeypatch, password, role):
+    element = _Element(password)
+    patterns = SimpleNamespace(ValuePattern=0, LegacyIAccessiblePattern=1)
+    monkeypatch.setattr(windows, "auto", SimpleNamespace(GetFocusedControl=lambda: element, PatternId=patterns))
+    monkeypatch.setattr(windows, "_pattern", lambda *_: None)
+    assert windows.focused_field().role == role
 
 
 def test_an_unknown_control_type_has_no_role():

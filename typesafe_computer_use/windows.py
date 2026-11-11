@@ -107,9 +107,24 @@ MOUSEEVENTF_WHEEL = 0x0800
 # ------------------------------------------------------------------ pure rules
 
 
-def role_for(control_type_name: str) -> str:
-    """The AX role a UI Automation control type stands for, or "" for one the walk ignores."""
+def role_for(control_type_name: str, password: bool = False) -> str:
+    """The AX role a UI Automation control type stands for, or "" for one the walk ignores.
+
+    A password box is an EditControl whose IsPassword property is set. macOS calls it
+    AXSecureTextField, which is not a text role, so the loop neither types into it nor pastes
+    over it, and the clipboard guard in `_press_shortcut` sees it.
+    """
+    if password and control_type_name == "EditControl":
+        return "AXSecureTextField"
     return CONTROL_TYPE_TO_ROLE.get(control_type_name, "")
+
+
+def _role_of(element) -> str:
+    try:
+        password = bool(getattr(element, "IsPassword", False))
+    except Exception:  # the bridge raises when the element has gone away
+        password = False
+    return role_for(getattr(element, "ControlTypeName", ""), password)
 
 
 def pressable(has_invoke: bool, default_action: str) -> bool:
@@ -599,7 +614,7 @@ def focused_field(pid: int | None = None) -> Field | None:
     frame = _ui_frame(element)
     x, y, w, h = frame if frame is not None else (0.0, 0.0, 0.0, 0.0)
     return Field(
-        role=role_for(getattr(element, "ControlTypeName", "")),
+        role=_role_of(element),
         label=(getattr(element, "Name", "") or "").strip(),
         placeholder=_ui_placeholder(element),
         value=_ui_value(element) or "",
@@ -682,7 +697,7 @@ def _ui_frame(element) -> Frame | None:
 
 def _ui_attrs(element) -> AxAttrs:
     label = (getattr(element, "Name", "") or "").strip()
-    return AxAttrs(role_for(getattr(element, "ControlTypeName", "")), label, _ui_frame(element))
+    return AxAttrs(_role_of(element), label, _ui_frame(element))
 
 
 def _ui_actions(element) -> list[str]:
