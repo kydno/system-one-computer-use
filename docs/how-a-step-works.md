@@ -257,7 +257,10 @@ does. So each step keeps a signature of the screen (the app, the page, the text 
 the loop stops after three actions in a row that left the screen as it was (a refused
 action, a wait on a page still loading, a scroll that has run out of page) or after two in a
 row that were already taken on the same screen earlier in the run (a click that does
-nothing, or a cycle through two pages). Two captures count as the same screen when at most
+nothing, or a cycle through two pages), or after three navigations in a row to the same place
+(`use_browser` or `open_app` that ends in the same line as the one before, which no reading of the
+page can hide, since a site that answers with an error page reads a little differently each time).
+Two captures count as the same screen when at most
 one line differs, and that one is one line in ten or fewer: a clock or a ticker does not
 hide a stall, and a two-line modal on a dense page is not mistaken for nothing happening.
 The memory figure Chromium adds to a tab's name ("Settings - Memory usage - 56.0 MB") is left

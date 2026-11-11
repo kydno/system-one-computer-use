@@ -38,6 +38,8 @@ from .writer import Answer, WriterError, compose_answer
 # action's description says what was attempted and only the next capture says what came of it.
 MAX_IDLE = 3  # consecutive actions that left the screen as it was: refusals, waits on a spinner, scrolls at the bottom
 MAX_REPEATS = 2  # consecutive actions already taken on the same screen earlier in the run: a cycle, or a click that does nothing
+MAX_REVISITS = 2  # consecutive navigations to the place the action before already went to, whatever the page reads
+NAVIGATIONS = ("use_browser", "open_app")  # the actions that go to a place, not to something on the screen
 MAX_STALLS = 3  # stalls with no new page between them; the last is final, since two focuses from the writer did not free the run
 SETTLE_LOOK = 0.25  # between two looks at a screen that may still be moving; each look is a capture of its own
 EARLIER_LINES = 600  # lines of text from the screens before the last one that the answer may also be read from
@@ -122,6 +124,8 @@ class RunState:
     timings: list[dict[str, float]] = field(default_factory=list)
     idle: int = 0  # actions in a row that changed nothing on screen
     repeats: int = 0  # actions in a row already taken on the same screen
+    revisits: int = 0  # navigations in a row to the place the one before went to
+    navigated: str | None = None  # the last action when it was a navigation, so the next can be told a revisit
     stalls: int = 0  # stalls since the run last reached a page it had not been on
     pages: set[tuple[str, str | None]] = field(default_factory=set)  # every (app, URL) the run has shown
     last: Signature | None = None  # the screen the last action was taken on
@@ -322,7 +326,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 record["handed_back"] = True
                 state.handoffs.append(Handoff(step, state.outcome, WAITING, len(state.history), answer.text))
                 state.guidance = state.guidance.followed()  # a focus given before the screen had loaded
-                state.idle = state.repeats = 0
+                state.idle = state.repeats = state.revisits = 0
                 if cfg.act and not cfg.replay:
                     wait_for_screen(cfg, ctx, state, log)
                 return True
@@ -337,7 +341,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                     Handoff(step, state.outcome, f"scroll {answer.scroll}{where}", len(state.history), answer.text)
                 )
                 state.guidance = state.guidance.followed()  # a focus from before the scroll is about the old screen
-                state.idle = state.repeats = 0
+                state.idle = state.repeats = state.revisits = 0
                 if cfg.act and not cfg.replay:
                     scroll_for_writer(cfg, state, answer, log)
                 return True
@@ -349,7 +353,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 record["handed_back"] = True
                 state.handoffs.append(Handoff(step, state.outcome, answer.focus, len(state.history), answer.text))
                 state.guidance = state.guidance.focused(answer.focus)
-                state.idle = state.repeats = 0  # the stall was under the old focus; the new one starts clean
+                state.idle = state.repeats = state.revisits = 0  # the stall was under the old focus; the new one starts clean
                 return True
             log(f"\nanswer ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}")
             log.event("answer", text=answer.text, achieved=answer.achieved)
@@ -626,7 +630,7 @@ def resolve(
     state.history.append(what)
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
-    return not repeating(state, what, decision.kind.choice == "wait", log)
+    return not repeating(state, what, decision.kind.choice == "wait", log, decision.kind.choice in NAVIGATIONS)
 
 
 def named_by_focus(decision: Decision, items: list[Item], focus: str | None) -> str | None:
@@ -746,7 +750,7 @@ def tried_here(state: RunState) -> list[str]:
     return [what for seen, what in state.seen if what is not None and state.last is not None and same_screen(seen, state.last)]
 
 
-def repeating(state: RunState, what: str, waiting: bool, log: Log) -> bool:
+def repeating(state: RunState, what: str, waiting: bool, log: Log, navigating: bool = False) -> bool:
     """Count the actions already taken on the same screen earlier, and stop once too many run in a row.
 
     The same action on the same screen led somewhere once, and this is where it led: back here.
@@ -754,14 +758,25 @@ def repeating(state: RunState, what: str, waiting: bool, log: Log) -> bool:
     with no action, so the screen it was taken on still reaches the answer, but it is never a
     repeat and never listed as tried: waiting is repeating by design, and the classifier must
     stay free to wait again. The idle count bounds it instead.
+
+    A navigation is judged by where it went, not by the screen it was taken on. A site that answers
+    with an error page reads a line differently each time, so a run that opened it again and again
+    never took the same action on the same screen twice, and nothing stopped it. The place is a
+    fact the history line holds, and opening what the last action just opened gains nothing.
     """
     if waiting:
         state.seen.append((state.last, None))
         return False
     state.repeats = state.repeats + 1 if what in tried_here(state) else 0
+    state.revisits = state.revisits + 1 if navigating and what == state.navigated else 0
+    state.navigated = what if navigating else None
     state.seen.append((state.last, what))
     if state.repeats >= MAX_REPEATS:
         log(f"  {MAX_REPEATS} actions in a row already taken on the same screen; stopping")
+        state.outcome = "stalled"
+        return True
+    if state.revisits >= MAX_REVISITS:
+        log(f"  {what!r} {MAX_REVISITS + 1} times in a row; stopping")
         state.outcome = "stalled"
         return True
     return False
