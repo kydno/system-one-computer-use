@@ -74,8 +74,10 @@ count the takeover.
 
 ## What it costs
 
-`takeover.json` adds up the cost each reply reports, as OpenRouter's replies do on its other APIs;
-when none reports one, `cost` is null and the token counts remain. At GPT-6 Luna's listed price on
+OpenRouter's Responses replies report their cost in USD (`usage.cost`), and `takeover.json` adds
+them up; with a reply that reports none, `cost` is null and the token counts remain. One turn of
+the default model on two 1280x768 screenshots and a short story took 3,355 input tokens and 57
+output tokens, for $0.00045. At GPT-6 Luna's listed price on
 OpenRouter ($0.10 per million input tokens, $0.01 cached, $0.50 output), a screenshot is a
 fraction of a cent. For scale, not a measurement of this loop: OSWorld's own GPT agent on Luna, at
 `xhigh` effort, finished one task in 6 turns on about 59,000 input tokens (43,000 cached) and 320
