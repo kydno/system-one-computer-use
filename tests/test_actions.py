@@ -513,6 +513,7 @@ def test_the_configured_browser_counts_as_a_browser_whatever_its_name(screen, pr
         ("AXTextField", "Password", ""),
         ("AXTextField", "", "Card number"),
         ("AXTextField", "One-time code", ""),
+        ("AXTextField", "Login", "Password"),  # an innocent label does not hide a placeholder that is not
     ],
 )
 def test_paste_and_cut_are_refused_in_a_field_that_looks_like_a_credential(screen, pressed, name, role, label, placeholder):

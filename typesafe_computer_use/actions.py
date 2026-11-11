@@ -375,7 +375,9 @@ CLIPBOARD_OUT_OF_REACH = ("paste", "cut")  # never into, or out of, a field that
 
 def looks_like_a_credential_field(field: Field | None) -> bool:
     """A field the system calls secure, or one whose label or placeholder names a password, a code, a card."""
-    return field is not None and (field.role == "AXSecureTextField" or looks_credential(field.label or field.placeholder))
+    return field is not None and (
+        field.role == "AXSecureTextField" or looks_credential(field.label) or looks_credential(field.placeholder)
+    )
 
 
 def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
