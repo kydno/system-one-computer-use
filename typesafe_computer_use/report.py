@@ -155,8 +155,9 @@ def render_payload(
     return "\n".join(parts) + "\n"
 
 
-def annotate(screen: Screen, items: list[Item], chosen: str, out: Path) -> None:
-    """Blue boxes for OCR blocks, orange for accessibility controls, red for the chosen one, green for the focused field."""
+def annotate(screen: Screen, items: list[Item], chosen: str, out: Path, dropped_on: str | None = None) -> None:
+    """Blue boxes for OCR blocks, orange for accessibility controls, red for the chosen one, purple for the item a
+    drag drops it on, green for the focused field."""
     image = screen.image.copy()
     draw = ImageDraw.Draw(image)
     try:
@@ -165,8 +166,9 @@ def annotate(screen: Screen, items: list[Item], chosen: str, out: Path) -> None:
         font = ImageFont.load_default()
     for it in items:
         hit = str(it.index) == chosen
-        color = (255, 0, 0) if hit else (255, 140, 0) if it.from_ax else (0, 160, 255)
-        draw.rectangle((it.x1, it.y1, it.x2, it.y2), outline=color, width=3 if hit else 1)
+        drop = str(it.index) == dropped_on
+        color = (255, 0, 0) if hit else (150, 0, 200) if drop else (255, 140, 0) if it.from_ax else (0, 160, 255)
+        draw.rectangle((it.x1, it.y1, it.x2, it.y2), outline=color, width=3 if hit or drop else 1)
         draw.text((it.x1, max(0, it.y1 - 12 * screen.scale)), str(it.index), fill=color, font=font)
     f = screen.field
     if f is not None:

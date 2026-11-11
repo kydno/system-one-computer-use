@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from evals_support import home_with, run_form, run_popup
+from evals_support import home_with, run_form, run_moves, run_popup
 
 from typesafe_computer_use.evals import cases
 from typesafe_computer_use.evals.store import Home, checkout_root
@@ -140,3 +140,23 @@ def test_the_main_checkout_is_found_from_inside_a_worktree(tmp_path):
     assert checkout_root(tree / "sub") == main.resolve()
     assert checkout_root(main) == main.resolve()
     assert Home(main).runs == main / "runs" and Home(main).private == main / ".private" / "evals"
+
+
+def test_a_step_whose_run_was_offered_the_moves_rebuilds_with_them_and_a_plain_step_without(monkeypatch, tmp_path):
+    world, _ = run_moves(monkeypatch, tmp_path / "m")
+    (selecting, stopping) = cases.harvest_run(tmp_path / "m" / "run")
+
+    assert "press_shortcut" in selecting.criteria["kind"] and selecting.picked["kind"] == "press_shortcut"
+    assert cases.rebuild(selecting).moves is True
+    assert cases.fidelity(selecting) == [] and cases.fidelity(stopping) == []  # rebuilt as it was sent, with no flag given
+    state, questions = cases.request(selecting)
+    assert "press_shortcut" in questions["kind"].criteria and state == json.loads(json.dumps(world.fake.states[0]))
+
+    # Forcing the moves off asks the question the saved run was never asked, so it no longer matches.
+    assert "press_shortcut" not in cases.request(selecting, moves=False)[1]["kind"].criteria
+
+    run_popup(monkeypatch, tmp_path / "p")
+    (plain, _) = cases.harvest_run(tmp_path / "p" / "run")
+    assert cases.rebuild(plain).moves is False
+    assert "press_shortcut" not in cases.request(plain)[1]["kind"].criteria
+    assert "press_shortcut" in cases.request(plain, moves=True)[1]["kind"].criteria  # --moves forces it on for any case

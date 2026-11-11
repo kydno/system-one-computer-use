@@ -459,7 +459,11 @@ class FakeTypeSafe:
         self.moves = moves  # how the goal-needs-moves question is: closed unless a scenario opens it
         self.states: list[dict] = []
         self.asked: list[dict] = []  # the questions each decision was asked, so a test can read the criteria offered
-        self.pending: tuple = (None, DEFAULT_CONFIDENCE)  # the last step's target and second confidence, for a follow-up question
+        self.pending: tuple = (
+            None,
+            DEFAULT_CONFIDENCE,
+            DEFAULT_CONFIDENCE,
+        )  # the last step's target, and its item and drop-target confidences, for a follow-up question
         self.follow_ups: list[dict] = []  # the state each shortcut follow-up was sent, which is all that request sees
 
     def __enter__(self) -> FakeTypeSafe:
@@ -475,10 +479,14 @@ class FakeTypeSafe:
             return SimpleNamespace(answers={"moves": SimpleNamespace(noul=1.0 if self.moves else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
+        if set(questions) == {"target"}:  # the follow-up to a drag_item: where it is dropped, named by text
+            self.asked.append(questions)
+            target, confidence = self.pending[0][1], self.pending[2]
+            return SimpleNamespace(answers={"target": _answer(self._item_key(state, target), confidence)})
         if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
             self.asked.append(questions)
             self.follow_ups.append(state)
-            target, confidence = self.pending
+            target, confidence = self.pending[:2]
             if self.shortcuts is not None:
                 target = self.shortcuts(state)
             return SimpleNamespace(answers={"shortcut": _answer(target, confidence)})
@@ -491,16 +499,20 @@ class FakeTypeSafe:
             raise AssertionError(f"the scenario takes {kind!r}, which the kind question did not offer: {sorted(offered)}")
         confidence = step[2] if len(step) > 2 else DEFAULT_CONFIDENCE
         asked_again = confidence[1] if isinstance(confidence, tuple) else confidence
-        self.pending = (target, asked_again)
+        dropped = confidence[2] if isinstance(confidence, tuple) and len(confidence) > 2 else asked_again
+        self.pending = (target, asked_again, dropped)
         return SimpleNamespace(answers=self._answers(state, questions, kind, target, confidence))
 
     def _answers(self, state: dict, questions: dict, kind: str, target, confidence: float | tuple[float, float]) -> dict:
         """A step's confidence is one figure for every answer, or (kind, item) when the two differ."""
-        confidence, item_confidence = confidence if isinstance(confidence, tuple) else (confidence, confidence)
+        confidence, item_confidence = confidence[:2] if isinstance(confidence, tuple) else (confidence, confidence)
         answers = {"kind": _answer(kind, confidence), "site": _answer(target if kind == "use_browser" else "none", confidence)}
         if "item" in questions:
-            aimed = kind in ("click_item", *POINTING) or (kind in ("scroll_down", "scroll_up") and target is not None)
-            answers["item"] = _answer(self._item_key(state, target) if aimed else "0", item_confidence)
+            aimed = kind in ("click_item", *POINTING, "drag_item") or (
+                kind in ("scroll_down", "scroll_up") and target is not None
+            )
+            what = target[0] if kind == "drag_item" else target
+            answers["item"] = _answer(self._item_key(state, what) if aimed else "0", item_confidence)
         if "offscreen" in questions:
             key = self._offscreen_key(state, target) if kind == "press_offscreen" else "0"
             answers["offscreen"] = _answer(key, confidence)

@@ -521,7 +521,13 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         state.outcome = "no decision"
         return False
     by_index = {str(it.index): it for it in items}
-    annotate(screen, items, decision.item.choice if decision.pointing else decision.chosen, prefix.with_suffix(".png"))
+    annotate(
+        screen,
+        items,
+        decision.item.choice if decision.pointing or decision.dragging else decision.chosen,
+        prefix.with_suffix(".png"),
+        dropped_on=decision.target.choice if decision.dragging else None,
+    )
 
     field_desc = (
         f" field={'clicked' if screen.field.clicked else screen.field.role}:{screen.field.label!r}" if screen.field else ""
@@ -537,6 +543,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
             if decision.shortcut is not None
             else ""
         )
+        + (f" target={decision.target.choice!r} ({decision.target.confidence:.2f})" if decision.target is not None else "")
         + (f" refused={decision.refused}, asked again without it" if decision.refused else "")
     )
     for key, p in top(decision.kind, 4):
@@ -729,6 +736,9 @@ def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
     if decision.clicking:
         item = next((it for it in items if str(it.index) == decision.item.choice), None)
         return f"click {item.text!r}" if item is not None else decision.chosen
+    if decision.dragging:
+        named = {str(it.index): it.text for it in items}
+        return f"drag {named.get(decision.item.choice)!r} onto {named.get(decision.target.choice)!r}"
     if decision.pointing:
         item = next((it for it in items if str(it.index) == decision.item.choice), None)
         return f"{POINTING_WORDS[decision.kind.choice]} {item.text!r}" if item is not None else decision.chosen
@@ -823,6 +833,7 @@ def answers(
             if decision.shortcut
             else {}
         ),
+        **({"target": decision.target.choice, "target_probabilities": decision.target.probabilities} if decision.target else {}),
         "offscreen": decision.offscreen.choice if decision.offscreen else None,
         "offscreen_probabilities": decision.offscreen.probabilities if decision.offscreen else None,
         "offscreen_controls": offscreen_records(screen.offscreen),

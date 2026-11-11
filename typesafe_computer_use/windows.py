@@ -145,8 +145,12 @@ def key_events(
     """(virtual key, flags) for pressing a key, with its modifiers held around it.
 
     Windows has one Control key, which stands for macOS's Command and its Control alike, and Alt is Option.
+    Command with a key that has a chord of its own (`[` is Alt-Left) is that chord, with Shift if asked; Option
+    or Control with it would be dropped silently, so that combination is refused.
     """
     if command and key in COMMAND_CHORDS:
+        if option or control:
+            raise ValueError(f"Command-{key} is {COMMAND_CHORDS[key]} on Windows and cannot also hold Option or Control")
         keys = COMMAND_CHORDS[key]
     else:
         keys = (*((VK_CONTROL,) if command or control else ()), *((VK_ALT,) if option else ()), VK[key])
@@ -299,23 +303,33 @@ def _reach(point: tuple[float, float]) -> tuple[int, int]:
 
 def click_at(point: tuple[float, float], button: str = "left", count: int = 1) -> None:
     """Move, read back where the cursor landed, then press and release there `count` times with the
-    left or right button; two clicks in a row are a double click."""
+    left or right button; two clicks in a row are a double click. The abort corner is looked at
+    between the clicks, and the button comes up even when the press is interrupted."""
     if button not in BUTTON_EVENTS or not 1 <= count <= MAX_CLICKS:
         raise ValueError(f"cannot click {count} times with the {button!r} button")
     down, up = BUTTON_EVENTS[button]
+    check_abort()
     _reach(point)
-    for _ in range(count):
-        _send(_mouse(down))
-        _send(_mouse(up))
+    for n in range(count):
+        if n:
+            check_abort()
+        try:
+            _send(_mouse(down))
+        finally:
+            _send(_mouse(up))
 
 
 def drag(start: tuple[float, float], end: tuple[float, float]) -> None:
     """Press the left button at `start`, move to `end` in steps, and release there.
 
-    The button comes up wherever the cursor got to, also when the drag is interrupted or the abort
-    corner is hit half way, so nothing stays held and nothing is dropped where it was not taken.
+    A drag that is interrupted or aborted half way goes back to `start` and lets go there, so nothing
+    stays held and nothing is dropped where the cursor was passing over. The button-up event carries no
+    position, so the cursor is moved to the release point first, never left where the user's hand took it
+    (the abort corner).
     """
+    check_abort()
     here = _reach(start)
+    completed = False
     try:
         _send(_mouse(MOUSEEVENTF_LEFTDOWN))
         sleep_watching(DRAG_HOLD)
@@ -327,13 +341,35 @@ def drag(start: tuple[float, float], end: tuple[float, float]) -> None:
             )
             _move(here)
         sleep_watching(DRAG_HOLD)
+        completed = True
     finally:
-        _send(_mouse(MOUSEEVENTF_LEFTUP))
+        try:
+            _move(here if completed else _round_point(start))
+        finally:
+            _send(_mouse(MOUSEEVENTF_LEFTUP))
+
+
+def _round_point(point: tuple[float, float]) -> tuple[int, int]:
+    return (round(point[0]), round(point[1]))
 
 
 def press(key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:
-    for vk, flags in key_events(key, command, shift, option, control):
-        _send(_key(vk=vk, flags=flags))
+    """Press the key with its modifiers held around it. A key still held when an event fails (a UAC
+    prompt or the lock screen takes the input desktop) is let go, so no modifier stays down."""
+    held: list[tuple[int, int]] = []
+    try:
+        for vk, flags in key_events(key, command, shift, option, control):
+            if not flags & KEYEVENTF_KEYUP:
+                held.append((vk, flags))
+            _send(_key(vk=vk, flags=flags))
+            if flags & KEYEVENTF_KEYUP:
+                held = [h for h in held if h[0] != vk]
+    finally:
+        for vk, flags in reversed(held):
+            # One that cannot be let go (the input desktop is still locked) must not leave the others held,
+            # and must not hide the error that got us here.
+            with suppress(OSError):
+                _send(_key(vk=vk, flags=flags | KEYEVENTF_KEYUP))
 
 
 def type_text(text: str) -> None:

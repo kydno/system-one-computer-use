@@ -23,8 +23,10 @@ from typesafe_computer_use.decide import (
     verify_typed,
 )
 from typesafe_computer_use.decisions import ChoiceAnswer, DecisionError
-from typesafe_computer_use.models import AxNode, Field, Guidance
+from typesafe_computer_use.models import AxNode, Field, Guidance, Popup
 from typesafe_computer_use.runner import goal_only_looks, named_by_focus
+
+BUBBLE = Popup("Restore pages?", 100.0, 100.0, 300.0, 200.0)
 
 
 def answer(choice, confidence, probabilities=None):
@@ -273,7 +275,7 @@ def test_press_shortcut_is_offered_only_to_a_run_whose_goal_needs_the_moves_and_
 
 def test_a_closed_gate_leaves_the_kind_question_as_it_was_before_the_moves_existed():
     shut, open_ = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
-    assert {k: v for k, v in open_.items() if k not in ("press_shortcut", *POINTING)} == shut
+    assert {k: v for k, v in open_.items() if k not in ("press_shortcut", *POINTING, "drag_item")} == shut
     assert list(shut) == [
         "click_item",
         "use_browser",
@@ -392,7 +394,11 @@ def test_the_item_question_names_the_other_clicks_only_when_they_are_offered(scr
     assert "triple click" not in shut and shut.startswith("If clicking an on-screen item is the right move, which item?")
     assert (
         "triple click" in open_
-        and open_.replace(" by any click (single, right, double, or the triple click that selects its text),", "") == shut
+        and open_.replace(
+            " by any click (single, right, double, or the triple click that selects its text), or, for a drag, the item that is dragged,",
+            "",
+        )
+        == shut
     )
 
 
@@ -419,7 +425,7 @@ def test_the_other_clicks_need_an_item_to_be_a_decision_to_point():
 def test_a_refused_item_question_sinks_every_kind_that_needs_an_item(screen):
     from typesafe_computer_use.decisions import Refusal
 
-    assert set(SPARED["item"]) == {"click_item", *POINTING}
+    assert set(SPARED["item"]) == {"click_item", *POINTING, "drag_item"}
 
     def system_one(state, questions):
         if "item" in questions:
@@ -428,6 +434,87 @@ def test_a_refused_item_question_sinks_every_kind_that_needs_an_item(screen):
 
     with pytest.raises(DecisionError, match="chose double_click_item without it"):
         decide(SimpleNamespace(system_one=system_one), "g", screen, [item(0, "File")], [], "Google Chrome", None, moves=True)
+
+
+def test_drag_is_offered_to_a_run_that_needs_the_moves_and_asks_for_its_target_in_a_second_request(screen):
+    assert "drag_item" not in kind_criteria("Google Chrome", None) and "drag_item" in kind_criteria(
+        "Google Chrome", None, moves=True
+    )
+    files = [item(0, "Invoice.pdf"), item(1, "Taxes"), item(2, "Photos")]
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "target" in questions:
+            return SimpleNamespace(answers={"target": answer("1", 0.8)})
+        return SimpleNamespace(answers={"kind": answer("drag_item", 0.95), "site": answer("none", 1.0), "item": answer("0", 0.9)})
+
+    d = decide(SimpleNamespace(system_one=system_one), "file the invoice", screen, files, [], "Google Chrome", None, moves=True)
+
+    assert d.dragging and d.chosen == "drag_item" and d.item.choice == "0" and d.target.choice == "1"
+    assert d.confidence == 0.8  # a drag moves things, so the weakest of the three answers counts
+    state, questions = requests[1]
+    assert state["dragging_item"] == "0" and [it["text"] for it in state["screen_items_in_reading_order"]] == [
+        "Invoice.pdf",
+        "Taxes",
+        "Photos",
+    ]
+    assert list(questions["target"].criteria) == ["1", "2"]  # never the dragged item itself
+
+
+def test_drag_is_not_offered_with_fewer_than_two_items_to_drag_between(screen):
+    from typesafe_computer_use.decide import build_questions
+
+    one = build_questions(screen, [item(0, "Invoice.pdf")], "Google Chrome", None, moves=True)["kind"].criteria
+    two = build_questions(screen, [item(0, "Invoice.pdf"), item(1, "Taxes")], "Google Chrome", None, moves=True)["kind"].criteria
+    assert "drag_item" not in one and "right_click_item" in one  # the other moves need only one item
+    assert "drag_item" in two
+
+
+def test_the_target_question_leaves_out_items_under_a_popup_and_is_not_asked_for_a_covered_source(screen):
+    files = [item(0, "Invoice.pdf"), item(1, "Taxes"), item(2, "Photos")]
+    asked = []
+
+    def system_one(state, questions):
+        asked.append(questions)
+        if "target" in questions:
+            return SimpleNamespace(answers={"target": answer("2", 0.8)})
+        return SimpleNamespace(answers={"kind": answer("drag_item", 0.95), "site": answer("none", 1.0), "item": answer("0", 0.9)})
+
+    under = replace(screen, covered={1: BUBBLE})  # Taxes is under a popup
+    d = decide(SimpleNamespace(system_one=system_one), "g", under, files, [], "Google Chrome", None, moves=True)
+    assert list(asked[1]["target"].criteria) == ["2"] and d.dragging
+
+    asked.clear()
+    covered_source = replace(screen, covered={0: BUBBLE})  # the file itself is under a popup
+    d = decide(SimpleNamespace(system_one=system_one), "g", covered_source, files, [], "Google Chrome", None, moves=True)
+    assert len(asked) == 1 and d.target is None and not d.dragging  # the action would refuse it, so no second request
+
+
+def test_a_drag_with_nothing_to_drop_on_asks_no_target_question(screen):
+    files = [item(0, "Invoice.pdf"), item(1, "Taxes")]
+    asked = []
+
+    def system_one(state, questions):
+        asked.append(questions)
+        return SimpleNamespace(answers={"kind": answer("drag_item", 0.95), "site": answer("none", 1.0), "item": answer("0", 0.9)})
+
+    d = decide(
+        SimpleNamespace(system_one=system_one),
+        "g",
+        replace(screen, covered={1: BUBBLE}),
+        files,
+        [],
+        "Google Chrome",
+        None,
+        moves=True,
+    )
+    assert len(asked) == 1 and d.target is None
+
+
+def test_a_drag_with_no_target_answer_is_not_a_drag():
+    d = Decision(kind=answer("drag_item", 0.9), item=answer("0", 0.9), site=answer("none", 1.0))
+    assert not d.dragging
 
 
 def test_browser_criteria_say_which_is_in_front_and_which_is_the_default():

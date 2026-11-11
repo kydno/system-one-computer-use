@@ -79,6 +79,25 @@ def run_form(monkeypatch, tmp_path: Path, act: bool = True):
     return world, state
 
 
+def run_moves(monkeypatch, tmp_path: Path):
+    """A run whose goal needed the moves beyond clicking: the gate was open, so its requests offered them."""
+    world = World(
+        [
+            Page(name="doc", items=["Total 4,210", "Notes"], app="Notes", on={"key:cmd+a": "all"}),
+            Page(name="all", items=["Total 4,210 (selected)", "Notes"], app="Notes"),
+        ]
+    )
+    state = drive(
+        world,
+        scripted(("press_shortcut", "select_all"), ("done", None)),
+        goal="select everything in the note",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        moves=True,
+    )
+    return world, state
+
+
 def home_with(root: Path, *drives: tuple[Path, str]) -> Home:
     """A checkout's worth of `runs/`: each (folder a drive wrote, name to file it under)."""
     for source, name in drives:

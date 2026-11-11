@@ -16,7 +16,7 @@ from .store import Home, git_state, now_iso
 PARTS = ("total", "state", "items_in_state", "q_kind", "q_item", "q_site", "q_browser", "q_offscreen")
 
 
-def measure(cases: Sequence[Case], moves: bool = False) -> dict[str, dict[str, int]]:
+def measure(cases: Sequence[Case], moves: bool | None = None) -> dict[str, dict[str, int]]:
     """Each case's request bytes by part, under the current code; `moves` for a run offered the moves
     beyond clicking and typing."""
     return {case.id: sizes(*request(case, moves)) for case in cases}

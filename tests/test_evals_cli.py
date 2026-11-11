@@ -82,6 +82,30 @@ def test_size_keeps_a_baseline_and_a_later_measurement_is_set_against_it(checkou
     assert len(list(checkout.passes.glob("*-size.json"))) >= 1
 
 
+def test_size_can_force_the_moves_on_or_off_or_leave_each_case_as_its_run_was_asked(checkout, capsys):
+    eval_run(checkout, capsys, "harvest")
+    own = eval_run(checkout, capsys, "size")[1]
+    on = eval_run(checkout, capsys, "size", "--moves")[1]
+    off = eval_run(checkout, capsys, "size", "--no-moves")[1]
+    assert "offered" not in own.splitlines()[0]
+    assert "with the moves offered" in on.splitlines()[0] and "with no moves offered" in off.splitlines()[0]
+    assert eval_run(checkout, capsys, "decisions", "--plan", "--no-moves")[0] == 0
+
+
+def test_annotate_marks_the_item_a_drag_drops_on_apart_from_the_one_it_takes(screen, tmp_path):
+    from PIL import Image
+
+    from typesafe_computer_use.models import Item
+    from typesafe_computer_use.report import annotate
+
+    items = [Item(0, "Invoice.pdf", 1.0, 100, 100, 300, 140), Item(1, "Taxes", 1.0, 100, 300, 300, 340)]
+    out = tmp_path / "a.png"
+    annotate(screen, items, "0", out, dropped_on="1")
+    image = Image.open(out).convert("RGB")
+    assert image.getpixel((100, 120)) == (255, 0, 0)  # the one that is taken
+    assert image.getpixel((100, 320)) == (150, 0, 200)  # the one it lands on
+
+
 def reply_first_option(request: httpx.Request) -> httpx.Response:
     asked = json.loads(request.content)["questions"]
     answers = {
@@ -109,6 +133,9 @@ def test_a_pass_that_asks_a_model_needs_an_open_batch_and_is_recorded_as_numbers
     )
     code, out, _ = eval_run(checkout, capsys, "decisions", "--repeats", "1")
     assert code == 0 and '"requests_sent": 5' in out and "batch t1: $0.0050 of $1.00" in out
+    assert (
+        '"moves_mode": "own"' in out and '"moves_cases": 0' in out and '"moves": false' in out
+    )  # each case as its run was asked
 
     code, out, _ = eval_run(checkout, capsys, "decisions", "--plan")
     assert "5 already cached, 0 new" in out

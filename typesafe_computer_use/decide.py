@@ -22,7 +22,7 @@ SHORTCUT_KIND = (
 # What the goal question lists, so that it opens for the moves the run is offered and no others.
 MOVES_ASKED = (
     "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs), the context menu of "
-    "an item (a right click), a double click, or selecting the text of an item"
+    "an item (a right click), a double click, selecting the text of an item, or dragging one item onto another"
 )
 OFFSCREEN_PREFIX = "offscreen:"
 # The questions a step is asked again without when the model refuses one, each with the one kind
@@ -42,10 +42,17 @@ POINTING = {
     "select_item_text": (
         "Select the whole line or paragraph of an on-screen text item with a triple click (chosen in the item "
         "question), so that it can be copied. Use when the goal needs that text copied and no control on screen "
-        "selects it. Typing afterwards does not act on the selection."
+        "selects it. Not when the focused field already shows that text as selected. Typing afterwards does not "
+        "act on the selection."
     ),
 }
-SPARED = {"item": ("click_item", *POINTING), "offscreen": ("press_offscreen",)}
+DRAG = (
+    "Drag one on-screen item (chosen in the item question) onto another (chosen in the target question that "
+    "follows): to move a file into a folder, reorder a list or the tabs, or drop something on a place. Not "
+    "for a slider or a map, and not when a menu or a button on screen does the same."
+)
+SPARED = {"item": ("click_item", *POINTING, "drag_item"), "offscreen": ("press_offscreen",)}
+GATED_KINDS = frozenset({"press_shortcut", *POINTING, "drag_item"})  # offered only to a run whose goal needs the moves
 PRESS_OFFSCREEN = (
     "Activate a labelled control that the app exposes but that is not currently visible on screen "
     "(chosen in the offscreen question). Use when the needed control is known to exist but is "
@@ -123,8 +130,13 @@ def kind_criteria(
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
     moves: bool = False,
+    draggable: bool = True,
 ) -> dict[str, str]:
-    clicks = {"click_item": "Click one of the on-screen text items (chosen in the item question).", **(POINTING if moves else {})}
+    """`draggable` is whether two items are on screen: a drag needs one to take and another to drop it on."""
+    clicks = {
+        "click_item": "Click one of the on-screen text items (chosen in the item question).",
+        **({**POINTING, **({"drag_item": DRAG} if draggable else {})} if moves else {}),
+    }
     if offscreen:
         clicks["press_offscreen"] = PRESS_OFFSCREEN
     return {**clicks, **fixed_actions(browser, email, browsers, apps, moves)}
@@ -270,6 +282,7 @@ class Decision:
     browser: ChoiceAnswer | None = None  # asked only when more than one browser is installed
     app: ChoiceAnswer | None = None  # asked only once open_app is chosen
     shortcut: ChoiceAnswer | None = None  # asked only once press_shortcut is chosen
+    target: ChoiceAnswer | None = None  # asked only once drag_item is chosen: the item the dragged one is dropped on
     refused: str | None = None  # a question the model refused, so the step was decided without it
 
     @property
@@ -280,6 +293,10 @@ class Decision:
     def pointing(self) -> bool:
         """A click of another kind than a single one, on the item the item question picked."""
         return self.kind.choice in POINTING and self.item is not None
+
+    @property
+    def dragging(self) -> bool:
+        return self.kind.choice == "drag_item" and self.item is not None and self.target is not None
 
     @property
     def pressing_offscreen(self) -> bool:
@@ -307,6 +324,8 @@ class Decision:
             return min(self.kind.confidence, self.item.confidence)
         if self.pressing_offscreen:
             return min(self.kind.confidence, self.offscreen.confidence)
+        if self.dragging:
+            return min(self.kind.confidence, self.item.confidence, self.target.confidence)  # a drag moves things
         if self.pressing_shortcut:
             return min(self.kind.confidence, self.shortcut.confidence)  # a wrong shortcut is not always undone
         return self.kind.confidence
@@ -338,7 +357,7 @@ def build_questions(
                 "tried on this screen: each of those led straight back here."
                 + (FOCUS_RULE if guidance and guidance.focus else "")
             ),
-            criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves),
+            criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves, len(items) >= 2),
         ),
         "site": Choice(
             instructions=(
@@ -361,7 +380,12 @@ def build_questions(
         questions["item"] = Choice(
             instructions=(
                 "If clicking an on-screen item is the right move,"
-                + (" by any click (single, right, double, or the triple click that selects its text)," if moves else "")
+                + (
+                    " by any click (single, right, double, or the triple click that selects its text), or, for a drag,"
+                    " the item that is dragged,"
+                    if moves
+                    else ""
+                )
                 + " which item? If scrolling is, which "
                 "item sits in the list, panel, or page that should scroll? Pick a line of that content "
                 "itself, not a sidebar or menu entry that shares a word with the goal: the wheel turns "
@@ -401,7 +425,7 @@ def decide(
 ) -> Decision:
     """One request for the step's decision, and a second, small one for the app only when the first
     chose open_app: the list of installed apps is long, and most steps open none. A shortcut is asked
-    the same way, once press_shortcut is chosen.
+    the same way, once press_shortcut is chosen, and so is the item a drag drops on.
 
     Luna refuses the item question now and then, the one whose labels are text read off the screen,
     and OpenRouter loses every other answer with it: on a Claude window full of a conversation about
@@ -440,6 +464,26 @@ def decide(
             },
             questions={"shortcut": shortcut_question()},
         ).answers["shortcut"]
+    target = None
+    # A source under a popup is refused by the action whatever the target, and with nothing to drop it on the
+    # question would have no choices: neither is worth a request.
+    if (
+        answers["kind"].choice == "drag_item"
+        and answers.get("item") is not None
+        and not covered(screen, answers["item"].choice)
+        and target_question(screen, items, answers["item"].choice).criteria
+    ):
+        source = answers["item"].choice
+        target = client.system_one(
+            state={
+                "goal": goal,
+                **(guidance.state() if guidance else {}),
+                "frontmost_app": screen.app,
+                "dragging_item": source,
+                "screen_items_in_reading_order": state["screen_items_in_reading_order"],
+            },
+            questions={"target": target_question(screen, items, source)},
+        ).answers["target"]
     return Decision(
         kind=answers["kind"],
         item=answers.get("item"),
@@ -448,6 +492,7 @@ def decide(
         browser=answers.get("browser"),
         app=app,
         shortcut=shortcut,
+        target=target,
         refused=refused,
     )
 
@@ -459,6 +504,23 @@ def app_question(apps: Sequence[str], frontmost: str) -> Choice:
             "one it names; when it names none, the one made for the task it describes."
         ),
         criteria=app_criteria(apps, frontmost),
+    )
+
+
+def covered(screen: Screen, key: str) -> bool:
+    """Whether a popup is in front of the item with this key: the action refuses to press or drop there."""
+    return key.isdigit() and int(key) in screen.covered
+
+
+def target_question(screen: Screen, items: list[Item], source: str) -> Choice:
+    """Which item the dragged one is dropped on: every item but the dragged one, and none under a popup,
+    in the item question's words."""
+    return Choice(
+        instructions=(
+            "An on-screen item is dragged this step (the state's dragging_item). Which item is it dropped "
+            "on? The one the goal, or the current focus, moves it to: a folder, a slot in a list, a tab."
+        ),
+        criteria={key: line for key, line in item_criteria(screen, items).items() if key != source and not covered(screen, key)},
     )
 
 

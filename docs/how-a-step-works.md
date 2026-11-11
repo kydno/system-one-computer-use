@@ -158,6 +158,7 @@ on the app, and the node and time caps bind first on a big tree: Notes and Chrom
 |---|---|
 | `click_item` | press the element through the accessibility tree when the item came from it, so the press lands on the control rather than on whatever covers it; a mouse click at the center of the box otherwise, and as the fallback when the press is refused or, on a web page, when 0.4 s later the screen shows no change outside the focused field and the menu bar (Chromium accepts presses that pages listening for pointer events ignore), after closing the popup in front of it when there is one |
 | `right_click_item`, `double_click_item`, `select_item_text` | (offered only to a run whose goal needs the moves beyond clicking and typing, with the item question's wording widened to match) a right click, a double click, or a triple click (which selects the item's line or paragraph) at the center of the item the `item` answer names; they reuse the `item` question and add no request. Always a pointer click, never an accessibility press, since a press is a single left click; a popup in front of the item is closed first, as for `click_item`. The menu a right click opens, or the file a double click opens, is read as ordinary items at the next step. A split on the item lowers the step's confidence as it does for a click, and a read-only goal's lower floor does not apply to them. Code refuses a double or triple click on an accessibility button, link, checkbox, radio button, pop-up, menu or tab, since a second click would submit twice, toggle a checkbox back, or land on the next page (`'Buy' is a button, one click activates it`); a right click is allowed there. The triple click is for copying: copying the selection is the `copy` shortcut. Typing does not replace a selection (a text area is typed into at the caret, a single-line field has its whole value set), so the kind's wording does not offer it for replacing |
+| `drag_item` | (offered only to a run whose goal needs the moves beyond clicking and typing) press the left button on the item the `item` answer names, move to the item the `target` answer names in twelve steps, each with a look at the abort corner, and release there; a drag that is interrupted or aborted half way goes back to where the item was taken and lets go there, so nothing is dropped on what the pointer passed over (the abort corner has no side effect). Offered only when two items are on screen. The `target` question is a request of its own, sent only once `kind` is `drag_item` and the dragged item is not under a popup, with the state's items and every item but the dragged one and those under a popup as choices; with none left it is not asked. The `item` answer of a drag is the item that is taken. Refused when either item is under a popup. The step's picture marks the drop target in purple beside the red item taken. A split on any of the three answers lowers the step's confidence, since a drag moves things. Not for a slider or a map: a drag goes from one item to another, not by an amount |
 | `press_offscreen` | `AXPress` a labelled control the app exposes but does not show, chosen from the off-screen list; offered only when that list is not empty, and a refusal counts as a no-op since there is no pixel to fall back on |
 | `use_browser` | go to the browser the `browser` answer names, showing the website the `site` answer names: `none` brings it forward on the page already open there, a `SITES` catalog key opens that URL through AppleScript `open location`, and `other` opens a URL the writer proposes. The `browser` question lists the default (`$CLICKER_BROWSER`, else the browser macOS opens links in when it is one of these, else Chrome) and every other installed browser (Chrome, Brave, Edge, Arc, Chromium on macOS), each marked as the app in front now or the default; with only one, no question is asked and that one is used |
 | `open_app` | bring the app the `app` answer names to the front, starting it when it is not running, with up to 10 s to get there. The `app` question is a request of its own, sent only once `kind` is `open_app`, since the list is long and most steps open no app: it carries the goal, the focus, and the app in front, and lists every app bundle in `/Applications`, `~/Applications`, `/System/Applications` and the `Utilities` inside each, except the browsers `use_browser` reaches, plus `none`. `none`, or the app already in front, is refused in the history line. Offered only where the adapter lists apps: macOS, not Windows or the OSWorld VM |
@@ -172,7 +173,7 @@ on the app, and the node and time caps bind first on a big tree: Notes and Chrom
 
 ### Moves beyond clicking and typing
 
-`press_shortcut`, and the right, double and triple clicks, are in the kind question only for a run whose goal needs them. Once a run, before
+`press_shortcut`, the right, double and triple clicks, and `drag_item` are in the kind question only for a run whose goal needs them. Once a run, before
 its first step, the decision model is asked of the goal alone whether reaching it needs a move that
 clicking and typing cannot make (`decide.needs_moves`, a Noul like the read-only question), and the
 run is offered the moves when the answer is at least `MOVES_NOUL` (0.5). Unsure, or no answer, offers
@@ -182,8 +183,10 @@ question of every step, agreement with saved steps that never needed it fell 2.6
 where it picked the shortcut. A probe of Jev scored 20 goals that need one 0.58 to 0.98 and 16 that do not
 0.05 to 0.36. The answer model's instructions follow the gate: it is told the agent has the shortcuts only
 when the run was offered them, so it does not send the classifier to a move it lacks. The run records
-`moves` in `run.json` and the log. `clicker-eval size --moves` and `decisions --moves` measure the
-requests of a run that was offered them; without the flag they are the requests of any other run.
+`moves` in `run.json` and the log. `clicker-eval size` and `decisions` ask each saved step as its own run
+was asked, with the moves when its run was offered them; `--moves` offers them in every case and
+`--no-moves` in none. A saved pass says which: `moves_mode` (`own`, `on` or `off`) and `moves_cases`, how
+many of its cases were asked with them.
 
 After any action the screen gets time to settle before the next step reads it. It is looked at
 every 0.25 s: once it differs from the capture the action was decided on and then holds still for
@@ -224,7 +227,7 @@ the user said, once there are any:
   that was on the listing and not on the checkout. It returns `{achieved, answer, focus, question}`,
   and is told to take the answer from those screens and the user's replies alone, to give a focus
   as one move and not a plan, and only a move the agent has: a keyboard shortcut only from the
-  catalog, a right click, a double click, or a triple click on an item, no drag (typing replaces what a field holds), and a website only by its https address. It
+  catalog, a right click, a double click, a triple click on an item, or a drag of one item onto another, and only when the run was offered them (typing replaces what a field holds), and a website only by its https address. It
   never asks for a credential, and when the run ends short of the goal it says what the agent
   could not do. When an action ran after the last capture, the screen is captured again first.
   This one call uses `CLICKER_ANSWER_MODEL`, a stronger reader than the per-step writer.
