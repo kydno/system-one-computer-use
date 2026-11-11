@@ -2473,7 +2473,7 @@ def test_l74_a_double_click_that_opens_nothing_is_a_stall_like_any_click_that_do
     assert state.outcome == "stalled" and state.history == ["double-clicked 'Notes.txt'"] * 3
 
 
-def tabs_world() -> World:
+def folders_world() -> World:
     return World(
         [
             Page(
@@ -2488,7 +2488,7 @@ def tabs_world() -> World:
 
 
 def test_l78_a_file_is_dragged_onto_a_folder_with_the_target_asked_in_its_own_request(monkeypatch, tmp_path):
-    world = tabs_world()
+    world = folders_world()
     policy = scripted(("drag_item", ("Invoice.pdf", "Taxes")))
 
     state = drive(world, policy, goal="file the invoice under Taxes", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
@@ -2501,8 +2501,8 @@ def test_l78_a_file_is_dragged_onto_a_folder_with_the_target_asked_in_its_own_re
 
 
 def test_l79_a_drag_the_classifier_is_unsure_of_the_target_for_moves_nothing(monkeypatch, tmp_path):
-    world = tabs_world()
-    policy = scripted(("drag_item", ("Invoice.pdf", "Taxes"), (0.9, 0.2)))
+    world = folders_world()
+    policy = scripted(("drag_item", ("Invoice.pdf", "Taxes"), (0.9, 0.9, 0.2)))  # sure of the file, not of where it goes
 
     state = drive(world, policy, goal="file the invoice under Taxes", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True)
 

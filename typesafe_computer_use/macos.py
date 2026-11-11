@@ -134,13 +134,15 @@ def click_at(point: tuple[float, float], button: str = "left", count: int = 1) -
 def drag(start: tuple[float, float], end: tuple[float, float]) -> None:
     """Press the left button at `start`, move to `end` in steps, and release there.
 
-    The button comes up wherever the pointer got to, also when the drag is interrupted or the abort
-    corner is hit half way, so nothing stays held and nothing is dropped where it was not taken.
+    A drag that is interrupted or aborted half way goes back to `start` and lets go there, so
+    nothing stays held and nothing is dropped on whatever the pointer was passing over (a folder,
+    another window, the Trash): the abort corner is the user's emergency stop, and it has no side effect.
     """
     check_abort()
     _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, start, Quartz.kCGMouseButtonLeft))
     check_abort()
     here = start
+    completed = False
     try:
         _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, start, Quartz.kCGMouseButtonLeft))
         sleep_watching(DRAG_HOLD)
@@ -149,8 +151,14 @@ def drag(start: tuple[float, float], end: tuple[float, float]) -> None:
             here = (start[0] + (end[0] - start[0]) * n / DRAG_STEPS, start[1] + (end[1] - start[1]) * n / DRAG_STEPS)
             _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDragged, here, Quartz.kCGMouseButtonLeft))
         sleep_watching(DRAG_HOLD)
+        completed = True
     finally:
-        _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, here, Quartz.kCGMouseButtonLeft))
+        try:
+            if not completed and here != start:
+                here = start
+                _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDragged, here, Quartz.kCGMouseButtonLeft))
+        finally:
+            _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, here, Quartz.kCGMouseButtonLeft))
 
 
 def press(key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:

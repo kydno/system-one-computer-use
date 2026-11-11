@@ -130,10 +130,12 @@ def kind_criteria(
     browsers: Sequence[str] = (),
     apps: Sequence[str] = (),
     moves: bool = False,
+    draggable: bool = True,
 ) -> dict[str, str]:
+    """`draggable` is whether two items are on screen: a drag needs one to take and another to drop it on."""
     clicks = {
         "click_item": "Click one of the on-screen text items (chosen in the item question).",
-        **({**POINTING, "drag_item": DRAG} if moves else {}),
+        **({**POINTING, **({"drag_item": DRAG} if draggable else {})} if moves else {}),
     }
     if offscreen:
         clicks["press_offscreen"] = PRESS_OFFSCREEN
@@ -355,7 +357,7 @@ def build_questions(
                 "tried on this screen: each of those led straight back here."
                 + (FOCUS_RULE if guidance and guidance.focus else "")
             ),
-            criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves),
+            criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves, len(items) >= 2),
         ),
         "site": Choice(
             instructions=(
@@ -378,7 +380,12 @@ def build_questions(
         questions["item"] = Choice(
             instructions=(
                 "If clicking an on-screen item is the right move,"
-                + (" by any click (single, right, double, or the triple click that selects its text)," if moves else "")
+                + (
+                    " by any click (single, right, double, or the triple click that selects its text), or, for a drag,"
+                    " the item that is dragged,"
+                    if moves
+                    else ""
+                )
                 + " which item? If scrolling is, which "
                 "item sits in the list, panel, or page that should scroll? Pick a line of that content "
                 "itself, not a sidebar or menu entry that shares a word with the goal: the wheel turns "
@@ -458,7 +465,14 @@ def decide(
             questions={"shortcut": shortcut_question()},
         ).answers["shortcut"]
     target = None
-    if answers["kind"].choice == "drag_item" and answers.get("item") is not None:
+    # A source under a popup is refused by the action whatever the target, and with nothing to drop it on the
+    # question would have no choices: neither is worth a request.
+    if (
+        answers["kind"].choice == "drag_item"
+        and answers.get("item") is not None
+        and not covered(screen, answers["item"].choice)
+        and target_question(screen, items, answers["item"].choice).criteria
+    ):
         source = answers["item"].choice
         target = client.system_one(
             state={
@@ -493,14 +507,20 @@ def app_question(apps: Sequence[str], frontmost: str) -> Choice:
     )
 
 
+def covered(screen: Screen, key: str) -> bool:
+    """Whether a popup is in front of the item with this key: the action refuses to press or drop there."""
+    return key.isdigit() and int(key) in screen.covered
+
+
 def target_question(screen: Screen, items: list[Item], source: str) -> Choice:
-    """Which item the dragged one is dropped on: every item but the dragged one, in the item question's words."""
+    """Which item the dragged one is dropped on: every item but the dragged one, and none under a popup,
+    in the item question's words."""
     return Choice(
         instructions=(
             "An on-screen item is dragged this step (the state's dragging_item). Which item is it dropped "
             "on? The one the goal, or the current focus, moves it to: a folder, a slot in a list, a tab."
         ),
-        criteria={key: line for key, line in item_criteria(screen, items).items() if key != source},
+        criteria={key: line for key, line in item_criteria(screen, items).items() if key != source and not covered(screen, key)},
     )
 
 

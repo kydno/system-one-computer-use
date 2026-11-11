@@ -5,7 +5,7 @@ import ctypes
 import pytest
 
 from typesafe_computer_use import windows
-from typesafe_computer_use.models import ROLE_WORDS, TEXT_ROLES, Missed
+from typesafe_computer_use.models import ROLE_WORDS, TEXT_ROLES, Abort, Missed
 from typesafe_computer_use.windows import (
     KEYEVENTF_EXTENDEDKEY,
     KEYEVENTF_KEYUP,
@@ -210,12 +210,15 @@ def test_a_drag_holds_the_button_through_the_moves_and_lets_go_at_the_end(monkey
     moves = [point for kind, point in log if kind == "move"]
     sends = [event for kind, event in log if kind == "send"]
     assert sends == [windows.MOUSEEVENTF_LEFTDOWN, windows.MOUSEEVENTF_LEFTUP]
-    assert moves[0] == (100, 100) and moves[-1] == (400, 220) and len(moves) == windows.DRAG_STEPS + 1
+    assert (
+        moves[0] == (100, 100) and moves[-1] == (400, 220) and len(moves) == windows.DRAG_STEPS + 2
+    )  # reach, steps, release point
     assert log.index(("send", windows.MOUSEEVENTF_LEFTDOWN)) == 1 and log[-1] == ("send", windows.MOUSEEVENTF_LEFTUP)
+    assert log[-2] == ("move", (400, 220))  # the button comes up at the cursor's place, which the up event does not carry
 
 
 def test_a_drag_that_never_reached_its_start_presses_nothing(monkeypatch):
-    log = windows_input(monkeypatch, cursor=lambda: (0.0, 0.0))
+    log = windows_input(monkeypatch, cursor=lambda: (300.0, 300.0))
     with pytest.raises(Missed):
         windows.drag((100.0, 100.0), (400.0, 220.0))
     assert [kind for kind, _ in log] == ["move"]
@@ -235,6 +238,52 @@ def test_an_interrupted_drag_still_lets_go_of_the_button(monkeypatch):
         windows.drag((100.0, 100.0), (400.0, 220.0))
     assert log[-1] == ("send", windows.MOUSEEVENTF_LEFTUP)
     assert sum(kind == "move" for kind, _ in log) < windows.DRAG_STEPS + 1  # it stopped on the way
+    assert log[-2] == ("move", (100, 100))  # and went back to where the item was taken before it let go
+
+
+def test_the_abort_corner_half_way_through_a_drag_lets_go_at_the_start_not_in_the_corner(monkeypatch):
+    log = windows_input(monkeypatch)
+    monkeypatch.setattr(
+        windows, "mouse_location", lambda: (0.0, 0.0) if sum(kind == "move" for kind, _ in log) >= 4 else (100.0, 100.0)
+    )
+    with pytest.raises(Abort):
+        windows.drag((100.0, 100.0), (400.0, 220.0))
+    assert log[-2:] == [("move", (100, 100)), ("send", windows.MOUSEEVENTF_LEFTUP)]
+
+
+def test_the_corner_stops_a_drag_before_the_cursor_moves(monkeypatch):
+    log = windows_input(monkeypatch, cursor=lambda: (0.0, 0.0))
+    with pytest.raises(Abort):
+        windows.drag((100.0, 100.0), (400.0, 220.0))
+    assert log == []
+
+
+def test_the_abort_corner_stops_a_double_click_between_its_two_clicks(monkeypatch):
+    log = windows_input(monkeypatch)
+    monkeypatch.setattr(windows, "mouse_location", lambda: (0.0, 0.0) if len(log) >= 3 else (640.0, 480.0))
+    with pytest.raises(Abort):
+        windows.click_at((640.0, 480.0), count=2)
+    assert [event for kind, event in log if kind == "send"] == [windows.MOUSEEVENTF_LEFTDOWN, windows.MOUSEEVENTF_LEFTUP]
+
+
+def test_a_press_that_fails_part_way_lets_go_of_the_keys_it_holds(monkeypatch):
+    sent = []
+
+    def send(event):
+        sent.append((event.u.ki.wVk, event.u.ki.dwFlags))
+        if len(sent) == 2:  # the key itself, after Ctrl is down
+            raise OSError("the input desktop is locked")
+
+    monkeypatch.setattr(windows, "_send", send)
+    with pytest.raises(OSError):
+        windows.press("c", command=True)
+    assert sent[0] == (0x11, 0) and sent[-1] == (0x11, KEYEVENTF_KEYUP)  # Ctrl went down, and is up again after the failure
+
+
+def test_a_command_chord_cannot_also_hold_option_or_control():
+    assert key_events("[", command=True, shift=True)[0] == (0x10, 0)
+    with pytest.raises(ValueError, match="cannot also hold"):
+        key_events("[", command=True, option=True)
 
 
 def test_control_and_option_are_held_around_a_key():

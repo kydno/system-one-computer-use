@@ -53,10 +53,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--runs", nargs="*", help="only these run folders")
     s.add_argument(
         "--moves",
-        action="store_const",
-        const=True,
+        action=argparse.BooleanOptionalAction,
         default=None,
-        help="offer the moves beyond clicking and typing in every case; by default each case is asked as its own run was",
+        help="--moves offers the moves beyond clicking and typing in every case, --no-moves in none; by default each case is asked as its own run was",
     )
 
     s = sub.add_parser("decisions", help="ask the decision model about the labelled cases and score its picks")
@@ -68,10 +67,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--misses", type=int, default=10, help="how many wrong picks to list")
     s.add_argument(
         "--moves",
-        action="store_const",
-        const=True,
+        action=argparse.BooleanOptionalAction,
         default=None,
-        help="offer the moves beyond clicking and typing in every case; by default each case is asked as its own run was",
+        help="--moves offers the moves beyond clicking and typing in every case, --no-moves in none; by default each case is asked as its own run was",
     )
 
     s = sub.add_parser("batch", help="open, inspect, advance, or close the budget the user approved")
@@ -211,7 +209,8 @@ def do_size(home: Home, args: argparse.Namespace) -> None:
     every = chosen_cases(home, args.runs)
     per_case = size.measure(every, args.moves)
     parts = size.aggregate(per_case)
-    print(f"request bytes under the current code{', with the moves offered' if args.moves else ''}, over {len(every)} cases")
+    how = {True: ", with the moves offered", False: ", with no moves offered", None: ""}[args.moves]
+    print(f"request bytes under the current code{how}, over {len(every)} cases")
     for part, v in parts.items():
         print(f"  {part:15s} mean {v['mean']:6d}  median {v['median']:6d}  p90 {v['p90']:6d}")
     base = size.load_baseline(home)
@@ -269,7 +268,12 @@ def do_decisions(home: Home, args: argparse.Namespace) -> None:
         )
     summary = decisions.summarize(rows, args.repeats, float(settings["floor"]))
     summary.update(
-        requests_sent=used["sent"], requests_cached=used["cached"], cost_spent=round(used["spent"], 6), moves=args.moves is True
+        requests_sent=used["sent"],
+        requests_cached=used["cached"],
+        cost_spent=round(used["spent"], 6),
+        moves=args.moves is True,  # true only when forced on for every case
+        moves_mode={True: "on", False: "off", None: "own"}[args.moves],  # "own": each case as its own run was asked
+        moves_cases=sum(args.moves if args.moves is not None else cases.rebuild(case).moves for case, _, _ in selected),
     )
     summary["stopped_early"] = stopped
     models = {"configured": settings["decisions"], "named_by_replies": used["models"]}

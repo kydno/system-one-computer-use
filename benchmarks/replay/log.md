@@ -87,10 +87,16 @@ can only count against it):
   by eye these are mostly tab and drawing tasks. $0.002.
 - Gate closed (any other run): `clicker-eval size` reads +0.0% in every part, and all 642 requests of a
   six-repeat pass are already cached, so the baseline is reproduced exactly for $0.
-- Gate open, all four kinds offered: request bytes +7.0% (kind question +72%, item question +1%), input tokens
+- Gate open, all five kinds offered (press_shortcut, right click, double click, select the item's text, drag): request bytes +7.0% (kind question +72%, item question +1%), input tokens
   an ask +3.8%. Silver agreement 0.564 against the baseline's 0.598 on the same three repeats; the only new
   kind picked was `select_item_text`, 6 of 321. Row: `20261110T220134Z.jsonl`. That is the cost to a run the
-  gate opens for, and about 3.4 points on steps that needed none of the moves.
+  gate opens for, and about 3.4 points on steps that needed none of the moves. These figures are from commit
+  `80f599e`. The code has changed what a gate-open run sends since (the shortcut follow-up's state, the
+  `select_item_text` wording, `MOVES_ASKED` naming drag, the item question's drag clause, `drag_item` left out
+  of a screen with one item), so the agreement and the gate's open rate are to be measured again in the next
+  approved batch. What can be measured without a model, at `ad1bb69` over the same 827 saved requests:
+  `clicker-eval size --no-moves` reads 23,247 bytes (+0.0% in every part against the baseline), and
+  `size --moves` 25,026 bytes (+7.7%, the kind question 2,141 to 3,797 bytes, the item question +123).
 
 Not measured, and it cannot be offline: whether the moves work. The saved screens do not react, no saved step needs
 a shortcut or a drag, and the Quartz right-button, click-state and drag paths have never run on hardware. The

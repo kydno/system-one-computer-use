@@ -526,6 +526,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         items,
         decision.item.choice if decision.pointing or decision.dragging else decision.chosen,
         prefix.with_suffix(".png"),
+        dropped_on=decision.target.choice if decision.dragging else None,
     )
 
     field_desc = (

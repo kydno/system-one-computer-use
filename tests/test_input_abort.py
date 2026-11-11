@@ -230,13 +230,13 @@ def test_a_drag_interrupted_after_the_press_releases_the_button_where_it_was(inp
     assert [event[0] for event in input_events] == ["move", "down", "up"] and input_events[-1][1] == AT
 
 
-def test_the_abort_corner_half_way_through_a_drag_lets_go_where_the_pointer_got_to(input_events, monkeypatch):
+def test_the_abort_corner_half_way_through_a_drag_goes_back_and_lets_go_where_the_item_was_taken(input_events, monkeypatch):
     monkeypatch.setattr(macos, "mouse_location", lambda: (0, 0) if sum(e[0] == "drag" for e in input_events) >= 3 else (500, 500))
     with pytest.raises(Abort):
         macos.drag(AT, TO)
     kinds = [event[0] for event in input_events]
-    assert kinds == ["move", "down", "drag", "drag", "drag", "up"]
-    assert input_events[-1][1] == input_events[-2][1] != TO  # dropped where it stopped, not where it was headed
+    assert kinds == ["move", "down", "drag", "drag", "drag", "drag", "up"]
+    assert input_events[-2][1] == AT and input_events[-1][1] == AT  # back at the start, not dropped on what it passed over
 
 
 def test_the_corner_stops_a_drag_before_the_pointer_moves(input_events, monkeypatch):
