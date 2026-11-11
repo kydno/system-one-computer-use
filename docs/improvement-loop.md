@@ -66,7 +66,7 @@ A pass that runs out of budget stops, keeps what it has, and says so.
    right action.
 3. Reproduce it: the gold cases that fail, plus a scenario in `tests/test_scenarios.py` when it is
    a loop or stop-rule problem.
-4. Change the loop, never the case. The ground rules hold:
+4. Change the loop, never the case. The ground rules in [CONTRIBUTING](../CONTRIBUTING.md) hold:
    the action set stays mutually exclusive, code decides facts, free text comes only from the
    writer.
 5. Gates, cheapest first: ruff and pytest; `clicker-eval size` (bytes by part against the

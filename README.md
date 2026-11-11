@@ -158,6 +158,8 @@ a one-command machine in Google Cloud.
 
 Bug reports with a run folder attached are the most useful thing you can send. Before a pull
 request, `uv run ruff check . && uv run ruff format --check .` and `uv run pytest -q` must pass.
+The ground rules, and how to write a scenario for a task the loop cannot do, are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
