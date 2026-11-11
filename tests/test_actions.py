@@ -495,6 +495,10 @@ def pressed(monkeypatch):
         ("reopen_tab", "pressed the reopen tab shortcut", ("t", True, True, False, False)),
         ("address_bar", "pressed the address bar shortcut", ("l", True, False, False, False)),
         ("save_as", "pressed the save as shortcut", ("s", True, True, False, False)),
+        ("next_field", "pressed the next field shortcut", ("tab", False, False, False, False)),
+        ("previous_field", "pressed the previous field shortcut", ("tab", False, True, False, False)),
+        ("arrow_down", "pressed the arrow down shortcut", ("down", False, False, False, False)),
+        ("page_down", "pressed the page down shortcut", ("page_down", False, False, False, False)),
     ],
 )
 def test_a_shortcut_from_the_catalog_is_pressed_with_its_modifiers(screen, pressed, name, said, keys):
@@ -515,7 +519,9 @@ def test_nothing_in_the_catalog_quits_logs_out_or_types():
 
     assert not {"q", "delete", "return", "escape"} & {s.key for s in SHORTCUTS.values()}
     assert not any(s.command and s.option and s.key == "escape" for s in SHORTCUTS.values())  # force quit
-    assert all(len(s.key) == 1 or s.key == "tab" for s in SHORTCUTS.values())
+    assert all(
+        len(s.key) == 1 or s.key in {"tab", "up", "down", "left", "right", "page_up", "page_down"} for s in SHORTCUTS.values()
+    )
 
 
 def test_every_key_in_the_catalog_has_a_key_code_on_each_platform_that_presses_it():

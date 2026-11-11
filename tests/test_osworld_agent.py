@@ -503,6 +503,9 @@ def test_keys_map_onto_pyautogui():
     desktop.press("a", command=True)
     desktop.press("tab")
     desktop.press("delete")
+    desktop.press("page_down")
+    desktop.press("down")
+    desktop.press("tab", shift=True)
     (code,) = desktop.actions
     assert code.splitlines() == [
         "pyautogui.press('enter')",
@@ -511,6 +514,9 @@ def test_keys_map_onto_pyautogui():
         "pyautogui.hotkey('ctrl', 'a')",
         "pyautogui.press('tab')",
         "pyautogui.press('backspace')",
+        "pyautogui.press('pagedown')",
+        "pyautogui.press('down')",
+        "pyautogui.hotkey('shift', 'tab')",
     ]
 
 

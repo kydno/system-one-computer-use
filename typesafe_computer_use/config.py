@@ -109,6 +109,15 @@ SHORTCUTS: dict[str, Shortcut] = {
     "bold": Shortcut("b", "Make the selected text bold, or turn bold on or off at the cursor.", command=True),
     "italic": Shortcut("i", "Make the selected text italic, or turn italics on or off at the cursor.", command=True),
     "underline": Shortcut("u", "Underline the selected text, or turn underline on or off at the cursor.", command=True),
+    # Plain navigation keys: they move the focus or the cursor and change nothing, so they are as safe as a scroll.
+    "next_field": Shortcut("tab", "Press the Tab key: move the focus to the next field, control, or spreadsheet cell."),
+    "previous_field": Shortcut("tab", "Press Shift and Tab: move the focus to the previous field, control, or cell.", shift=True),
+    "arrow_up": Shortcut("up", "Press the Up arrow once: move the cursor or the selection up one line, row, or item."),
+    "arrow_down": Shortcut("down", "Press the Down arrow once: move the cursor or the selection down one line, row, or item."),
+    "arrow_left": Shortcut("left", "Press the Left arrow once: move the cursor or the selection one character or cell left."),
+    "arrow_right": Shortcut("right", "Press the Right arrow once: move the cursor or the selection one character or cell right."),
+    "page_up": Shortcut("page_up", "Press Page Up: move up by one screen in a document, list, or sheet."),
+    "page_down": Shortcut("page_down", "Press Page Down: move down by one screen in a document, list, or sheet."),
 }
 
 

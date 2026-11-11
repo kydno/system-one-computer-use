@@ -207,3 +207,11 @@ fifteen did not hold. The gate (`needs_moves`) was run over the instructions of 
   the kind question and the measured numbers above are untouched. Asked of Jev with a goal written for each of the
   fourteen entries tried (three repeats, the new and the old alike): 42 of 42 picks right, the OSWorld task's goal
   at 1.00 for `reopen_tab`.
+
+Also in the catalog, to a total of thirty-three: the keys that only move the focus or the cursor, so as safe as a scroll:
+Tab and Shift-Tab (the next and previous field, form control or spreadsheet cell), the four arrows, Page Up and Page
+Down. The agent had Return and Escape and no other key, so filling a form or a sheet cell by cell, or walking a list,
+meant a click on every item. Asked again of Jev with the whole catalog and a goal for twenty of its entries, three
+repeats each: 60 of 60 right (`bold` and `arrow_left` the least sure, 0.65 to 0.86). The key tables of the Mac and Windows
+adapters and the OSWorld mapping each got the new keys, with a test that every catalog key has a key code on both.
+Not run on hardware: a run that fills a form with Tab.

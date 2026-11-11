@@ -112,6 +112,13 @@ def test_delete_is_an_extended_key():
     assert key_events("delete") == [(0x2E, KEYEVENTF_EXTENDEDKEY), (0x2E, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)]
 
 
+def test_the_arrows_and_the_page_keys_are_extended_keys():
+    ext = KEYEVENTF_EXTENDEDKEY
+    assert key_events("down") == [(0x28, ext), (0x28, ext | KEYEVENTF_KEYUP)]
+    assert key_events("page_up") == [(0x21, ext), (0x21, ext | KEYEVENTF_KEYUP)]
+    assert key_events("tab") == [(0x09, 0), (0x09, KEYEVENTF_KEYUP)]  # Tab is on the main block
+
+
 def test_shift_is_held_around_a_key():
     assert key_events("return", shift=True) == [(0x10, 0), (0x0D, 0), (0x0D, KEYEVENTF_KEYUP), (0x10, KEYEVENTF_KEYUP)]
 

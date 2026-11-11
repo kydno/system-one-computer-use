@@ -25,7 +25,8 @@ from .config import ABORT_CORNER_PX
 from .models import TEXT_ROLES, Abort, AxNode, Field, KeyboardFocus
 
 KEYCODES = {
-    "return": 36, "tab": 48, "escape": 53, "delete": 51, "left": 123, "right": 124,
+    "return": 36, "tab": 48, "escape": 53, "delete": 51, "left": 123, "right": 124, "down": 125, "up": 126,
+    "page_up": 116, "page_down": 121,
     "[": 33, "]": 30, "=": 24, "-": 27,
     "a": 0, "b": 11, "c": 8, "d": 2, "f": 3, "i": 34, "l": 37, "n": 45, "o": 31, "p": 35,
     "r": 15, "s": 1, "t": 17, "u": 32, "v": 9, "w": 13, "x": 7, "z": 6,
