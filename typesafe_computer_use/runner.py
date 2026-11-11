@@ -27,7 +27,7 @@ from .config import (
     moves_override,
     writer_model,
 )
-from .decide import Decision, browser_names, decide, needs_moves, offscreen_records, read_only
+from .decide import STOP_KINDS, Decision, browser_names, decide, kind_criteria, needs_moves, offscreen_records, read_only
 from .decisions import DecisionClient, DecisionError
 from .events import Events
 from .models import Abort, EarlierTask, Field, Guidance, Item, Screen, Signature, same_screen, signature
@@ -56,6 +56,8 @@ FOCUS_LEAD = 2.0  # how many times likelier the item a focus names must be than 
 # The text a focus quotes: in curly or straight quotes, but not an apostrophe ("the browser's 'Tab search'").
 QUOTED = re.compile(r"\u201c(.+?)\u201d|\"(.+?)\"|\u2018(.+?)\u2019|(?<!\w)'(.+?)'(?!\w)")
 WAITING = "wait for the screen to finish loading"  # the focus a handoff records when the writer called for a wait
+HANDOFF_FILE = "handoff.json"  # what a run that ended short of the goal leaves for an outer agent to go on from
+HANDOFF_RAW = "handoff-raw.png"  # the screen it ended on, as captured
 
 # The outcomes the writer is handed, each in words it can pass on. A dry run took no action and
 # an abort is the user's own stop, so neither has anything to report.
@@ -152,6 +154,7 @@ class RunState:
     read_only: bool = False  # the goal only asks to find something out, so the lower floor applies
     moves: bool = False  # the goal needs a move beyond clicking and typing, so the run is offered the moves that are
     moves_by: str = "gate"  # who settled it: the gate's question about the goal, or CLICKER_MOVES
+    handed_on: bool = False  # the run ended short of the goal and wrote `handoff.json` for an outer agent
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -187,6 +190,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
                 log(f"\nstopped after {cfg.steps} steps")
                 state.outcome = "step limit"
                 hand_off(cfg, ctx, state, cfg.steps, log)
+            write_handoff(cfg, ctx, state, log)
     except (KeyboardInterrupt, Abort) as e:
         state.outcome = f"aborted ({str(e) or 'Ctrl-C'})"  # a bare KeyboardInterrupt is truthy but prints as ""
         log(f"\n{state.outcome} after {len(state.history)} actions")
@@ -213,6 +217,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "cost": state.calls.cost(),
             "ended_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "handoffs": [asdict(h) for h in state.handoffs],
+            "handoff": HANDOFF_FILE if state.handed_on else None,
             "questions": [asdict(e) for e in state.guidance.exchanges],
             "earlier_tasks": [asdict(t) for t in cfg.earlier],
             "timing": summarize(state.timings),
@@ -224,6 +229,81 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
         log(f"run folder: {cfg.out}")
         log.event("end", folder=str(cfg.out), why=STOPPED.get(state.outcome), **summary)
     return state
+
+
+def write_handoff(cfg: RunConfig, ctx: Context, state: RunState, log: Log) -> None:
+    """A run that stopped short of the goal leaves its story for an outer agent to take over from.
+
+    The writer can send the classifier back, but it never takes the wheel itself, so a run it
+    could not free ends with an answer and nothing more. `handoff.json` is the rest: what the
+    agent did and where, why it stopped, what the writer tried, the screens it passed and the one
+    it ended on, and the moves it had, so a model that can do more starts from this screen and
+    not from the goal alone. It holds screen text, so it stays in the run folder, as the captures
+    do; a credential is never typed by the run, so none is in the actions.
+
+    Only a run that stopped (see STOPPED) with the goal not achieved writes it. A dry run, an
+    abort and a crash reached no verdict, and an achieved goal leaves nothing to take over.
+    """
+    if state.outcome not in STOPPED or goal_achieved(state) is not False:
+        return
+    # The run has already ended with its outcome; a packet that cannot be written must not turn
+    # that into a crash, so the failure is logged and `run.json` says no packet was left.
+    try:
+        raw = None
+        if state.view is not None:
+            state.view[0].image.save(cfg.out / HANDOFF_RAW)  # the screen in memory, not a new capture
+            raw = HANDOFF_RAW
+        packet = handoff_packet(cfg, ctx, state, raw)
+        (cfg.out / HANDOFF_FILE).write_text(json.dumps(packet, indent=2), encoding="utf-8")
+    except Exception:
+        log(f"handoff not written:\n{traceback.format_exc().rstrip()}")
+        return
+    state.handed_on = True
+    log(f"handoff: {cfg.out / HANDOFF_FILE}")
+    log.event("handoff", file=str(cfg.out / HANDOFF_FILE), **packet)
+
+
+def handoff_packet(cfg: RunConfig, ctx: Context, state: RunState, raw: str | None) -> dict:
+    """What `handoff.json` holds; see `write_handoff` and docs/run-folder.md."""
+    now = signature(*state.view) if state.view is not None else None
+    final = now or state.last
+    # Every action has a screen in `state.seen`, the one it was taken on, in the same order.
+    on = [seen for seen, _ in state.seen]
+    # The screen each action led to: the one the next action was taken on, and for the last, the one
+    # the run ended on; none when an action ran and nothing read the screen after it.
+    after = [*on[1:], now]
+    # Paired by position, so a change that records an action without its screen fails the test that
+    # checks the pairing rather than a user's run.
+    actions = [
+        {
+            "action": what,
+            "app": before[0],
+            "url": before[1],
+            "then": None if then is None else {"app": then[0], "url": then[1], "changed_screen": not same_screen(before, then)},
+        }
+        for what, before, then in zip(state.history, on, after, strict=False)
+    ]
+    answer = state.answer
+    return {
+        "goal": cfg.goal,
+        "outcome": state.outcome,
+        "why": STOPPED[state.outcome],
+        "answer": answer.text if answer else None,
+        "last_focus": (answer.focus or None) if answer else None,
+        "actions": actions,
+        "handoffs": [asdict(h) for h in state.handoffs],
+        "questions": [asdict(e) for e in state.guidance.exchanges],
+        "earlier_screens": earlier_screens(state, final) if final is not None else [],
+        "current_screen": None
+        if now is None
+        else {"app": now[0], "url": now[1], "field": now[2], "text": [text for text, _ in now[3]], "raw": raw},
+        "moves": [
+            kind
+            for kind in kind_criteria(ctx.browser, ctx.email, True, ctx.browsers, ctx.apps, state.moves)
+            if kind not in STOP_KINDS
+        ],
+        "read_only": state.read_only,
+    }
 
 
 def configured_models(typesafe: DecisionClient, ctx: Context) -> dict[str, str | None]:

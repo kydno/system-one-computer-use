@@ -343,6 +343,13 @@ the agent could not do. On OSWorld's Chrome tasks every run that stalled a third
 the same pages failed anyway, up to 210 s later, and no solved run stalled more than twice.
 A `done` the writer does not see on the screen is sent back like any other stop.
 
+A run that ends with the goal not reached hands on its story. The writer never takes the wheel,
+so the run leaves `handoff.json` in its folder, and a `handoff` event on `--events`: the goal,
+every action with the app and URL it was taken on and where it led, the stops and the focuses
+the writer gave, the text of the screens passed and of the one it ended on, and the moves it
+had. An outer agent reads it and goes on from the screen the run ended on, not from the goal
+alone. [run-folder.md](run-folder.md) lists what it holds.
+
 ## Who did the work
 
 Every run ends by counting the requests each model took:

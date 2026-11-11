@@ -21,7 +21,7 @@ def read(out: io.StringIO) -> list[dict]:
 def milestones(out: io.StringIO) -> list[tuple]:
     """The events other than printed lines, as (event, the one field that tells them apart)."""
     keys = {"run": "act", "step": "step", "action": "text", "would": "text", "focus": "focus", "question": "text"}
-    keys |= {"answer": "achieved", "end": "outcome"}
+    keys |= {"answer": "achieved", "handoff": "outcome", "end": "outcome"}
     return [(e["event"], e[keys[e["event"]]]) for e in read(out) if e["event"] != "log"]
 
 
@@ -123,6 +123,7 @@ def test_a_declined_question_ends_the_run_with_the_answer_standing(monkeypatch, 
     assert [m for m in milestones(out) if m[0] != "step"] == [
         ("run", True),
         ("question", "13 or 15 inch?"),
+        ("handoff", "nothing helps"),  # the answer that stands did not reach the goal, so the story goes on
         ("end", "nothing helps"),
     ]
 
