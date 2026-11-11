@@ -468,7 +468,7 @@ _NO_MOVES = (
 _MOVES = (
     "It can press one keyboard shortcut from a short list ("
     + ", ".join(name.replace("_", " ") for name in SHORTCUTS)
-    + ") and no other key. It cannot right-click, double-click, or select text, so a focus that needs "
+    + ") and no other key. It cannot right-click, double-click, or select text with the mouse, so a focus that needs "
     "one of those is refused: name the button, menu, or link on screen that does the same."
 )
 assert _NO_MOVES in ANSWER_SYSTEM

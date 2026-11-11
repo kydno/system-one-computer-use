@@ -2226,6 +2226,24 @@ def test_l68_a_shortcut_is_asked_for_in_its_own_request_and_pressed_with_its_mod
     assert len(world.fake.states) == 3  # the two decisions and the final done; the follow-ups are not decisions
 
 
+def test_l68b_the_shortcut_is_decided_from_what_the_follow_up_was_sent_select_all_then_copy(monkeypatch, tmp_path):
+    """The follow-up is its own request and sees only its own state. Here the fake picks from that state alone, as the
+    model must: select all until the history says it was pressed, then copy."""
+    world = copy_world()
+
+    def next_shortcut(state: dict) -> str:
+        return "copy" if "pressed the select all shortcut" in state["previous_actions"] else "select_all"
+
+    state = drive(
+        world, scripted(("press_shortcut", None), ("press_shortcut", None)), goal="copy the whole note",
+        monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True, shortcuts=next_shortcut,
+    )  # fmt: skip
+
+    assert world.log == ["key:cmd+a", "key:cmd+c"] and state.outcome == "done"
+    assert [f["previous_actions"] for f in world.fake.follow_ups] == [[], ["pressed the select all shortcut"]]
+    assert all({"goal", "frontmost_app", "focused_field", "previous_actions"} <= set(f) for f in world.fake.follow_ups)
+
+
 def test_l69_a_shortcut_the_classifier_is_unsure_of_stops_the_run_before_any_key_is_pressed(monkeypatch, tmp_path):
     world = copy_world()
     policy = scripted(("press_shortcut", "copy", (0.9, 0.2)))
@@ -2244,6 +2262,56 @@ def test_l70_a_shortcut_with_nothing_in_the_list_to_press_is_refused_and_not_ask
     assert world.log == []
     assert state.history[0] == "press_shortcut refused: no shortcut in the list is the one the goal needs"
     assert state.outcome == "stalled"  # the same refusal on the same screen is a repeat, as any refused action is
+
+
+def test_l69b_a_read_only_goal_does_not_lower_the_floor_for_a_shortcut(monkeypatch, tmp_path):
+    """The 0.15 floor is for a click that only opens the wrong page. A close-tab at 0.3 is not that."""
+    world = copy_world()
+    policy = scripted(("press_shortcut", "close_tab", 0.3))
+
+    state = drive(
+        world, policy, goal="find the total on this page", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True, read_only=True
+    )
+
+    assert state.read_only and state.outcome == "low confidence" and world.log == []
+
+
+def test_l70b_paste_into_a_field_that_looks_like_a_credential_is_refused_and_presses_nothing(monkeypatch, tmp_path):
+    world = World(
+        [
+            Page(
+                name="login",
+                items=["Sign in", "Password"],
+                app="Notes",
+                field="Password",
+                on={"key:cmd+v": "pasted"},
+            ),
+            Page(name="pasted", items=["Sign in", "Password"], app="Notes"),
+        ]
+    )
+
+    state = drive(
+        world, scripted(("press_shortcut", "paste")), goal="sign in", monkeypatch=monkeypatch, tmp_path=tmp_path, moves=True
+    )
+
+    assert world.log == []
+    assert state.history[0] == "press_shortcut refused: paste would act on a field that looks like a credential"
+
+
+def test_l70c_a_browser_shortcut_is_refused_where_the_same_keys_do_something_else(monkeypatch, tmp_path):
+    world = copy_world()  # Notes is in front: Cmd-W would close the document window
+
+    state = drive(
+        world,
+        scripted(("press_shortcut", "close_tab")),
+        goal="close the tab",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        moves=True,
+    )
+
+    assert world.log == []
+    assert state.history[0] == "press_shortcut refused: close tab works in a browser, and Notes is in front"
 
 
 def asked_for_the_answer(writer: FakeWriter) -> list[dict]:

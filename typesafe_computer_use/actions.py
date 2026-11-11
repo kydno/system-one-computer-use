@@ -9,12 +9,12 @@ from dataclasses import dataclass, field, replace
 
 from PIL import Image, ImageChops
 
-from .config import SHORTCUTS, SITES
+from .config import BROWSER_APPS, SHORTCUTS, SITES
 from .decide import OFFSCREEN_PREFIX, Decision, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
-from .writer import Writer, WriterError, compose_text, compose_url
+from .writer import Writer, WriterError, compose_text, compose_url, looks_credential
 
 VERIFY_THRESHOLD = 0.5
 WAIT_SECONDS = 3.0  # what a wait adds to the settle every step already gets; three of them cover a slow page
@@ -338,6 +338,14 @@ def _open_app(decision: Decision, screen, items, ctx: Context) -> str:
     return f"open_app failed: {app} did not come to the front with a window"
 
 
+CLIPBOARD_OUT_OF_REACH = ("paste", "cut")  # never into, or out of, a field that holds a credential
+
+
+def looks_like_a_credential_field(field: Field | None) -> bool:
+    """A field the system calls secure, or one whose label or placeholder names a password, a code, a card."""
+    return field is not None and (field.role == "AXSecureTextField" or looks_credential(field.label or field.placeholder))
+
+
 def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
     """Press the shortcut the shortcut answer named, from the catalog and nowhere else.
 
@@ -349,6 +357,12 @@ def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
     shortcut = SHORTCUTS.get(name)
     if shortcut is None:
         return "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    if shortcut.browser and screen.app != ctx.browser and screen.app not in BROWSER_APPS:
+        # The same keys do something else elsewhere: Cmd-W closes a document window, Cmd-R replies in Mail.
+        return f"press_shortcut refused: {name.replace('_', ' ')} works in a browser, and {screen.app or 'no app'} is in front"
+    if name in CLIPBOARD_OUT_OF_REACH and looks_like_a_credential_field(screen.field):
+        # The clipboard may hold a password copied from a manager, and a cut takes one out of its field.
+        return f"press_shortcut refused: {name} would act on a field that looks like a credential"
     desktop.press(shortcut.key, command=shortcut.command, shift=shortcut.shift, option=shortcut.option, control=shortcut.control)
     return f"pressed the {name.replace('_', ' ')} shortcut"
 

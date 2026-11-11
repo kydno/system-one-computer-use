@@ -603,7 +603,9 @@ def resolve(
         log(f"  model says {decision.kind.choice!r}; stopping")
         state.outcome = "done" if decision.kind.choice == "done" else "nothing helps"
         return False
-    floor = cfg.read_only_confidence if state.read_only else cfg.min_confidence
+    # The low floor is for a goal where a wrong click only opens the wrong page. A shortcut is not that: cut, paste
+    # and close tab are not always undone, and a goal that only looks things up is as likely as any to open the moves.
+    floor = cfg.read_only_confidence if state.read_only and not decision.pressing_shortcut else cfg.min_confidence
     if decision.confidence < floor:
         named = named_by_focus(decision, items, state.guidance.focus)
         if named is None or decision.kind.confidence < floor:

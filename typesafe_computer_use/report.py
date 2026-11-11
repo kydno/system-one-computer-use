@@ -78,7 +78,7 @@ def render_payload(
         RULE,
         "STATE  (sent as `state`)",
         RULE,
-        json.dumps(base_state(goal, screen, items, history, tried, guidance), indent=2),
+        json.dumps(base_state(goal, screen, items, history, tried, guidance, moves), indent=2),
         "",
         RULE,
         "QUESTION kind  (Choice criteria)",

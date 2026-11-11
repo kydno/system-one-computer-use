@@ -319,8 +319,53 @@ def test_the_shortcut_is_asked_in_a_second_request_only_once_press_shortcut_is_c
     assert d.pressing_shortcut and d.chosen == "press_shortcut" and d.shortcut.choice == "copy"
     assert d.confidence == 0.7  # a wrong shortcut is not always undone, so a split on it counts
     state, questions = requests[1]
-    assert state == {"goal": "copy the figure", "current_focus": "copy it", "frontmost_app": "Google Chrome"}
+    assert state == {
+        "goal": "copy the figure",
+        "current_focus": "copy it",
+        "frontmost_app": "Google Chrome",
+        "focused_field": None,
+        "previous_actions": [],
+    }
     assert list(questions["shortcut"].criteria) == [*SHORTCUTS, "none"]
+
+
+def test_the_shortcut_question_sees_what_was_pressed_and_what_is_selected_so_a_goal_of_several_goes_on(screen):
+    """A goal that takes select all, then copy, then paste was answered 'select all' every step: the follow-up
+    saw the goal alone, and nothing on the screen looks different once text is selected."""
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "shortcut" in questions:
+            return SimpleNamespace(answers={"shortcut": answer("copy", 0.9)})
+        return SimpleNamespace(answers={"kind": answer("press_shortcut", 0.95), "site": answer("none", 1.0)})
+
+    box = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10, selected="a b")
+    live = replace(screen, field=box)
+    decide(
+        SimpleNamespace(system_one=system_one),
+        "copy it",
+        live,
+        [],
+        ["pressed the select all shortcut"],
+        "Google Chrome",
+        None,
+        moves=True,
+    )
+
+    kind_state, (shortcut_state, _) = requests[0][0], requests[1]
+    for state in (kind_state, shortcut_state):
+        assert state["focused_field"]["selected_text"] == "a b"
+        assert state["previous_actions"] == ["pressed the select all shortcut"]
+
+
+def test_the_selected_text_is_in_the_field_only_for_a_run_offered_the_moves_that_select():
+    box = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10, selected="a b")
+    plain = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10)
+    assert "selected_text" not in box.summary() and box.summary(selection=True)["selected_text"] == "a b"
+    assert plain.summary(selection=True) == plain.summary()  # nothing selected: the request is the one it always was
+    assert Field(**box.record()) == box
+    assert Field(**{k: v for k, v in box.record().items() if k != "selected"}).selected == ""  # a step saved before this
 
 
 def test_a_shortcut_answer_for_any_other_kind_is_ignored():

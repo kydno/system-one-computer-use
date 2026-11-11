@@ -16,8 +16,8 @@ SHORTCUT_KIND = (
     "Press a keyboard shortcut from a short list: the shortcut question that follows says which. "
     "Use it for a command the goal needs that no control on screen does, or that the keys do "
     "in one step: copy or paste a selection, select all, undo, find on the page, switch tabs. "
-    "Not for Return, Escape, or going back, which have actions of their own, and not when a "
-    "button on screen does the same thing."
+    "Not for Return, Escape, or going back, which have actions of their own, not to open a website "
+    "(use_browser does that), and not when a button on screen does the same thing."
 )
 # What the goal question lists, so that it opens for the moves the run is offered and no others.
 MOVES_ASKED = "a keyboard shortcut (copy, paste, select all, undo, find on the page, switch tabs)"
@@ -206,10 +206,13 @@ def base_state(
     history: list[str],
     tried: list[str] | None = None,
     guidance: Guidance | None = None,
+    moves: bool = False,
 ) -> dict:
     """The facts the classifier reads. `tried` lists the actions already taken on this same screen
     earlier in the run, each of which led back here: a fact the code knows and the model cannot.
-    `guidance` is what the writer and the user added to the goal when the classifier last stopped."""
+    `guidance` is what the writer and the user added to the goal when the classifier last stopped.
+    `moves` is whether the run is offered the moves beyond clicking and typing: then the field says what
+    text is selected in it, which a selection leaves no other trace of."""
     hints = date_hints(items, screen)
     mates = row_mates(items)
     return {
@@ -218,7 +221,7 @@ def base_state(
         "now": now_context(),
         "frontmost_app": screen.app,
         "browser_active_tab_url": screen.url,
-        "focused_field": screen.field.summary() if screen.field else None,
+        "focused_field": screen.field.summary(selection=moves) if screen.field else None,
         "previous_actions": history[-8:],
         "already_tried_on_this_screen": list(tried or []),
         "screen_items_in_reading_order": [
@@ -379,7 +382,7 @@ def decide(
     refuses the off-screen question the same way, and only pressing one of those controls needs it.
     """
     questions = build_questions(screen, items, browser, email, guidance, browsers, apps, moves)
-    state = base_state(goal, screen, items, history, tried, guidance)
+    state = base_state(goal, screen, items, history, tried, guidance, moves)
     refused = None
     try:
         answers = client.system_one(state=state, questions=questions).answers
@@ -400,7 +403,13 @@ def decide(
     shortcut = None
     if answers["kind"].choice == "press_shortcut":
         shortcut = client.system_one(
-            state={"goal": goal, **(guidance.state() if guidance else {}), "frontmost_app": screen.app},
+            state={
+                "goal": goal,
+                **(guidance.state() if guidance else {}),
+                "frontmost_app": screen.app,
+                "focused_field": screen.field.summary(selection=True) if screen.field else None,
+                "previous_actions": history[-8:],
+            },
             questions={"shortcut": shortcut_question()},
         ).answers["shortcut"]
     return Decision(
@@ -429,7 +438,10 @@ def shortcut_question() -> Choice:
     return Choice(
         instructions=(
             "A keyboard shortcut is to be pressed this step. Which one does the goal, or the current "
-            "focus, need? The one that does what it describes; 'none' when no shortcut in the list does."
+            "focus, need? The one that does what it describes; 'none' when no shortcut in the list does. "
+            "A goal can take several in turn, such as select all, then copy, then paste: choose the next one "
+            "that is still to be pressed, going by the previous actions and by what is selected in the focused "
+            "field, and never one whose effect is already there."
         ),
         criteria=shortcut_criteria(),
     )

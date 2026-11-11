@@ -327,7 +327,7 @@ def request(case: Case, moves: bool = False) -> tuple[dict, dict[str, Choice]]:
     needs the moves beyond clicking and typing; the saved runs were asked for none, so it is off."""
     r = rebuild(case)
     with frozen_clock(case.state):
-        state = decide.base_state(r.goal, r.screen, r.items, r.history, r.tried, r.guidance)
+        state = decide.base_state(r.goal, r.screen, r.items, r.history, r.tried, r.guidance, moves)
         questions = decide.build_questions(r.screen, r.items, r.browser, r.email, r.guidance, r.browsers, r.apps, moves)
     return state, questions
 
