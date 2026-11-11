@@ -37,6 +37,7 @@ ROW_HEIGHT = 40.0
 ROW_TEXT_HEIGHT = 30.0  # a row's text is shorter than its pitch, so there is a gap between rows
 ROW_X1, ROW_X2 = 100.0, 600.0
 LOADING = "Loading..."
+CLICKS = {("left", 1): "click", ("right", 1): "rightclick", ("left", 2): "doubleclick", ("left", 3): "tripleclick"}
 
 # An off-screen control is parked far above the display, the way Chromium parks a scrolled-out link.
 OFFSCREEN_Y = -4200.0
@@ -314,24 +315,36 @@ class World:
 
     # ----- the machine ---------------------------------------------------------------------
 
-    def click_at(self, point: tuple[float, float]) -> None:
+    def click_at(self, point: tuple[float, float], button: str = "left", count: int = 1) -> None:
         """A synthetic click, in screen points: find the cell it lands on and press that item.
 
         A page with a `covered_by` overlay takes every mouse click itself, wherever it was aimed:
         that is a cookie banner over the content. A press through accessibility still reaches the
-        element under it, which is the whole point of pressing rather than clicking.
+        element under it, which is the whole point of pressing rather than clicking. A right click
+        or a click that repeats is the action of the same name ("rightclick:Photo", "doubleclick:Photo").
         """
         self.mouse.append(point)
+        way = CLICKS[button, count]
         if self.page.covered_by is not None:
-            self.apply(f"click:{self.page.covered_by}")
+            self.apply(f"{way}:{self.page.covered_by}")
             return
-        px, py = point[0] * SCALE, point[1] * SCALE
-        cells = self.cells()
-        hit = next((c for c in cells if c.box[0] <= px <= c.box[2] and c.box[1] <= py <= c.box[3]), None)
+        hit, cells = self.cell_at(point)
         if hit is not None and self.page.popup is not None and hit.text in self.page.under_popup:
             self.apply(f"click:{self.page.popup}")  # the popup is in front of it and takes the click
             return
-        self.apply(self.click_action(hit, cells) if hit is not None else "click:nothing")
+        self.apply(self.click_action(hit, cells).replace("click:", f"{way}:", 1) if hit is not None else f"{way}:nothing")
+
+    def cell_at(self, point: tuple[float, float]) -> tuple[Cell | None, list[Cell]]:
+        """The cell under a screen point, and every cell of the page."""
+        px, py = point[0] * SCALE, point[1] * SCALE
+        cells = self.cells()
+        return next((c for c in cells if c.box[0] <= px <= c.box[2] and c.box[1] <= py <= c.box[3]), None), cells
+
+    def drag(self, start: tuple[float, float], end: tuple[float, float]) -> None:
+        """A drag from one point to another is "drag:<text taken>><text dropped on>"."""
+        taken, dropped = (hit.text if hit is not None else "nothing" for hit, _ in (self.cell_at(start), self.cell_at(end)))
+        self.mouse.append(start)
+        self.apply(f"drag:{taken}>{dropped}")
 
     def ax_press(self, ref: object) -> bool:
         if not isinstance(ref, Ref) or self._refs.get(ref.name) is not ref:
@@ -339,9 +352,15 @@ class World:
         self.apply(ref.name)
         return True
 
-    def press(self, name: str, command: bool = False, shift: bool = False) -> None:
+    def press(self, name: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:
+        """A key. Command-[ is Back; any other chord with Command, Option or Control is "key:cmd+shift+z",
+        its modifiers in that order; a plain key, or one with Shift alone, is the key's own name."""
         if command and name == "[":
             self.apply("back")
+            return
+        if command or option or control:
+            held = [m for m, on in (("cmd", command), ("ctrl", control), ("opt", option), ("shift", shift)) if on]
+            self.apply("key:" + "+".join([*held, name]))
             return
         self.apply("enter" if name == "return" else name)
 
@@ -385,6 +404,7 @@ class World:
         monkeypatch.setattr(desktop, "click_at", self.click_at)
         monkeypatch.setattr(desktop, "ax_press", self.ax_press)
         monkeypatch.setattr(desktop, "press", self.press)
+        monkeypatch.setattr(desktop, "drag", self.drag)
         monkeypatch.setattr(desktop, "scroll", self.scroll)
         monkeypatch.setattr(desktop, "hover", lambda at: None)  # nothing in the world reacts to the pointer
         monkeypatch.setattr(desktop, "type_text", self.type_text)

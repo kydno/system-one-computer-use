@@ -174,6 +174,80 @@ def test_a_click_that_landed_presses_and_releases(monkeypatch):
     assert [event.u.mi.dwFlags for event in sent] == [windows.MOUSEEVENTF_LEFTDOWN, windows.MOUSEEVENTF_LEFTUP]
 
 
+def windows_input(monkeypatch, cursor=lambda: (640.0, 480.0)):
+    """The adapter's input with the machine replaced: every event sent, every cursor move, in order."""
+    log = []
+    monkeypatch.setattr(windows, "_move", lambda point: log.append(("move", point)))
+    monkeypatch.setattr(windows, "mouse_location", cursor)
+    monkeypatch.setattr(windows, "_send", lambda event: log.append(("send", event.u.mi.dwFlags)))
+    monkeypatch.setattr(windows, "sleep_watching", lambda seconds: None)
+    return log
+
+
+def test_a_right_click_presses_and_releases_the_right_button(monkeypatch):
+    log = windows_input(monkeypatch)
+    windows.click_at((640.0, 480.0), button="right")
+    assert log[1:] == [("send", windows.MOUSEEVENTF_RIGHTDOWN), ("send", windows.MOUSEEVENTF_RIGHTUP)]
+
+
+def test_a_double_click_is_two_presses_in_a_row(monkeypatch):
+    log = windows_input(monkeypatch)
+    windows.click_at((640.0, 480.0), count=2)
+    assert [event for kind, event in log if kind == "send"] == [windows.MOUSEEVENTF_LEFTDOWN, windows.MOUSEEVENTF_LEFTUP] * 2
+
+
+@pytest.mark.parametrize("button, count", [("middle", 1), ("left", 0), ("left", 4)])
+def test_a_click_that_is_no_click_is_refused_before_the_cursor_moves(monkeypatch, button, count):
+    log = windows_input(monkeypatch)
+    with pytest.raises(ValueError, match="cannot click"):
+        windows.click_at((640.0, 480.0), button=button, count=count)
+    assert log == []
+
+
+def test_a_drag_holds_the_button_through_the_moves_and_lets_go_at_the_end(monkeypatch):
+    log = windows_input(monkeypatch, cursor=lambda: (100.0, 100.0))
+    windows.drag((100.0, 100.0), (400.0, 220.0))
+    moves = [point for kind, point in log if kind == "move"]
+    sends = [event for kind, event in log if kind == "send"]
+    assert sends == [windows.MOUSEEVENTF_LEFTDOWN, windows.MOUSEEVENTF_LEFTUP]
+    assert moves[0] == (100, 100) and moves[-1] == (400, 220) and len(moves) == windows.DRAG_STEPS + 1
+    assert log.index(("send", windows.MOUSEEVENTF_LEFTDOWN)) == 1 and log[-1] == ("send", windows.MOUSEEVENTF_LEFTUP)
+
+
+def test_a_drag_that_never_reached_its_start_presses_nothing(monkeypatch):
+    log = windows_input(monkeypatch, cursor=lambda: (0.0, 0.0))
+    with pytest.raises(Missed):
+        windows.drag((100.0, 100.0), (400.0, 220.0))
+    assert [kind for kind, _ in log] == ["move"]
+
+
+def test_an_interrupted_drag_still_lets_go_of_the_button(monkeypatch):
+    log = windows_input(monkeypatch, cursor=lambda: (100.0, 100.0))
+    looks = []
+
+    def check_abort():
+        looks.append(1)
+        if len(looks) > 3:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(windows, "check_abort", check_abort)
+    with pytest.raises(KeyboardInterrupt):
+        windows.drag((100.0, 100.0), (400.0, 220.0))
+    assert log[-1] == ("send", windows.MOUSEEVENTF_LEFTUP)
+    assert sum(kind == "move" for kind, _ in log) < windows.DRAG_STEPS + 1  # it stopped on the way
+
+
+def test_control_and_option_are_held_around_a_key():
+    ctrl, alt = 0x11, 0x12
+    assert key_events("tab", control=True) == [(ctrl, 0), (0x09, 0), (0x09, KEYEVENTF_KEYUP), (ctrl, KEYEVENTF_KEYUP)]
+    assert key_events("tab", control=True, shift=True)[:3] == [(0x10, 0), (ctrl, 0), (0x09, 0)]
+    assert key_events("z", option=True)[:2] == [(alt, 0), (0x5A, 0)]
+
+
+def test_command_and_control_are_the_one_control_key_on_windows():
+    assert key_events("c", command=True, control=True) == key_events("c", command=True) == key_events("c", control=True)
+
+
 # ------------------------------------------------------------------ OCR
 
 

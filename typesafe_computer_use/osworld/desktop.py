@@ -159,19 +159,27 @@ class OSWorldDesktop:
 
     # ----- input -----------------------------------------------------------------------------
 
-    def click_at(self, point: tuple[float, float]) -> None:
+    def click_at(self, point: tuple[float, float], button: str = "left", count: int = 1) -> None:
         x, y = point
-        self._do(f"pyautogui.click({round(x)}, {round(y)})")
+        extra = (f", button={button!r}" if button != "left" else "") + (f", clicks={count}" if count != 1 else "")
+        self._do(f"pyautogui.click({round(x)}, {round(y)}{extra})")
 
-    def press(self, key: str, command: bool = False, shift: bool = False) -> None:
-        if shift:
-            self._do(f"pyautogui.hotkey('shift', {KEYS.get(key, key)!r})")
-        elif command and key == "[":
+    def press(self, key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:
+        name = KEYS.get(key, key)
+        if command and key == "[":
             self._do("pyautogui.hotkey('alt', 'left')")  # Back, where Command-[ is Back on a Mac
-        elif command:
-            self._do(f"pyautogui.hotkey('ctrl', {KEYS.get(key, key)!r})")
+            return
+        held = [m for m, on in (("ctrl", command or control), ("alt", option), ("shift", shift)) if on]
+        if held:
+            self._do(f"pyautogui.hotkey({', '.join(repr(m) for m in held)}, {name!r})")
         else:
-            self._do(f"pyautogui.press({KEYS.get(key, key)!r})")
+            self._do(f"pyautogui.press({name!r})")
+
+    def drag(self, start: tuple[float, float], end: tuple[float, float]) -> None:
+        (x1, y1), (x2, y2) = start, end
+        self._do(
+            f"pyautogui.moveTo({round(x1)}, {round(y1)})\npyautogui.dragTo({round(x2)}, {round(y2)}, duration=0.5, button='left')"
+        )
 
     def type_text(self, text: str) -> None:
         self._do(f"pyautogui.write({text!r}, interval={TYPE_INTERVAL})")
