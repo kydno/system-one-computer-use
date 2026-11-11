@@ -181,9 +181,11 @@ Supervised, on this code (runs `20261110-191418` and `-191556`, each command app
   stopped at 0.36 and then triple-clicked the find field (the focus was not in the text area, so the lines were
   still one block, as designed), the third pressed Escape, and the fourth, with the text area focused and its three
   lines now items of their own, picked the named line at 0.93 and triple-clicked it. Only that line was selected.
-- The reviews took 65 to 77 s each in these runs, against 8 to 25 s of the classifier's whole work in the run. They are the
-  answer model's calls (`openrouter/free`, the free reviewer chosen for cost), not the writer's (`openai/gpt-6-luna`): a free route
-  queues. If speed is the next goal, the review is the largest piece, and a paid or pinned answer model is the lever.
+- The reviews in these runs took 21 to 77 s each, against 8 to 25 s of the classifier's whole work in the run. They are the answer
+  model's calls (`openrouter/free`, the free reviewer chosen for cost), not the writer's (`openai/gpt-6-luna`), and they are not
+  typical: over the 115 saved runs with timings, 160 reviews took a median of 4.9 s (mean 8.0, p90 12.5) and 41 final answers a
+  median of 5.7 s, together a third of the time those runs spent in steps and reviews. Today's are the slow tail of a free route
+  that queues; the lever for speed is a paid or pinned answer model, and its worth is that third, not more.
 
 ## 2026-11-10: the moves gate on OSWorld's tasks, and a wider shortcut catalog (after batch2's two iterations were used; $0.03)
 
