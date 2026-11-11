@@ -492,6 +492,9 @@ def pressed(monkeypatch):
         ("next_tab", "pressed the next tab shortcut", ("tab", False, False, False, True)),
         ("previous_tab", "pressed the previous tab shortcut", ("tab", False, True, False, True)),
         ("zoom_in", "pressed the zoom in shortcut", ("=", True, False, False, False)),
+        ("reopen_tab", "pressed the reopen tab shortcut", ("t", True, True, False, False)),
+        ("address_bar", "pressed the address bar shortcut", ("l", True, False, False, False)),
+        ("save_as", "pressed the save as shortcut", ("s", True, True, False, False)),
     ],
 )
 def test_a_shortcut_from_the_catalog_is_pressed_with_its_modifiers(screen, pressed, name, said, keys):
@@ -513,6 +516,15 @@ def test_nothing_in_the_catalog_quits_logs_out_or_types():
     assert not {"q", "delete", "return", "escape"} & {s.key for s in SHORTCUTS.values()}
     assert not any(s.command and s.option and s.key == "escape" for s in SHORTCUTS.values())  # force quit
     assert all(len(s.key) == 1 or s.key == "tab" for s in SHORTCUTS.values())
+
+
+def test_every_key_in_the_catalog_has_a_key_code_on_each_platform_that_presses_it():
+    """A shortcut added to the catalog without its key would be refused by the adapter at the press, mid-run."""
+    from typesafe_computer_use import macos, windows
+    from typesafe_computer_use.config import SHORTCUTS
+
+    keys = {s.key for s in SHORTCUTS.values()}
+    assert keys <= set(macos.KEYCODES) and keys <= set(windows.VK)
 
 
 def test_typing_sets_the_value_when_the_field_reads_it_back(calls, monkeypatch):

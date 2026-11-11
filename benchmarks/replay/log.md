@@ -183,3 +183,27 @@ Supervised, on this code (runs `20261110-191418` and `-191556`, each command app
   lines now items of their own, picked the named line at 0.93 and triple-clicked it. Only that line was selected.
 - The writer's reviews took 65 to 77 s each in these runs (`openai/gpt-6-luna`, reasoning `none`), against 8 to 25 s
   of the classifier's whole work in the run. If speed is the next goal, the writer's latency is the largest piece.
+
+## 2026-11-10: the moves gate on OSWorld's tasks, and a wider shortcut catalog (no iteration; $0.01)
+
+Cluster: the one OSWorld task this agent has ever failed in `benchmarks/osworld/` (of 7 distinct tasks, all in the
+Chrome domain) is "bring back the last tab I shut down", which is one chord (reopen the closed tab) that the catalog of
+fifteen did not hold. The gate (`needs_moves`) was run over the instructions of all 369 OSWorld 1.0 tasks, text only
+(public task text, $0.006): that task scores 0.78 and opens it.
+
+- The gate opens for 195 of the 369 (53%) at `MOVES_NOUL` 0.5: 80 of 101 multi_apps tasks, 30 of 47 Impress, 27 of 47
+  Calc, 16 of 23 Writer, 5 of 46 Chrome. Scores centre on 0.52 (quartiles 0.34, 0.52, 0.66), against 0.05 to 0.36 for
+  the plain goals of the earlier probe, so on these productivity goals the gate is close to a coin flip.
+- Only 27 instructions name a move in so many words (copy, paste, undo, drag, right click, bold...; a lower bound,
+  since a goal rarely says which move it needs); 22 of the 27 open the gate. 173 of the 195 that open name none:
+  align a text box, fill a column with a formula, add folders to a workspace. A run the gate opens for pays about
+  3.4 points of silver agreement and 7% of request bytes (iteration 3 above), so on this benchmark the gate would
+  charge half the tasks for a move that perhaps a tenth need. A threshold trades one for the other: 0.6 opens 36%
+  and keeps 17 of the 27, 0.7 opens 19% and keeps 15. There is no ground truth here to choose by, and a missed
+  move costs more than a needless one, so 0.5 stays; the way to choose is a run of a task set with the gate forced
+  open, shut and automatic, which takes a cloud VM and the maintainer's approval.
+- The shortcut catalog grows from fifteen to twenty-five: reopen the closed tab, address bar, bookmark, new window, open a
+  file, save as, print, bold, italic, underline. They sit in the shortcut question only, a request of its own, so
+  the kind question and the measured numbers above are untouched. Asked of Jev with a goal written for each of the
+  fourteen entries tried (three repeats, the new and the old alike): 42 of 42 picks right, the OSWorld task's goal
+  at 1.00 for `reopen_tab`.

@@ -94,6 +94,21 @@ SHORTCUTS: dict[str, Shortcut] = {
     "reload": Shortcut("r", "Reload the page.", command=True),
     "zoom_in": Shortcut("=", "Make the page or document larger.", command=True),
     "zoom_out": Shortcut("-", "Make the page or document smaller.", command=True),
+    # Added after the one OSWorld task this agent failed, bringing back the last tab that was closed, which no
+    # entry above does. They sit in the shortcut question only, a request of its own: the kind question,
+    # where each extra entry split the vote, is as it was.
+    "reopen_tab": Shortcut("t", "Reopen the tab or window that was closed last.", command=True, shift=True),
+    "address_bar": Shortcut("l", "Put the cursor in the browser's address bar, with its text selected.", command=True),
+    "bookmark_page": Shortcut("d", "Bookmark the page that is open.", command=True),
+    "new_window": Shortcut("n", "Open a new window, or a new document, in the app.", command=True),
+    "open_file": Shortcut("o", "Open the dialog that asks which file to open.", command=True),
+    "save_as": Shortcut(
+        "s", "Save the document under a new name or in another place (the save as dialog).", command=True, shift=True
+    ),
+    "print": Shortcut("p", "Open the print dialog for the document or page.", command=True),
+    "bold": Shortcut("b", "Make the selected text bold, or turn bold on or off at the cursor.", command=True),
+    "italic": Shortcut("i", "Make the selected text italic, or turn italics on or off at the cursor.", command=True),
+    "underline": Shortcut("u", "Underline the selected text, or turn underline on or off at the cursor.", command=True),
 }
 
 
