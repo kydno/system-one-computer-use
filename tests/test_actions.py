@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from typesafe_computer_use import actions
+from typesafe_computer_use import actions, perception
 from typesafe_computer_use.actions import click_item, fill_field, press_offscreen
-from typesafe_computer_use.models import AxNode, Field, Item, Missed, Popup
+from typesafe_computer_use.models import AxNode, Field, Guidance, Item, Missed, Popup
 from typesafe_computer_use.platform_adapter import desktop
 from typesafe_computer_use.writer import Fill, make_writer
 
@@ -186,6 +186,143 @@ def test_an_item_pressed_through_accessibility_leaves_the_popup_alone(screen, ca
     assert calls == [] and keys_and_pauses == []
 
 
+@pytest.fixture
+def pointer(monkeypatch):
+    """Every pointer click the desktop was asked for, with its button and how many times."""
+    log: list[tuple] = []
+    monkeypatch.setattr(desktop, "click_at", lambda point, button="left", count=1: log.append((point, button, count)))
+    return log
+
+
+def pointing(kind: str, index: int | None) -> SimpleNamespace:
+    item = SimpleNamespace(choice=str(index)) if index is not None else None
+    return SimpleNamespace(chosen=kind, kind=SimpleNamespace(choice=kind), item=item)
+
+
+@pytest.mark.parametrize(
+    "kind, said, button, count",
+    [
+        ("right_click_item", "right-clicked 'Organise'", "right", 1),
+        ("double_click_item", "double-clicked 'Organise'", "left", 2),
+        ("select_item_text", "selected the text of 'Organise'", "left", 3),
+    ],
+)
+def test_the_other_clicks_are_pointer_clicks_even_on_a_control_the_tree_could_press(screen, pointer, kind, said, button, count):
+    row = replace(ORGANISE, role="cell")  # a list row the tree could press; a double click opens it
+    live = replace(screen, ax_refs={3: object()})  # a press would be a single left click, so none is made
+    assert actions.perform(pointing(kind, 3), live, [row], context()) == said
+    assert pointer == [((1888.0, 142.0), button, count)]
+
+
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+@pytest.mark.parametrize("role", ["button", "link", "checkbox", "radio", "popup", "menu", "tab"])
+def test_a_second_click_is_refused_on_a_control_that_one_click_activates(screen, pointer, kind, role):
+    control = replace(ORGANISE, role=role)
+    said = actions.perform(pointing(kind, 3), screen, [control], context())
+    assert said == f"{kind} refused: 'Organise' is a {role}, one click activates it"
+    assert pointer == []
+
+
+@pytest.mark.parametrize(
+    "ax_role, word",
+    [("AXMenuItem", "menu item"), ("AXDisclosureTriangle", "disclosure"), ("AXButton", "button"), ("AXLink", "link")],
+)
+@pytest.mark.parametrize("kind", ["double_click_item", "select_item_text"])
+def test_a_second_click_is_refused_on_what_the_tree_calls_a_menu_entry_or_a_disclosure_triangle(
+    screen, pointer, ax_role, word, kind
+):
+    """Through the role mapping, not with a role word written into the item: a gap in the map would show here."""
+    node = AxNode(role=ax_role, label="Copy", x=1888.0 / 2 - 20, y=142.0 / 2 - 8, w=40.0, h=16.0, pressable=True)
+    (item,) = perception.to_ax_items([node], 2.0)
+    assert item.role == word
+    said = actions.perform(pointing(kind, 0), screen, [item], context())
+    assert said == f"{kind} refused: 'Copy' is a {word}, one click activates it"
+    assert pointer == []
+
+
+def test_a_right_click_is_fine_on_a_button(screen, pointer):
+    assert actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context()) == "right-clicked 'Organise'"
+    assert pointer == [((1888.0, 142.0), "right", 1)]
+
+
+def test_the_other_clicks_name_the_row_when_a_label_repeats(screen, pointer):
+    buy = [
+        Item(0, "Buy", 1.0, 3000.0, 100.0, 3100.0, 130.0),
+        Item(1, "Mars", 1.0, 100.0, 100.0, 300.0, 130.0),
+        Item(2, "Buy", 1.0, 3000.0, 500.0, 3100.0, 530.0),
+    ]
+    assert actions.perform(pointing("double_click_item", 0), screen, buy, context()) == "double-clicked 'Buy' beside 'Mars'"
+
+
+def test_the_other_clicks_close_the_popup_in_front_of_the_item_first(screen, pointer, keys_and_pauses):
+    live = replace(screen, covered={3: BUBBLE})
+    said = actions.perform(pointing("right_click_item", 3), live, [ORGANISE], context())
+    assert said.startswith("closed ") and said.endswith(" then right-clicked 'Organise'")
+    assert pointer[-1][1:] == ("right", 1)
+
+
+@pytest.mark.parametrize("index", [None, 9])
+def test_the_other_clicks_refuse_when_no_item_on_screen_was_chosen(screen, pointer, index):
+    assert actions.perform(pointing("select_item_text", index), screen, [ORGANISE], context()) == (
+        "select_item_text refused: no item on screen was chosen"
+    )
+    assert pointer == []
+
+
+def test_a_pointer_that_never_got_there_clicks_nothing_and_says_so(screen, monkeypatch):
+    def miss(point, button="left", count=1):
+        raise Missed("the cursor went to (0, 0)")
+
+    monkeypatch.setattr(desktop, "click_at", miss)
+    said = actions.perform(pointing("right_click_item", 3), screen, [ORGANISE], context())
+    assert said == "right_click_item refused: 'Organise' was not clicked, the cursor went to (0, 0)"
+
+
+@pytest.fixture
+def dragged(monkeypatch):
+    log: list[tuple] = []
+    monkeypatch.setattr(desktop, "drag", lambda start, end: log.append((start, end)))
+    return log
+
+
+def dragging(source: int | None, target: int | None) -> SimpleNamespace:
+    pick = lambda n: SimpleNamespace(choice=str(n)) if n is not None else None  # noqa: E731
+    return SimpleNamespace(chosen="drag_item", item=pick(source), target=pick(target))
+
+
+FOLDER = Item(4, "Taxes", 1.0, 3000.0, 600.0, 3200.0, 660.0)  # capture pixels, scale 2
+
+
+def test_one_item_is_dragged_onto_another_by_their_centers(screen, dragged):
+    said = actions.perform(dragging(3, 4), screen, [ORGANISE, FOLDER], context())
+    assert said == "dragged 'Organise' onto 'Taxes'" and dragged == [((1888.0, 142.0), (1550.0, 315.0))]
+
+
+@pytest.mark.parametrize("source, target", [(3, 3), (3, 9), (None, 4), (3, None)])
+def test_a_drag_needs_two_different_items_on_screen(screen, dragged, source, target):
+    assert actions.perform(dragging(source, target), screen, [ORGANISE, FOLDER], context()) == (
+        "drag_item refused: it needs two different items on screen"
+    )
+    assert dragged == []
+
+
+def test_nothing_is_dragged_from_under_or_onto_a_popup(screen, dragged):
+    for covered in ({3: BUBBLE}, {4: BUBBLE}):
+        said = actions.perform(dragging(3, 4), replace(screen, covered=covered), [ORGANISE, FOLDER], context())
+        assert said == "drag_item refused: 'Organise' or 'Taxes' is under a popup"
+    assert dragged == []
+
+
+def test_a_drag_the_pointer_could_not_start_says_so(screen, monkeypatch):
+    def miss(start, end):
+        raise Missed("the cursor went to (0, 0)")
+
+    monkeypatch.setattr(desktop, "drag", miss)
+    assert actions.perform(dragging(3, 4), screen, [ORGANISE, FOLDER], context()) == (
+        "drag_item refused: 'Organise' was not dragged, the cursor went to (0, 0)"
+    )
+
+
 def context(writer=None) -> actions.Context:
     return actions.Context(
         goal="find the next upcoming bruno mars concert",
@@ -279,6 +416,42 @@ def test_use_browser_switches_to_the_open_tab_the_writer_names(screen, browser, 
     assert browser == [("show", "Google Chrome", GUIDE)]
 
 
+FOCUS_URL = "https://docs.example.com/create/new"
+
+
+def with_focus(focus: str, writer=None) -> actions.Context:
+    return replace(context(writer), guidance=Guidance(focus=focus))
+
+
+def test_use_browser_opens_the_url_the_focus_names_without_asking_the_writer(screen, browser, monkeypatch):
+    monkeypatch.setattr(actions, "compose_url", lambda *a: pytest.fail("the focus already names the page"))
+    ctx = with_focus(f"Open {FOCUS_URL} in the address bar.", writer=object())
+    assert actions.perform(browsing("other"), screen, [], ctx) == f"opened {FOCUS_URL}"
+    assert browser == [("open", "Google Chrome", FOCUS_URL)]
+
+
+def test_use_browser_opens_the_url_the_focus_names_when_there_is_no_writer_at_all(screen, browser, monkeypatch):
+    """Code read the URL out, so the page opens where it used to be refused for want of a writer to propose one."""
+    monkeypatch.setattr(actions, "compose_url", lambda *a: pytest.fail("there is no writer"))
+    ctx = with_focus(f"Open {FOCUS_URL}.")
+    assert ctx.writer is None
+    assert actions.perform(browsing("other"), screen, [], ctx) == f"opened {FOCUS_URL}"
+
+
+def test_use_browser_shows_the_open_tab_when_the_url_the_focus_names_is_one(screen, browser, monkeypatch):
+    monkeypatch.setattr(desktop, "browser_tabs", lambda app: [("New document", FOCUS_URL)])
+    monkeypatch.setattr(actions, "compose_url", lambda *a: pytest.fail("the focus already names the page"))
+    ctx = with_focus(f"Open {FOCUS_URL} in the address bar.")
+    assert actions.perform(browsing("other"), screen, [], ctx) == f"switched to the open tab {FOCUS_URL}"
+    assert browser == [("show", "Google Chrome", FOCUS_URL)]
+
+
+def test_use_browser_asks_the_writer_when_the_focus_only_mentions_a_page_it_is_leaving(screen, browser, monkeypatch):
+    monkeypatch.setattr(actions, "compose_url", lambda *a: "https://www.songkick.com/")
+    ctx = with_focus(f"The page {FOCUS_URL} is not found; click Blank instead.", writer=object())
+    assert actions.perform(browsing("other"), screen, [], ctx) == "opened https://www.songkick.com/"
+
+
 def test_use_browser_opens_a_url_that_is_not_an_open_tab(screen, browser, monkeypatch):
     monkeypatch.setattr(desktop, "browser_tabs", lambda app: OPEN_TABS)
     monkeypatch.setattr(actions, "compose_url", lambda *a: "https://www.songkick.com/")
@@ -360,6 +533,122 @@ def test_an_app_that_does_not_come_to_the_front_is_a_no_op(screen, monkeypatch):
     assert (
         actions.perform(opening("Photos"), screen, [], ctx) == "open_app failed: Photos did not come to the front with a window"
     )
+
+
+def shortcut_of(name: str | None) -> SimpleNamespace:
+    return SimpleNamespace(chosen="press_shortcut", shortcut=SimpleNamespace(choice=name) if name is not None else None)
+
+
+@pytest.fixture
+def pressed(monkeypatch):
+    """Every key press the desktop was asked for, with the modifiers it carried."""
+    log: list[tuple] = []
+    monkeypatch.setattr(
+        desktop,
+        "press",
+        lambda key, command=False, shift=False, option=False, control=False: log.append((key, command, shift, option, control)),
+    )
+    return log
+
+
+@pytest.mark.parametrize(
+    "name, said, keys",
+    [
+        ("copy", "pressed the copy shortcut", ("c", True, False, False, False)),
+        ("select_all", "pressed the select all shortcut", ("a", True, False, False, False)),
+        ("redo", "pressed the redo shortcut", ("z", True, True, False, False)),
+        ("next_tab", "pressed the next tab shortcut", ("tab", False, False, False, True)),
+        ("previous_tab", "pressed the previous tab shortcut", ("tab", False, True, False, True)),
+        ("zoom_in", "pressed the zoom in shortcut", ("=", True, False, False, False)),
+        ("reopen_tab", "pressed the reopen tab shortcut", ("t", True, True, False, False)),
+        ("address_bar", "pressed the address bar shortcut", ("l", True, False, False, False)),
+        ("save_as", "pressed the save as shortcut", ("s", True, True, False, False)),
+        ("next_field", "pressed the next field shortcut", ("tab", False, False, False, False)),
+        ("previous_field", "pressed the previous field shortcut", ("tab", False, True, False, False)),
+        ("arrow_down", "pressed the arrow down shortcut", ("down", False, False, False, False)),
+        ("page_down", "pressed the page down shortcut", ("page_down", False, False, False, False)),
+    ],
+)
+def test_a_shortcut_from_the_catalog_is_pressed_with_its_modifiers(screen, pressed, name, said, keys):
+    assert actions.perform(shortcut_of(name), screen, [], context()) == said
+    assert pressed == [keys]
+
+
+@pytest.mark.parametrize("name", ["new_tab", "close_tab", "next_tab", "previous_tab", "reload"])
+@pytest.mark.parametrize("app", ["Notes", "Mail", "TextEdit", ""])
+def test_a_browser_shortcut_is_refused_when_another_app_is_in_front(screen, pressed, name, app):
+    out = actions.perform(shortcut_of(name), replace(screen, app=app), [], context())
+    assert out == f"press_shortcut refused: {name.replace('_', ' ')} works in a browser, and {app or 'no app'} is in front"
+    assert pressed == []
+
+
+@pytest.mark.parametrize("app", ["Google Chrome", "Safari", "Firefox", "Arc"])
+def test_a_browser_shortcut_is_pressed_in_a_browser(screen, pressed, app):
+    assert actions.perform(shortcut_of("close_tab"), replace(screen, app=app), [], context()) == "pressed the close tab shortcut"
+    assert pressed == [("w", True, False, False, False)]
+
+
+def test_the_configured_browser_counts_as_a_browser_whatever_its_name(screen, pressed):
+    ctx = replace(context(), browser="Vivaldi")
+    assert actions.perform(shortcut_of("reload"), replace(screen, app="Vivaldi"), [], ctx) == "pressed the reload shortcut"
+
+
+@pytest.mark.parametrize("name", ["paste", "cut"])
+@pytest.mark.parametrize(
+    "role, label, placeholder",
+    [
+        ("AXSecureTextField", "", ""),
+        ("AXTextField", "Password", ""),
+        ("AXTextField", "", "Card number"),
+        ("AXTextField", "One-time code", ""),
+        ("AXTextField", "Login", "Password"),  # an innocent label does not hide a placeholder that is not
+    ],
+)
+def test_paste_and_cut_are_refused_in_a_field_that_looks_like_a_credential(screen, pressed, name, role, label, placeholder):
+    box = Field(role=role, label=label, placeholder=placeholder, value="", x=0, y=0, w=10, h=10)
+    out = actions.perform(shortcut_of(name), replace(screen, field=box), [], context())
+    assert out == f"press_shortcut refused: {name} would act on a field that looks like a credential"
+    assert pressed == []
+
+
+def test_copy_and_the_other_shortcuts_are_not_held_back_by_a_credential_field(screen, pressed):
+    box = Field(role="AXSecureTextField", label="Password", placeholder="", value="", x=0, y=0, w=10, h=10)
+    assert (
+        actions.perform(shortcut_of("select_all"), replace(screen, field=box), [], context()) == "pressed the select all shortcut"
+    )
+
+
+def test_paste_goes_into_an_ordinary_field(screen, pressed):
+    box = Field(role="AXTextField", label="Search", placeholder="", value="", x=0, y=0, w=10, h=10)
+    assert actions.perform(shortcut_of("paste"), replace(screen, field=box), [], context()) == "pressed the paste shortcut"
+    assert pressed == [("v", True, False, False, False)]
+
+
+@pytest.mark.parametrize("name", ["none", "quit", "force_quit", "Cmd-Q", None])
+def test_a_shortcut_outside_the_catalog_is_refused_and_presses_nothing(screen, pressed, name):
+    assert actions.perform(shortcut_of(name), screen, [], context()) == (
+        "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    )
+    assert pressed == []
+
+
+def test_nothing_in_the_catalog_quits_logs_out_or_types():
+    from typesafe_computer_use.config import SHORTCUTS
+
+    assert not {"q", "delete", "return", "escape"} & {s.key for s in SHORTCUTS.values()}
+    assert not any(s.command and s.option and s.key == "escape" for s in SHORTCUTS.values())  # force quit
+    assert all(
+        len(s.key) == 1 or s.key in {"tab", "up", "down", "left", "right", "page_up", "page_down"} for s in SHORTCUTS.values()
+    )
+
+
+def test_every_key_in_the_catalog_has_a_key_code_on_each_platform_that_presses_it():
+    """A shortcut added to the catalog without its key would be refused by the adapter at the press, mid-run."""
+    from typesafe_computer_use import macos, windows
+    from typesafe_computer_use.config import SHORTCUTS
+
+    keys = {s.key for s in SHORTCUTS.values()}
+    assert keys <= set(macos.KEYCODES) and keys <= set(windows.VK)
 
 
 def test_typing_sets_the_value_when_the_field_reads_it_back(calls, monkeypatch):

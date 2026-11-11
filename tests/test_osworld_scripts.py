@@ -66,7 +66,7 @@ def test_a_different_list_gets_a_different_file(tmp_path):
     assert first != second
 
 
-def dry_run(tmp_path: Path, *args: str) -> str:
+def dry_run(tmp_path: Path, *args: str, env: dict[str, str] | None = None) -> str:
     """scripts/osworld-gcp --dry-run in a bare copy of the repo, so no cache or result of this checkout is read.
 
     A dry run runs nothing, and should it ever try, gcloud, terraform, and rsync here only fail.
@@ -89,7 +89,7 @@ def dry_run(tmp_path: Path, *args: str) -> str:
         text=True,
         check=True,
         cwd=tmp_path,
-        env={"PATH": f"{shims}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        env={"PATH": f"{shims}:/usr/bin:/bin", "HOME": str(tmp_path), **(env or {})},
     )
     return out.stderr
 
@@ -97,6 +97,36 @@ def dry_run(tmp_path: Path, *args: str) -> str:
 def test_the_cloud_run_passes_every_task_to_the_machine(tmp_path):
     printed = dry_run(tmp_path, "run-jev", "chrome/a", "chrome/b", "--ocr", "rapidocr")
     assert "osworld-exec scripts/osworld run-jev chrome/a chrome/b --ocr rapidocr" in printed
+
+
+def test_clicker_moves_in_the_shell_goes_to_the_machine_with_the_command_and_into_the_row(tmp_path):
+    printed = dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr", env={"CLICKER_MOVES": "off"})
+    assert "osworld-exec env CLICKER_MOVES=off scripts/osworld run-jev chrome/a --ocr rapidocr" in printed
+    (line,) = [line for line in printed.splitlines() if "typesafe_computer_use.osworld.record" in line]
+    assert '"command": "CLICKER_MOVES=off run-jev chrome/a --ocr rapidocr"' in line
+
+
+def test_clicker_moves_is_read_as_the_python_side_reads_it(tmp_path):
+    printed = dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr", env={"CLICKER_MOVES": " OFF "})
+    assert "osworld-exec env CLICKER_MOVES=off scripts/osworld run-jev chrome/a --ocr rapidocr" in printed
+
+
+def test_clicker_moves_with_a_space_inside_is_refused_as_the_python_side_would(tmp_path):
+    with pytest.raises(subprocess.CalledProcessError) as stopped:
+        dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr", env={"CLICKER_MOVES": "o n"})
+    assert "CLICKER_MOVES must be auto, on or off" in stopped.value.stderr
+
+
+def test_a_cloud_run_without_clicker_moves_sends_the_command_as_it_was(tmp_path):
+    printed = dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr")
+    assert "CLICKER_MOVES" not in printed
+
+
+def test_a_misspelled_clicker_moves_stops_the_cloud_run_before_it_starts_a_machine(tmp_path):
+    with pytest.raises(subprocess.CalledProcessError) as stopped:
+        dry_run(tmp_path, "run-jev", "chrome/a", "--ocr", "rapidocr", env={"CLICKER_MOVES": "of"})
+    assert "CLICKER_MOVES must be auto, on or off, not 'of'" in stopped.value.stderr
+    assert "compute instances" not in stopped.value.stderr
 
 
 def test_the_cloud_run_lives_on_the_machine_not_in_the_connection(tmp_path):

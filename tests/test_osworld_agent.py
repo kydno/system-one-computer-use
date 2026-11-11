@@ -218,8 +218,10 @@ def test_an_item_under_a_popup_is_clicked_in_the_action_that_closes_the_popup(je
     assert actions == ["pyautogui.click(1891, 139)\ntime.sleep(0.5)\npyautogui.click(1888, 142)"]
     assert response == "click_item 'Organise' (0.90)"
     payload = (tmp_path / "jev" / "step-001-payload.txt").read_text()
-    assert "\"button 'Organise' (top-right; under 'Restore pages?')\"" in payload
-    assert payload.count("under 'Restore pages?'") == 1, "the bubble's own controls are not under it"
+    assert '"under": "\'Restore pages?\'"' in payload
+    assert payload.count("under 'Restore pages?'") == 0 and payload.count('"under"') == 1, (
+        "the bubble's own controls are not under it"
+    )
 
     assert agent.predict(GOAL, captured)[1] == ["DONE"]
     assert run_json(tmp_path)["history"] == ["closed 'Restore pages?' then clicked 'Organise'"]
@@ -501,6 +503,9 @@ def test_keys_map_onto_pyautogui():
     desktop.press("a", command=True)
     desktop.press("tab")
     desktop.press("delete")
+    desktop.press("page_down")
+    desktop.press("down")
+    desktop.press("tab", shift=True)
     (code,) = desktop.actions
     assert code.splitlines() == [
         "pyautogui.press('enter')",
@@ -509,6 +514,44 @@ def test_keys_map_onto_pyautogui():
         "pyautogui.hotkey('ctrl', 'a')",
         "pyautogui.press('tab')",
         "pyautogui.press('backspace')",
+        "pyautogui.press('pagedown')",
+        "pyautogui.press('down')",
+        "pyautogui.hotkey('shift', 'tab')",
+    ]
+
+
+def test_a_right_click_a_double_click_and_a_drag_map_onto_pyautogui():
+    desktop = over(obs())
+    desktop.click_at((10.4, 20.6), button="right")
+    desktop.click_at((10.4, 20.6), count=2)
+    desktop.click_at((10.4, 20.6), count=3)
+    desktop.drag((10.0, 20.0), (300.4, 220.6))
+    (code,) = desktop.actions
+    assert code.splitlines() == [
+        "pyautogui.click(10, 21, button='right')",
+        "pyautogui.click(10, 21, clicks=2)",
+        "pyautogui.click(10, 21, clicks=3)",
+        "pyautogui.moveTo(10, 20)",
+        "pyautogui.dragTo(300, 221, duration=0.5, button='left')",
+    ]
+
+
+def test_modifiers_become_the_hotkey_the_vm_reads():
+    desktop = over(obs())
+    desktop.press("c", command=True)
+    desktop.press("z", command=True, shift=True)
+    desktop.press("tab", control=True)
+    desktop.press("tab", control=True, shift=True)
+    desktop.press("t", option=True)
+    desktop.press("return", shift=True)
+    (code,) = desktop.actions
+    assert code.splitlines() == [
+        "pyautogui.hotkey('ctrl', 'c')",
+        "pyautogui.hotkey('ctrl', 'shift', 'z')",
+        "pyautogui.hotkey('ctrl', 'tab')",
+        "pyautogui.hotkey('ctrl', 'shift', 'tab')",
+        "pyautogui.hotkey('alt', 't')",
+        "pyautogui.hotkey('shift', 'enter')",
     ]
 
 

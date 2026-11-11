@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,6 +15,12 @@ DEFAULT_MIN_CONFIDENCE = 0.4
 # page and the next step can leave it. GPT-6 Luna spreads an item's odds over every item on screen:
 # its right click scored 0.11 to 0.24 on three Firebase and Cloud Console runs.
 DEFAULT_READ_ONLY_CONFIDENCE = 0.15
+# How sure the decision model must be that a goal needs a move beyond clicks and typing (for now a keyboard
+# shortcut; the click variants and the drag join it in later changes) before those moves are offered for the
+# run. A probe of
+# Jev scored 20 goals that need one 0.58 to 0.98 and 16 that do not 0.05 to 0.36; offering the moves to every
+# goal cost 2.6 points of agreement on saved steps that never needed them.
+MOVES_NOUL = 0.5
 READ_ONLY_NOUL = 0.8  # how sure the decision model must be that a goal changes nothing before it counts as read-only
 DEFAULT_STEPS = 100
 DEFAULT_DELAY = 2.0
@@ -53,6 +60,75 @@ SITES: dict[str, str] = {
     "notion": "https://www.notion.so/",
     "slack": "https://app.slack.com/",
     "typesafe_console": "https://console.typesafe.ai/",
+}
+
+
+@dataclass(frozen=True)
+class Shortcut:
+    """A keyboard shortcut the agent may press, written for a Mac: Command is the key that the other
+    platforms' adapters turn into Control, and Control the key that stays Control (see `Desktop.press`)."""
+
+    key: str
+    says: str  # what it does, the line the classifier reads
+    command: bool = False
+    shift: bool = False
+    option: bool = False
+    control: bool = False
+    browser: bool = False  # does its work in a browser only: elsewhere the same keys do something else (Cmd-R is Reply in Mail)
+
+
+# The apps a browser shortcut (new tab, close tab, next tab, reload) is pressed in; the configured browser counts too.
+BROWSER_APPS = ("Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc", "Safari", "Firefox")
+
+# The shortcuts the classifier can pick by name, the kind of move that has no control on screen or
+# whose control a shortcut reaches in one step. Kept short: each one can split the vote with a button
+# that does the same. Nothing that quits, force-quits, logs out, or types text.
+SHORTCUTS: dict[str, Shortcut] = {
+    "copy": Shortcut("c", "Copy the current selection to the clipboard.", command=True),
+    "cut": Shortcut("x", "Cut the current selection to the clipboard.", command=True),
+    "paste": Shortcut("v", "Paste the clipboard where the focus is.", command=True),
+    "select_all": Shortcut("a", "Select everything in the focused field, document, or page.", command=True),
+    "undo": Shortcut("z", "Undo the last change in the app.", command=True),
+    # Redo is Command-Shift-Z; the Windows adapter turns it into Ctrl-Shift-Z, which some apps there answer with Ctrl-Y only.
+    "redo": Shortcut("z", "Redo the change that was just undone.", command=True, shift=True),
+    "save": Shortcut("s", "Save the document that is open.", command=True),
+    "find": Shortcut("f", "Open the find bar to search the page or document for text.", command=True),
+    "new_tab": Shortcut("t", "Open a new, empty tab in the browser.", command=True, browser=True),
+    "close_tab": Shortcut("w", "Close the current tab or window.", command=True, browser=True),
+    "next_tab": Shortcut("tab", "Switch to the next tab in the browser.", control=True, browser=True),
+    "previous_tab": Shortcut("tab", "Switch to the previous tab in the browser.", control=True, shift=True, browser=True),
+    "reload": Shortcut("r", "Reload the page.", command=True, browser=True),
+    "zoom_in": Shortcut("=", "Make the page or document larger.", command=True),
+    "zoom_out": Shortcut("-", "Make the page or document smaller.", command=True),
+    # Added after the one OSWorld task this agent failed, bringing back the last tab that was closed, which no
+    # entry above does. They sit in the shortcut question only, a request of its own: the kind question,
+    # where each extra entry split the vote, is as it was.
+    "reopen_tab": Shortcut("t", "Reopen the tab or window that was closed last.", command=True, shift=True, browser=True),
+    "address_bar": Shortcut(
+        "l", "Put the cursor in the browser's address bar, with its text selected.", command=True, browser=True
+    ),
+    "bookmark_page": Shortcut("d", "Bookmark the page that is open.", command=True, browser=True),
+    "new_window": Shortcut("n", "Open a new window, or a new document, in the app.", command=True),
+    "open_file": Shortcut("o", "Open the dialog that asks which file to open.", command=True),
+    "save_as": Shortcut(
+        "s",
+        "Open the save as dialog, to save the document under a new name or in another place (in some Mac apps this key duplicates the document instead).",
+        command=True,
+        shift=True,
+    ),
+    "print": Shortcut("p", "Open the print dialog for the document or page.", command=True),
+    "bold": Shortcut("b", "Make the selected text bold, or turn bold on or off at the cursor.", command=True),
+    "italic": Shortcut("i", "Make the selected text italic, or turn italics on or off at the cursor.", command=True),
+    "underline": Shortcut("u", "Underline the selected text, or turn underline on or off at the cursor.", command=True),
+    # Plain navigation keys: they move the focus or the cursor and change nothing, so they are as safe as a scroll.
+    "next_field": Shortcut("tab", "Press the Tab key: move the focus to the next field, control, or spreadsheet cell."),
+    "previous_field": Shortcut("tab", "Press Shift and Tab: move the focus to the previous field, control, or cell.", shift=True),
+    "arrow_up": Shortcut("up", "Press the Up arrow once: move the cursor or the selection up one line, row, or item."),
+    "arrow_down": Shortcut("down", "Press the Down arrow once: move the cursor or the selection down one line, row, or item."),
+    "arrow_left": Shortcut("left", "Press the Left arrow once: move the cursor or the selection one character or cell left."),
+    "arrow_right": Shortcut("right", "Press the Right arrow once: move the cursor or the selection one character or cell right."),
+    "page_up": Shortcut("page_up", "Press Page Up: move up by one screen in a document, list, or sheet."),
+    "page_down": Shortcut("page_down", "Press Page Down: move down by one screen in a document, list, or sheet."),
 }
 
 
@@ -142,6 +218,17 @@ def custom_writer_endpoint() -> bool:
         return True
     url = writer_base_url() or os.environ.get("ANTHROPIC_BASE_URL")
     return bool(url) and urlparse(url).hostname != ANTHROPIC_HOST
+
+
+def moves_override() -> bool | None:
+    """CLICKER_MOVES: `on` offers every run the moves beyond clicking and typing, `off` offers none,
+    whatever the goal says. `auto`, or nothing, leaves it to the decision model (the gate), which is
+    how a run decides when nobody forces it. Forcing exists so a benchmark can run the same tasks
+    with the moves in and out of the kind question, without the gate's one-call guess in between."""
+    raw = os.environ.get("CLICKER_MOVES", "").strip().lower() or "auto"
+    if raw not in ("auto", "on", "off"):
+        raise ValueError(f"CLICKER_MOVES must be auto, on or off, not {raw!r}")
+    return {"on": True, "off": False}.get(raw)
 
 
 def writer_vision() -> bool:

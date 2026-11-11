@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import ipaddress
 import json
 import os
 import re
@@ -18,6 +19,7 @@ from PIL import Image
 
 from .calls import reviewing
 from .config import (
+    SHORTCUTS,
     answer_model,
     answer_reasoning,
     answer_sort,
@@ -256,23 +258,60 @@ def compose_text(
     return Fill(text, submit=bool(text) and data["submit"] and not multiline, reason=data["reason"].strip())
 
 
+# Hosts that name this machine or its network, which no page a goal is about lives on.
+PRIVATE_HOST_SUFFIXES = (".local", ".localhost", ".internal", ".lan", ".home", ".corp", ".home.arpa")
+
+
 def valid_url(url: str) -> bool:
-    parsed = urlparse(url)
-    return parsed.scheme == "https" and "." in parsed.netloc and not any(ch.isspace() for ch in url)
+    """An https address on a public host name. Unparseable text, a host that is an IP address, and a name that
+    belongs to this machine or its network (a router's page, a service on localhost) are not one."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:  # "Invalid IPv6 URL" from a bracket in prose
+        return False
+    if parsed.scheme != "https" or "." not in parsed.netloc or any(ch.isspace() for ch in url):
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not host.endswith(PRIVATE_HOST_SUFFIXES)
 
 
-URL_IN_TEXT = re.compile("https://[^\\s<>\"'`\u201c\u201d\u2018\u2019]+")
+URL_IN_TEXT = re.compile("https://[^\\s<>\"'`\u201c\u201d\u2018\u2019\\[\\]]+")
+# The words that tell a sentence to go to a page, and the ones that tell it the page is not the place to go.
+GO_TO = re.compile(r"\b(open|opening|go to|goto|navigate to|navigating to|visit|load|browse to|head to|type|enter)\b", re.I)
+NOT_THE_PLACE = re.compile(r"\b(not found|isn't|is not|dead|broken|404|doesn't|does not|instead of|rather than|error)\b", re.I)
+
+
+def trimmed(url: str) -> str:
+    """A URL as prose ends it: no sentence punctuation, markdown emphasis, or closing bracket after it. A closing
+    parenthesis stays when the URL opened one (a wiki page named Foo_(bar))."""
+    while url:
+        if url[-1] in ".,;:!?*_~}" or (url[-1] == ")" and url.count(")") > url.count("(")):
+            url = url[:-1]
+        else:
+            break
+    return url
 
 
 def url_named_in(text: str | None) -> str:
-    """The one https URL a piece of text names, or "" when it names none or more than one.
+    """The one https URL a piece of text sends the browser to, or "" when it names none or more than one.
 
     The writer's focus often says exactly which page to open ("Open https://example.com/create in
     the address bar"). Code reads that URL out, so a URL the writer guessed from the goal, or an open
-    tab that looks like the goal's page, cannot take its place.
+    tab that looks like the goal's page, cannot take its place. A URL counts only where its sentence
+    sends the browser there (an open, go to, visit before it) and does not say the page is the wrong one
+    ("https://x.example/new is not found; click Blank instead" names a page to leave).
     """
-    named = {u.rstrip(".,;:!?)]}") for u in URL_IN_TEXT.findall(text or "")}
-    found = {u for u in named if valid_url(u)}
+    found = set()
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
+        for match in URL_IN_TEXT.finditer(sentence):
+            url = trimmed(match.group(0))
+            if valid_url(url) and GO_TO.search(sentence[: match.start()]) and not NOT_THE_PLACE.search(sentence):
+                found.add(url)
     return found.pop() if len(found) == 1 else ""
 
 
@@ -474,6 +513,29 @@ ANSWER_SYSTEM = (
 )
 
 
+# For a run whose goal needs them (see `decide.needs_moves`), the agent has the moves the kind question
+# offers, and the answer model is told so; otherwise it is told the agent has none, and does not ask for one.
+_NO_MOVES = (
+    "It has no other key or shortcut and cannot right-click, double-click, or select text, so a focus "
+    "that needs one of those is refused: name the button, menu, or link on screen that does the same."
+)
+_MOVES = (
+    "It can press one keyboard shortcut from a short list ("
+    + ", ".join(name.replace("_", " ") for name in SHORTCUTS)
+    + ") and no other key. It can also right-click an item, double-click it, select its text with a "
+    "triple click to copy it (typing does not replace a selection), or drag one item onto another. It cannot drag "
+    "by an amount or along a path, so a slider or a map is out of its reach: name the button, menu, or link on "
+    "screen that does the same."
+)
+assert _NO_MOVES in ANSWER_SYSTEM
+ANSWER_SYSTEM_MOVES = ANSWER_SYSTEM.replace(_NO_MOVES, _MOVES)
+
+
+def answer_system(moves: bool = False) -> str:
+    """The answer model's instructions, with the agent's moves as the run was offered them."""
+    return ANSWER_SYSTEM_MOVES if moves else ANSWER_SYSTEM
+
+
 def compose_answer(
     writer: Writer,
     goal: str,
@@ -485,6 +547,7 @@ def compose_answer(
     guidance: Guidance | None = None,
     earlier_stops: list[dict] | None = None,
     can_ask: bool = False,
+    moves: bool = False,
 ) -> Answer:
     """What to tell the user now that the classifier has stopped, and how the run could go on.
 
@@ -514,7 +577,7 @@ def compose_answer(
     }
     data = _structured(
         writer,
-        system=ANSWER_SYSTEM,
+        system=answer_system(moves),
         packet=packet,
         properties={
             "achieved": {"type": "boolean"},

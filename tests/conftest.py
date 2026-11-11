@@ -195,12 +195,15 @@ WRITER_ENV = (
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_PROFILE",
     "OPENROUTER_API_KEY",  # sends the writer to OpenRouter when no other endpoint is named
+    "CLICKER_MOVES",  # settles the moves gate for the whole run, so a shell that exports it changes every scenario
 )
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    """No writer configuration from the shell running the tests."""
+    """No writer or gate configuration from the shell running the tests, so a maintainer's keys and endpoints
+    change no request a test reads (a custom endpoint appends the reply schema to every system prompt).
+    A test that needs one sets it itself, after this runs."""
     for name in WRITER_ENV:
         monkeypatch.delenv(name, raising=False)
     return monkeypatch

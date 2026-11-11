@@ -1,25 +1,33 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from conftest import item
 
-from typesafe_computer_use.config import SITES
+from typesafe_computer_use.config import SHORTCUTS, SITES
 from typesafe_computer_use.decide import (
+    POINTING,
+    SPARED,
     Decision,
     app_criteria,
     base_state,
+    beside,
     browser_criteria,
     decide,
     item_criteria,
     kind_criteria,
+    needs_moves,
     offscreen_criteria,
     row_mates,
+    shortcut_criteria,
     site_criteria,
     verify_typed,
 )
 from typesafe_computer_use.decisions import ChoiceAnswer, DecisionError
-from typesafe_computer_use.models import AxNode, Field, Guidance
+from typesafe_computer_use.models import AxNode, Field, Guidance, Popup
 from typesafe_computer_use.runner import goal_only_looks, named_by_focus
+
+BUBBLE = Popup("Restore pages?", 100.0, 100.0, 300.0, 200.0)
 
 
 def answer(choice, confidence, probabilities=None):
@@ -99,15 +107,17 @@ def test_kind_criteria_offers_email_only_when_set():
     assert "click_item" in kind_criteria("Google Chrome", None)
 
 
-def test_item_criteria_and_state_carry_region_and_dates(screen, make_item):
+def test_item_criteria_point_at_the_states_rows_which_carry_region_and_dates(screen, make_item):
     items = [make_item(0, "Sale ends Oct 1, 2099", y1=100, y2=130), make_item(1, "Buy", y1=140, y2=170)]
-    crit = item_criteria(screen, items)
-    assert crit["0"].startswith("'Sale ends Oct 1, 2099' (top-left; dated 2099-10-01")
-    assert "near a line dated 2099-10-01" in crit["1"]
+    assert item_criteria(screen, items) == {"0": "Item 0.", "1": "Item 1."}  # one copy of each item goes out, in the state
     state = base_state("buy the thing", screen, items, ["opened https://example.com/"])
     assert state["goal"] == "buy the thing"
     assert state["previous_actions"] == ["opened https://example.com/"]
-    assert state["screen_items_in_reading_order"][1]["when"].startswith("near a line dated")
+    first, second = state["screen_items_in_reading_order"]
+    assert (
+        first["text"] == "Sale ends Oct 1, 2099" and first["where"] == "top-left" and first["when"].startswith("dated 2099-10-01")
+    )
+    assert second["when"].startswith("near a line dated")
     assert "today" in state["now"]
 
 
@@ -128,9 +138,6 @@ def test_a_duplicated_label_names_its_row_and_a_unique_one_does_not(screen, make
     ]
     assert row_mates(wide)[5] == ["Col 0", "Col 1", "Col 2"]  # a criterion stays short
     assert row_mates(wide, limit=None)[5] == [f"Col {i}" for i in range(5)]  # a history line takes the whole row
-    crit = item_criteria(screen, items)
-    assert crit["5"].endswith("; in the row of 'Coldplay', 'Oct 2')")
-    assert "row" not in crit["3"] and "row" not in crit["6"]
     state = base_state("buy a ticket to Coldplay", screen, items, [])
     rows = state["screen_items_in_reading_order"]
     assert rows[5]["beside"] == ["Coldplay", "Oct 2"] and "beside" not in rows[3]
@@ -259,6 +266,257 @@ def test_the_app_is_asked_in_a_second_request_only_once_open_app_is_chosen(scree
     assert list(questions["app"].criteria) == ["Photos", "Notes", "none"]
 
 
+def test_press_shortcut_is_offered_only_to_a_run_whose_goal_needs_the_moves_and_the_catalog_ends_with_none():
+    assert "press_shortcut" not in kind_criteria("Google Chrome", None)
+    assert "press_shortcut" in kind_criteria("Google Chrome", None, moves=True)
+    assert list(shortcut_criteria()) == [*SHORTCUTS, "none"]
+    assert all(text.endswith(".") for text in shortcut_criteria().values())
+
+
+def test_a_closed_gate_leaves_the_kind_question_as_it_was_before_the_moves_existed():
+    shut, open_ = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
+    assert {k: v for k, v in open_.items() if k not in ("press_shortcut", *POINTING, "drag_item")} == shut
+    assert list(shut) == [
+        "click_item",
+        "use_browser",
+        "type_text",
+        "press_enter",
+        "press_escape",
+        "go_back",
+        "scroll_down",
+        "scroll_up",
+        "wait",
+        "done",
+        "none",
+    ]
+
+
+def test_the_goal_is_asked_once_whether_it_needs_a_move_beyond_clicks_and_typing():
+    asked = []
+
+    def system_one(state, questions):
+        asked.append((state, questions))
+        return SimpleNamespace(answers={"moves": SimpleNamespace(noul=0.9)})
+
+    assert needs_moves(SimpleNamespace(system_one=system_one), "copy the total") == 0.9
+    ((state, questions),) = asked
+    assert state == {"goal": "copy the total"} and list(questions) == ["moves"]
+    assert "keyboard shortcut" in questions["moves"].wire()["instructions"]
+
+
+def test_the_shortcut_is_asked_in_a_second_request_only_once_press_shortcut_is_chosen(screen):
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "shortcut" in questions:
+            return SimpleNamespace(answers={"shortcut": answer("copy", 0.7)})
+        return SimpleNamespace(answers={"kind": answer(kind, 0.95), "site": answer("none", 1.0)})
+
+    client = SimpleNamespace(system_one=system_one)
+    kind = "click_item"
+    assert decide(client, "g", screen, [], [], "Google Chrome", None).shortcut is None
+    assert len(requests) == 1 and "shortcut" not in requests[0][1]
+
+    requests.clear()
+    kind = "press_shortcut"
+    d = decide(client, "copy the figure", screen, [], [], "Google Chrome", None, guidance=Guidance(focus="copy it"), moves=True)
+    assert d.pressing_shortcut and d.chosen == "press_shortcut" and d.shortcut.choice == "copy"
+    assert d.confidence == 0.7  # a wrong shortcut is not always undone, so a split on it counts
+    state, questions = requests[1]
+    assert state == {
+        "goal": "copy the figure",
+        "current_focus": "copy it",
+        "frontmost_app": "Google Chrome",
+        "focused_field": None,
+        "previous_actions": [],
+    }
+    assert list(questions["shortcut"].criteria) == [*SHORTCUTS, "none"]
+
+
+def test_the_shortcut_question_sees_what_was_pressed_and_what_is_selected_so_a_goal_of_several_goes_on(screen):
+    """A goal that takes select all, then copy, then paste was answered 'select all' every step: the follow-up
+    saw the goal alone, and nothing on the screen looks different once text is selected."""
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "shortcut" in questions:
+            return SimpleNamespace(answers={"shortcut": answer("copy", 0.9)})
+        return SimpleNamespace(answers={"kind": answer("press_shortcut", 0.95), "site": answer("none", 1.0)})
+
+    box = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10, selected="a b")
+    live = replace(screen, field=box)
+    decide(
+        SimpleNamespace(system_one=system_one),
+        "copy it",
+        live,
+        [],
+        ["pressed the select all shortcut"],
+        "Google Chrome",
+        None,
+        moves=True,
+    )
+
+    kind_state, (shortcut_state, _) = requests[0][0], requests[1]
+    for state in (kind_state, shortcut_state):
+        assert state["focused_field"]["selected_text"] == "a b"
+        assert state["previous_actions"] == ["pressed the select all shortcut"]
+
+
+def test_the_selected_text_is_in_the_field_only_for_a_run_offered_the_moves_that_select():
+    box = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10, selected="a b")
+    plain = Field(role="AXTextArea", label="", placeholder="", value="a b", x=0, y=0, w=10, h=10)
+    assert "selected_text" not in box.summary() and box.summary(selection=True)["selected_text"] == "a b"
+    assert plain.summary(selection=True) == plain.summary()  # nothing selected: the request is the one it always was
+    assert Field(**box.record()) == box
+    assert Field(**{k: v for k, v in box.record().items() if k != "selected"}).selected == ""  # a step saved before this
+
+
+def test_a_shortcut_answer_for_any_other_kind_is_ignored():
+    d = Decision(kind=answer("click_item", 0.9), item=answer("3", 0.8), site=answer("none", 1.0), shortcut=answer("copy", 0.1))
+    assert not d.pressing_shortcut and d.chosen == "3" and d.confidence == 0.8
+
+
+def test_the_other_clicks_are_offered_beside_click_item_to_a_run_that_needs_them_and_each_reuses_the_item_answer():
+    shut, kinds = kind_criteria("Google Chrome", None), kind_criteria("Google Chrome", None, moves=True)
+    assert list(POINTING) == ["right_click_item", "double_click_item", "select_item_text"]
+    assert not set(POINTING) & set(shut) and set(POINTING) <= set(kinds)
+    assert all("item question" in text for text in (kinds["click_item"], *(kinds[k] for k in POINTING)))
+    assert list(kinds)[:4] == ["click_item", *POINTING]  # beside the click they are variants of
+
+
+def test_the_item_question_names_the_other_clicks_only_when_they_are_offered(screen):
+    from typesafe_computer_use.decide import build_questions
+
+    shut = build_questions(screen, [item(0, "File")], "Google Chrome", None)["item"].instructions
+    open_ = build_questions(screen, [item(0, "File")], "Google Chrome", None, moves=True)["item"].instructions
+    assert "triple click" not in shut and shut.startswith("If clicking an on-screen item is the right move, which item?")
+    assert (
+        "triple click" in open_
+        and open_.replace(
+            " by any click (single, right, double, or the triple click that selects its text), or, for a drag, the item that is dragged,",
+            "",
+        )
+        == shut
+    )
+
+
+def test_selecting_an_items_text_is_offered_for_copying_and_not_for_replacing_it():
+    """Typing adds to a text area and sets a whole single-line field: it never acts on a selection."""
+    says = POINTING["select_item_text"]
+    assert "copied" in says and "does not act on the selection" in says
+    for promise in ("replace", "typing over", "type over"):
+        assert promise not in says.lower().replace("does not act", "")
+    assert "select the word" not in POINTING["double_click_item"]
+
+
+@pytest.mark.parametrize("kind", list(POINTING))
+def test_a_right_double_or_triple_click_is_chosen_with_an_item_and_counts_the_item_confidence(kind):
+    d = Decision(kind=answer(kind, 0.9), item=answer("12", 0.6), site=answer("none", 1.0))
+    assert d.pointing and not d.clicking and d.chosen == kind and d.confidence == 0.6 and not d.stops
+
+
+def test_the_other_clicks_need_an_item_to_be_a_decision_to_point():
+    assert not Decision(kind=answer("right_click_item", 0.9), item=None, site=answer("none", 1.0)).pointing
+    assert not Decision(kind=answer("click_item", 0.9), item=answer("1", 0.9), site=answer("none", 1.0)).pointing
+
+
+def test_a_refused_item_question_sinks_every_kind_that_needs_an_item(screen):
+    from typesafe_computer_use.decisions import Refusal
+
+    assert set(SPARED["item"]) == {"click_item", *POINTING, "drag_item"}
+
+    def system_one(state, questions):
+        if "item" in questions:
+            raise Refusal("refused", "item")
+        return SimpleNamespace(answers={"kind": answer("double_click_item", 0.9), "site": answer("none", 1.0)})
+
+    with pytest.raises(DecisionError, match="chose double_click_item without it"):
+        decide(SimpleNamespace(system_one=system_one), "g", screen, [item(0, "File")], [], "Google Chrome", None, moves=True)
+
+
+def test_drag_is_offered_to_a_run_that_needs_the_moves_and_asks_for_its_target_in_a_second_request(screen):
+    assert "drag_item" not in kind_criteria("Google Chrome", None) and "drag_item" in kind_criteria(
+        "Google Chrome", None, moves=True
+    )
+    files = [item(0, "Invoice.pdf"), item(1, "Taxes"), item(2, "Photos")]
+    requests = []
+
+    def system_one(state, questions):
+        requests.append((state, questions))
+        if "target" in questions:
+            return SimpleNamespace(answers={"target": answer("1", 0.8)})
+        return SimpleNamespace(answers={"kind": answer("drag_item", 0.95), "site": answer("none", 1.0), "item": answer("0", 0.9)})
+
+    d = decide(SimpleNamespace(system_one=system_one), "file the invoice", screen, files, [], "Google Chrome", None, moves=True)
+
+    assert d.dragging and d.chosen == "drag_item" and d.item.choice == "0" and d.target.choice == "1"
+    assert d.confidence == 0.8  # a drag moves things, so the weakest of the three answers counts
+    state, questions = requests[1]
+    assert state["dragging_item"] == "0" and [it["text"] for it in state["screen_items_in_reading_order"]] == [
+        "Invoice.pdf",
+        "Taxes",
+        "Photos",
+    ]
+    assert list(questions["target"].criteria) == ["1", "2"]  # never the dragged item itself
+
+
+def test_drag_is_not_offered_with_fewer_than_two_items_to_drag_between(screen):
+    from typesafe_computer_use.decide import build_questions
+
+    one = build_questions(screen, [item(0, "Invoice.pdf")], "Google Chrome", None, moves=True)["kind"].criteria
+    two = build_questions(screen, [item(0, "Invoice.pdf"), item(1, "Taxes")], "Google Chrome", None, moves=True)["kind"].criteria
+    assert "drag_item" not in one and "right_click_item" in one  # the other moves need only one item
+    assert "drag_item" in two
+
+
+def test_the_target_question_leaves_out_items_under_a_popup_and_is_not_asked_for_a_covered_source(screen):
+    files = [item(0, "Invoice.pdf"), item(1, "Taxes"), item(2, "Photos")]
+    asked = []
+
+    def system_one(state, questions):
+        asked.append(questions)
+        if "target" in questions:
+            return SimpleNamespace(answers={"target": answer("2", 0.8)})
+        return SimpleNamespace(answers={"kind": answer("drag_item", 0.95), "site": answer("none", 1.0), "item": answer("0", 0.9)})
+
+    under = replace(screen, covered={1: BUBBLE})  # Taxes is under a popup
+    d = decide(SimpleNamespace(system_one=system_one), "g", under, files, [], "Google Chrome", None, moves=True)
+    assert list(asked[1]["target"].criteria) == ["2"] and d.dragging
+
+    asked.clear()
+    covered_source = replace(screen, covered={0: BUBBLE})  # the file itself is under a popup
+    d = decide(SimpleNamespace(system_one=system_one), "g", covered_source, files, [], "Google Chrome", None, moves=True)
+    assert len(asked) == 1 and d.target is None and not d.dragging  # the action would refuse it, so no second request
+
+
+def test_a_drag_with_nothing_to_drop_on_asks_no_target_question(screen):
+    files = [item(0, "Invoice.pdf"), item(1, "Taxes")]
+    asked = []
+
+    def system_one(state, questions):
+        asked.append(questions)
+        return SimpleNamespace(answers={"kind": answer("drag_item", 0.95), "site": answer("none", 1.0), "item": answer("0", 0.9)})
+
+    d = decide(
+        SimpleNamespace(system_one=system_one),
+        "g",
+        replace(screen, covered={1: BUBBLE}),
+        files,
+        [],
+        "Google Chrome",
+        None,
+        moves=True,
+    )
+    assert len(asked) == 1 and d.target is None
+
+
+def test_a_drag_with_no_target_answer_is_not_a_drag():
+    d = Decision(kind=answer("drag_item", 0.9), item=answer("0", 0.9), site=answer("none", 1.0))
+    assert not d.dragging
+
+
 def test_browser_criteria_say_which_is_in_front_and_which_is_the_default():
     crit = browser_criteria("Google Chrome", ("Brave Browser", "Google Chrome"), "Brave Browser")
     assert crit == {
@@ -324,3 +582,21 @@ def test_an_unknown_answer_to_the_read_only_question_keeps_the_floor():
     lines = []
     assert goal_only_looks(ctx, "confirm the export is on", lines.append) is False
     assert lines == ["read-only: unknown (openrouter answered 502), so the floor stays"]
+
+
+def test_a_history_line_names_a_short_row_whole_and_cuts_a_long_one_to_three_a_count_and_a_tag():
+    row = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    assert beside(row) == "'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'"  # up to eight, whole, as before
+    strip = [f"Tab {i}" for i in range(33)]
+    cut = beside(strip)
+    assert cut.startswith("'Tab 0', 'Tab 1', 'Tab 2' and 30 more (row ") and "Tab 5" not in cut  # not named title by title
+    assert beside(strip) == cut  # and the same row reads the same each time
+
+
+def test_two_long_rows_that_open_alike_get_lines_of_their_own_so_the_second_is_not_a_repeat_of_the_first():
+    head = ["Mars", "Sep 25", "Seat 4"]
+    one = [*head, "a", "b", "c", "d", "e", "f", "Delete"]
+    two = [*head, "a", "b", "c", "d", "x", "f", "Delete"]  # the same first three, the same length, one cell different
+    assert len(one) == len(two) > 8
+    assert beside(one) != beside(two)
+    assert beside(one).split(" and ")[0] == beside(two).split(" and ")[0]  # what the model reads first is alike

@@ -47,6 +47,8 @@ maintainer approved.
 clicker-eval batch open --cap 4 --iterations 3
 clicker-eval decisions --plan          # requests a pass would send, how many are cached
 clicker-eval decisions --repeats 3
+clicker-eval decisions --repeats 3 --moves      # every case offered the moves beyond clicking (--no-moves: none)
+                                              # by default each case is asked as its own run was
 clicker-eval batch iteration --note "what this iteration tries"
 clicker-eval batch status
 clicker-eval batch close

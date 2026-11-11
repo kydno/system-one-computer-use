@@ -92,8 +92,14 @@ def perceive(
     goal: str,
     timing: dict[str, float] | None = None,
     cache: OcrCache | None = None,
+    apart: bool = False,
 ) -> list[Item]:
     """Everything worth clicking on this screen: OCR text blocks, plus the app's own controls.
+
+    `apart` keeps the lines of the focused text area, or editor, one item each instead of one block: for a
+    run offered the moves that point at text (a triple click on a line, a right click), which can only
+    land on the middle of an item, so that a line is aimed at by being an item. Every other run reads the
+    block it always did.
 
     Fills `screen.ax_refs` on the way, so an item that came from the accessibility tree can be
     pressed through it later. The merge renumbers everything, hence the side table over the
@@ -107,7 +113,7 @@ def perceive(
     Pass None to read the whole region every time, which is what a replay and an inspection do.
     """
     with phase(timing, "ocr"):
-        blocks = ocr(screen, budget, goal, cache, timing)
+        blocks = ocr(screen, budget, goal, cache, timing, apart)
     with phase(timing, "ax"):
         nodes, hidden = ax_nodes(screen, budget)
         gray = screen.image.convert("L")
@@ -115,7 +121,16 @@ def perceive(
         nodes = [node for node in nodes if node not in blank]
         hidden = hidden + blank
         controls = to_ax_items(nodes, screen.scale)
-    merged = merge_with_origins([block for block in blocks if not in_field(block, screen)], controls, budget)
+    # A line a control of the app already covers (an editor that publishes its text through accessibility) takes
+    # the ordinary merge with it, so it is one item and not an OCR line beside an accessibility twin of itself.
+    content = [
+        block
+        for block in blocks
+        if apart and in_text_area(screen, (block.x1, block.y1, block.x2, block.y2)) and not covered_by_a_control(block, controls)
+    ]
+    held = {id(block) for block in content}
+    rest = [block for block in blocks if id(block) not in held and not in_field(block, screen)]
+    merged = merge_with_origins(rest, controls, budget, content)
     screen.ax_refs.clear()
     screen.ax_refs.update({it.index: nodes[origin].ref for it, origin in merged if origin is not None and nodes[origin].ref})
     screen.covered.clear()
@@ -134,8 +149,10 @@ def ocr(
     goal: str,
     cache: OcrCache | None = None,
     timing: dict[str, float] | None = None,
+    apart: bool = False,
 ) -> list[Item]:
-    """The screen's text as items, filtered and merged into blocks.
+    """The screen's text as items, filtered and merged into blocks. With `apart`, the lines inside the
+    focused text area are not merged: each stays an item.
 
     The filter runs over the raw lines every step, including the reused ones, so a cached line is
     treated exactly as a freshly read one. A read the cache made ahead of the step counts as its
@@ -153,7 +170,9 @@ def ocr(
     kept: list[Line] = [
         (t.strip(), c, b) for t, c, b in lines if t.strip() and c >= MIN_OCR_CONFIDENCE and not is_echo(t, echoes)
     ]
-    return to_items(merge_blocks(kept), budget)
+    held = [line for line in kept if apart and in_text_area(screen, line[2])]
+    held_ids = {id(line) for line in held}
+    return to_items(merge_blocks([line for line in kept if id(line) not in held_ids]) + held, budget)
 
 
 # ------------------------------------------------------------------ reading less of the screen
@@ -610,6 +629,16 @@ def in_field(block: Item, screen: Screen) -> bool:
     return field.x < x < field.x + field.w and field.y < y < field.y + field.h
 
 
+def in_text_area(screen: Screen, box: Box) -> bool:
+    """Whether a box (capture pixels) sits inside the focused text area or editor: the body of a document,
+    whose lines are content one can point at. A one-line field is `in_field`, which drops its text."""
+    field = screen.field
+    if field is None or not field.is_text or field.clicked or not field.multiline:
+        return False
+    x, y = (box[0] + box[2]) / 2 / screen.scale, (box[1] + box[3]) / 2 / screen.scale
+    return field.x < x < field.x + field.w and field.y < y < field.y + field.h
+
+
 def to_ax_items(nodes: list[AxNode], scale: float) -> list[Item]:
     """Controls as items, converted from screen points to capture pixels. A tab is named by its title
     alone (see `tab_title`)."""
@@ -640,8 +669,11 @@ def merge_sources(ocr_items: list[Item], ax_items: list[Item], budget: int = MAX
     return [it for it, _ in merge_with_origins(ocr_items, ax_items, budget)]
 
 
-def merge_with_origins(ocr_items: list[Item], ax_items: list[Item], budget: int = MAX_OPTIONS) -> list[tuple[Item, int | None]]:
+def merge_with_origins(
+    ocr_items: list[Item], ax_items: list[Item], budget: int = MAX_OPTIONS, extra: Sequence[Item] = ()
+) -> list[tuple[Item, int | None]]:
     """The merge, each item paired with the position of the control it came from, or None for plain text.
+    `extra` items join as they are: no control is merged with them.
 
     The pairing survives the budget cut and the renumbering, which is the only way back from a
     final item to the accessibility element behind it.
@@ -664,9 +696,26 @@ def merge_with_origins(ocr_items: list[Item], ax_items: list[Item], budget: int 
         text = control.text if len(control.text) >= len(block.text) else block.text
         merged.append((replace(block, text=text, role=control.role, source="ax+ocr"), origin))
     merged += [(block, None) for i, block in enumerate(ocr_items) if i not in taken and not is_icon(block, ax_items)]
+    merged += [(block, None) for block in extra]
     kept = [merged[i] for i in kept_by_budget([it for it, _ in merged], budget)]
     order = reading_order([it for it, _ in kept])
     return [(replace(kept[j][0], index=i), kept[j][1]) for i, j in enumerate(order)]
+
+
+def covered_by_a_control(block: Item, controls: list[Item]) -> bool:
+    """Whether a control of the app is this very line: about the same box, and the same text. Measured over the
+    larger of the two boxes, not the smaller as the merge does: the focused text area is a control itself, labelled
+    with its own value when it has no name, and its box holds every line, so over the smaller box each line would
+    read as covered by it, merge into it, and take the whole document's text."""
+    return any(same_box(control, block) and texts_match(control.text, block.text) for control in controls)
+
+
+def same_box(a: Item, b: Item) -> bool:
+    """Intersection over the larger box is at least MIN_BOX_OVERLAP."""
+    wide = min(a.x2, b.x2) - max(a.x1, b.x1)
+    tall = min(a.y2, b.y2) - max(a.y1, b.y1)
+    larger = max((a.x2 - a.x1) * (a.y2 - a.y1), (b.x2 - b.x1) * (b.y2 - b.y1))
+    return wide > 0 and tall > 0 and larger > 0 and wide * tall / larger >= MIN_BOX_OVERLAP
 
 
 def is_icon(block: Item, controls: list[Item]) -> bool:

@@ -19,11 +19,13 @@ from .config import (
     DEFAULT_READ_ONLY_CONFIDENCE,
     DEFAULT_STEPS,
     MAX_OPTIONS,
+    MOVES_NOUL,
     READ_ONLY_NOUL,
     answer_model,
+    moves_override,
     writer_model,
 )
-from .decide import Decision, browser_names, decide, offscreen_records, read_only
+from .decide import Decision, browser_names, decide, needs_moves, offscreen_records, read_only
 from .decisions import DecisionClient, DecisionError
 from .events import Events
 from .models import Abort, EarlierTask, Field, Guidance, Item, Screen, Signature, same_screen, signature
@@ -37,6 +39,8 @@ from .writer import Answer, WriterError, compose_answer
 # action's description says what was attempted and only the next capture says what came of it.
 MAX_IDLE = 3  # consecutive actions that left the screen as it was: refusals, waits on a spinner, scrolls at the bottom
 MAX_REPEATS = 2  # consecutive actions already taken on the same screen earlier in the run: a cycle, or a click that does nothing
+MAX_REVISITS = 2  # consecutive navigations to the place the action before already went to, whatever the page reads
+NAVIGATIONS = ("use_browser", "open_app")  # the actions that go to a place, not to something on the screen
 MAX_STALLS = 3  # stalls with no new page between them; the last is final, since two focuses from the writer did not free the run
 SETTLE_LOOK = 0.25  # between two looks at a screen that may still be moving; each look is a capture of its own
 EARLIER_LINES = 600  # lines of text from the screens before the last one that the answer may also be read from
@@ -121,6 +125,8 @@ class RunState:
     timings: list[dict[str, float]] = field(default_factory=list)
     idle: int = 0  # actions in a row that changed nothing on screen
     repeats: int = 0  # actions in a row already taken on the same screen
+    revisits: int = 0  # navigations in a row to the place the one before went to
+    navigated: str | None = None  # the last action when it was a navigation, so the next can be told a revisit
     stalls: int = 0  # stalls since the run last reached a page it had not been on
     pages: set[tuple[str, str | None]] = field(default_factory=set)  # every (app, URL) the run has shown
     last: Signature | None = None  # the screen the last action was taken on
@@ -137,6 +143,8 @@ class RunState:
     calls: Calls = field(default_factory=Calls)  # requests to each model, over the whole run
     clicked: Clicked | None = None  # the last action's click on page text, for the screen right after it
     read_only: bool = False  # the goal only asks to find something out, so the lower floor applies
+    moves: bool = False  # the goal needs a move beyond clicking and typing, so the run is offered the moves that are
+    moves_by: str = "gate"  # who settled it: the gate's question about the goal, or CLICKER_MOVES
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -160,6 +168,8 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             models = configured_models(typesafe, ctx)
             log(f"models: decisions {models['decisions']}, writer {models['writer']}, answer {models['answer']}")
             state.read_only = goal_only_looks(ctx, cfg.goal, log)
+            state.moves = goal_needs_moves(ctx, cfg.goal, log)
+            state.moves_by = "CLICKER_MOVES" if moves_override() is not None else "gate"
             for step in range(1, cfg.steps + 1):
                 ctx = replace(ctx, guidance=state.guidance)  # a handoff sets the focus, and the action it asked for spends it
                 if run_step(cfg, ctx, state, step, log):
@@ -188,6 +198,8 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "seconds": round(time.time() - started, 1),
             "models": models,
             "read_only": state.read_only,
+            "moves": state.moves,
+            "moves_by": state.moves_by,
             "calls": state.calls.summary(),
             "usage": state.calls.tokens(),
             "usage_by_role": state.calls.by_role(),
@@ -229,6 +241,26 @@ def goal_only_looks(ctx: Context, goal: str, log: Log) -> bool:
     looks = p >= READ_ONLY_NOUL
     log(f"read-only: {'yes' if looks else 'no'} ({p:.2f})")
     return looks
+
+
+def goal_needs_moves(ctx: Context, goal: str, log: Log) -> bool:
+    """Whether the goal needs a move beyond clicking and typing, by the decision model. Unsure, or no
+    answer, is a goal that needs none: the requests stay as they were, which is the safe side.
+    CLICKER_MOVES=on or off settles it without asking, for a run that must not depend on the guess."""
+    forced = moves_override()
+    if forced is not None:
+        log(
+            f"moves: {'offered' if forced else 'not offered'} (CLICKER_MOVES={'on' if forced else 'off'}, so the goal is not asked about)"
+        )
+        return forced
+    try:
+        p = needs_moves(ctx.typesafe, goal)
+    except DecisionError as e:
+        log(f"moves: unknown ({e}), so none are offered")
+        return False
+    needs = p >= MOVES_NOUL
+    log(f"moves: {'offered' if needs else 'not offered'} ({p:.2f})")
+    return needs
 
 
 def metered(ctx: Context, calls: Calls) -> Context:
@@ -305,7 +337,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 record["handed_back"] = True
                 state.handoffs.append(Handoff(step, state.outcome, WAITING, len(state.history), answer.text))
                 state.guidance = state.guidance.followed()  # a focus given before the screen had loaded
-                state.idle = state.repeats = 0
+                state.idle = state.repeats = state.revisits = 0
                 if cfg.act and not cfg.replay:
                     wait_for_screen(cfg, ctx, state, log)
                 return True
@@ -320,7 +352,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                     Handoff(step, state.outcome, f"scroll {answer.scroll}{where}", len(state.history), answer.text)
                 )
                 state.guidance = state.guidance.followed()  # a focus from before the scroll is about the old screen
-                state.idle = state.repeats = 0
+                state.idle = state.repeats = state.revisits = 0
                 if cfg.act and not cfg.replay:
                     scroll_for_writer(cfg, state, answer, log)
                 return True
@@ -332,7 +364,7 @@ def hand_off(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 record["handed_back"] = True
                 state.handoffs.append(Handoff(step, state.outcome, answer.focus, len(state.history), answer.text))
                 state.guidance = state.guidance.focused(answer.focus)
-                state.idle = state.repeats = 0  # the stall was under the old focus; the new one starts clean
+                state.idle = state.repeats = state.revisits = 0  # the stall was under the old focus; the new one starts clean
                 return True
             log(f"\nanswer ({verdict(answer)}, {seconds:.1f}s):\n  {answer.text}")
             log.event("answer", text=answer.text, achieved=answer.achieved)
@@ -418,7 +450,7 @@ def review(cfg: RunConfig, ctx: Context, state: RunState, stopped: str, can_ask:
         {"after_action": h.actions, "why": STOPPED[h.outcome], "you_said": h.said, "focus_given": h.focus} for h in state.handoffs
     ]
     return compose_answer(
-        ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask
+        ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask, state.moves
     )
 
 
@@ -454,7 +486,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         )
     screen = with_clicked_field(screen, state.clicked, browser_names(ctx.browser, ctx.browsers))
     state.clicked = None
-    items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache)
+    items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache, apart=state.moves)
     state.view = (screen, items)
     if not screen_moved(state, screen, items, log):
         return False
@@ -463,7 +495,17 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     screen.image.save(prefix.with_name(prefix.name + "-raw.png"))
     prefix.with_name(prefix.name + "-payload.txt").write_text(
         render_payload(
-            cfg.goal, screen, items, state.history, ctx.browser, ctx.email, tried, ctx.guidance, ctx.browsers, ctx.apps
+            cfg.goal,
+            screen,
+            items,
+            state.history,
+            ctx.browser,
+            ctx.email,
+            tried,
+            ctx.guidance,
+            ctx.browsers,
+            ctx.apps,
+            state.moves,
         ),
         encoding="utf-8",
     )
@@ -482,6 +524,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
                 ctx.guidance,
                 ctx.browsers,
                 ctx.apps,
+                state.moves,
             )
     except DecisionError as e:
         # A refusal or an outage is not a guess to act on: the writer reads this screen instead.
@@ -489,7 +532,13 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         state.outcome = "no decision"
         return False
     by_index = {str(it.index): it for it in items}
-    annotate(screen, items, decision.chosen, prefix.with_suffix(".png"))
+    annotate(
+        screen,
+        items,
+        decision.item.choice if decision.pointing or decision.dragging else decision.chosen,
+        prefix.with_suffix(".png"),
+        dropped_on=decision.target.choice if decision.dragging else None,
+    )
 
     field_desc = (
         f" field={'clicked' if screen.field.clicked else screen.field.role}:{screen.field.label!r}" if screen.field else ""
@@ -500,6 +549,12 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
         f"site={decision.site.choice}"
         + (f" browser={decision.browser.choice!r} ({decision.browser.confidence:.2f})" if decision.browser is not None else "")
         + (f" open={decision.app.choice!r} ({decision.app.confidence:.2f})" if decision.app is not None else "")
+        + (
+            f" shortcut={decision.shortcut.choice!r} ({decision.shortcut.confidence:.2f})"
+            if decision.shortcut is not None
+            else ""
+        )
+        + (f" target={decision.target.choice!r} ({decision.target.confidence:.2f})" if decision.target is not None else "")
         + (f" refused={decision.refused}, asked again without it" if decision.refused else "")
     )
     for key, p in top(decision.kind, 4):
@@ -566,7 +621,13 @@ def resolve(
         log(f"  model says {decision.kind.choice!r}; stopping")
         state.outcome = "done" if decision.kind.choice == "done" else "nothing helps"
         return False
-    floor = cfg.read_only_confidence if state.read_only else cfg.min_confidence
+    # The low floor is for a goal where a wrong click only opens the wrong page. A shortcut is not that: cut, paste
+    # and close tab are not always undone, and a goal that only looks things up is as likely as any to open the moves.
+    floor = (
+        cfg.read_only_confidence
+        if state.read_only and not (decision.pressing_shortcut or decision.pointing)
+        else cfg.min_confidence
+    )
     if decision.confidence < floor:
         named = named_by_focus(decision, items, state.guidance.focus)
         if named is None or decision.kind.confidence < floor:
@@ -593,7 +654,7 @@ def resolve(
     state.history.append(what)
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
-    return not repeating(state, what, decision.kind.choice == "wait", log)
+    return not repeating(state, what, decision.kind.choice == "wait", log, decision.kind.choice in NAVIGATIONS)
 
 
 def named_by_focus(decision: Decision, items: list[Item], focus: str | None) -> str | None:
@@ -674,13 +735,28 @@ def with_clicked_field(screen: Screen, clicked: Clicked | None, browsers: list[s
     return replace(screen, field=box)
 
 
+POINTING_WORDS = {
+    "right_click_item": "right-click",
+    "double_click_item": "double-click",
+    "select_item_text": "select the text of",
+}
+
+
 def intended(decision: Decision, screen: Screen, items: list[Item]) -> str:
     """What a dry run would have done, in words: a click names the text it would land on, not its index."""
     if decision.clicking:
         item = next((it for it in items if str(it.index) == decision.item.choice), None)
         return f"click {item.text!r}" if item is not None else decision.chosen
+    if decision.dragging:
+        named = {str(it.index): it.text for it in items}
+        return f"drag {named.get(decision.item.choice)!r} onto {named.get(decision.target.choice)!r}"
+    if decision.pointing:
+        item = next((it for it in items if str(it.index) == decision.item.choice), None)
+        return f"{POINTING_WORDS[decision.kind.choice]} {item.text!r}" if item is not None else decision.chosen
     if decision.pressing_offscreen:
         return f"press {screen.offscreen[int(decision.offscreen.choice)].label!r}"
+    if decision.pressing_shortcut:
+        return f"press the {decision.shortcut.choice.replace('_', ' ')} shortcut"
     return decision.kind.choice.replace("_", " ")
 
 
@@ -711,7 +787,7 @@ def tried_here(state: RunState) -> list[str]:
     return [what for seen, what in state.seen if what is not None and state.last is not None and same_screen(seen, state.last)]
 
 
-def repeating(state: RunState, what: str, waiting: bool, log: Log) -> bool:
+def repeating(state: RunState, what: str, waiting: bool, log: Log, navigating: bool = False) -> bool:
     """Count the actions already taken on the same screen earlier, and stop once too many run in a row.
 
     The same action on the same screen led somewhere once, and this is where it led: back here.
@@ -719,14 +795,25 @@ def repeating(state: RunState, what: str, waiting: bool, log: Log) -> bool:
     with no action, so the screen it was taken on still reaches the answer, but it is never a
     repeat and never listed as tried: waiting is repeating by design, and the classifier must
     stay free to wait again. The idle count bounds it instead.
+
+    A navigation is judged by where it went, not by the screen it was taken on. A site that answers
+    with an error page reads a line differently each time, so a run that opened it again and again
+    never took the same action on the same screen twice, and nothing stopped it. The place is a
+    fact the history line holds, and opening what the last action just opened gains nothing.
     """
     if waiting:
         state.seen.append((state.last, None))
         return False
     state.repeats = state.repeats + 1 if what in tried_here(state) else 0
+    state.revisits = state.revisits + 1 if navigating and what == state.navigated else 0
+    state.navigated = what if navigating else None
     state.seen.append((state.last, what))
     if state.repeats >= MAX_REPEATS:
         log(f"  {MAX_REPEATS} actions in a row already taken on the same screen; stopping")
+        state.outcome = "stalled"
+        return True
+    if state.revisits >= MAX_REVISITS:
+        log(f"  {what!r} {MAX_REVISITS + 1} times in a row; stopping")
         state.outcome = "stalled"
         return True
     return False
@@ -752,6 +839,12 @@ def answers(
             else {}
         ),
         **({"app_to_open": decision.app.choice, "app_to_open_probabilities": decision.app.probabilities} if decision.app else {}),
+        **(
+            {"shortcut": decision.shortcut.choice, "shortcut_probabilities": decision.shortcut.probabilities}
+            if decision.shortcut
+            else {}
+        ),
+        **({"target": decision.target.choice, "target_probabilities": decision.target.probabilities} if decision.target else {}),
         "offscreen": decision.offscreen.choice if decision.offscreen else None,
         "offscreen_probabilities": decision.offscreen.probabilities if decision.offscreen else None,
         "offscreen_controls": offscreen_records(screen.offscreen),

@@ -17,10 +17,12 @@ ROLE_WORDS = {
     "AXCell": "cell",
     "AXCheckBox": "checkbox",
     "AXComboBox": "field",
+    "AXDisclosureTriangle": "disclosure",
     "AXDockItem": "dock item",
     "AXImage": "image",
     "AXLink": "link",
     "AXMenuBarItem": "menu",
+    "AXMenuItem": "menu item",  # an entry of an open menu: the ones a right click lists
     "AXMenuButton": "button",
     "AXPopUpButton": "popup",
     "AXRadioButton": "radio",
@@ -271,6 +273,7 @@ class Field:
     clicked: bool = False
     editor: bool = False
     caret: int | None = None  # where the insertion point sits in `value`, when the element says
+    selected: str = ""  # the text that is selected in the field, when the element says
 
     @property
     def is_text(self) -> bool:
@@ -285,7 +288,11 @@ class Field:
         """Everything but the opaque element handle, which no log can serialize."""
         return {f.name: getattr(self, f.name) for f in fields(self) if f.name != "ref"}
 
-    def summary(self) -> dict:
+    def summary(self, selection: bool = False) -> dict:
+        """What the classifier reads of the field. `selection` adds the text that is selected in it, for a
+        run offered the moves that select (select all, a triple click): without it the screen looks the same
+        before and after the selection is made, and a move is made again and again. Off for every other
+        run, so that its request is the one it always was."""
         if self.clicked:
             return {"role": "unknown", "label": self.label, "note": CLICKED_NOTE}
         return {
@@ -293,6 +300,7 @@ class Field:
             "label": self.label,
             "placeholder": self.placeholder,
             "current_value": self.value[:200],
+            **({"selected_text": self.selected[:200]} if selection and self.selected else {}),
             **({"note": EDITOR_NOTE} if self.editor else {}),
         }
 

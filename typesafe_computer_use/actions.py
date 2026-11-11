@@ -9,12 +9,12 @@ from dataclasses import dataclass, field, replace
 
 from PIL import Image, ImageChops
 
-from .config import SITES
-from .decide import OFFSCREEN_PREFIX, Decision, row_mates, verify_typed
+from .config import BROWSER_APPS, SHORTCUTS, SITES
+from .decide import OFFSCREEN_PREFIX, Decision, beside, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
-from .writer import Writer, WriterError, compose_text, compose_url, url_named_in
+from .writer import Writer, WriterError, compose_text, compose_url, looks_credential, url_named_in
 
 VERIFY_THRESHOLD = 0.5
 WAIT_SECONDS = 3.0  # what a wait adds to the settle every step already gets; three of them cover a slow page
@@ -56,8 +56,8 @@ def perform(decision: Decision, screen: Screen, items: list[Item], ctx: Context)
         what = click_item(by_index[key], screen)
         mates = row_mates(items, limit=None).get(int(key))
         # Three rows each end in a Buy: the line must say which, or trying one marks them all as tried.
-        # The whole row goes in, so two rows that open alike still get lines of their own.
-        return f"{what} beside {', '.join(repr(m) for m in mates)}" if mates else what
+        # The whole row goes in, so two rows that open alike still get lines of their own (see `beside`).
+        return f"{what} beside {beside(mates)}" if mates else what
     if key.startswith(OFFSCREEN_PREFIX):
         return press_offscreen(key[len(OFFSCREEN_PREFIX) :], screen)
     handler = _HANDLERS.get(key)
@@ -91,6 +91,58 @@ def click_item(item: Item, screen: Screen) -> str:
     if unseen:
         return f"{closed}clicked {item.text!r} (accessibility press changed nothing on screen)"
     return f"{closed}clicked {item.text!r} (accessibility press did not take)"
+
+
+# What an accessibility control is called (`Item.role`) when one click already does what it is for.
+ACTIVATED_BY_ONE_CLICK = frozenset({"button", "link", "checkbox", "radio", "popup", "menu", "menu item", "disclosure", "tab"})
+
+
+def _point(button: str, count: int, said: str):
+    """A right click, a double click, or a triple click on the item the item answer named.
+
+    These are always pointer clicks. A press through accessibility is a single left click, and what
+    these do (open a menu, open a file, select text) is what a pointer does and a press does not.
+    A popup in front of the item is closed first, as for a click.
+    """
+
+    def handler(decision: Decision, screen: Screen, items: list[Item], ctx: Context) -> str:
+        item = next((it for it in items if decision.item is not None and str(it.index) == decision.item.choice), None)
+        if item is None:
+            return f"{decision.kind.choice} refused: no item on screen was chosen"
+        if count > 1 and item.role in ACTIVATED_BY_ONE_CLICK:
+            # A second click submits twice, toggles a checkbox back, or lands on whatever the next page shows there.
+            return f"{decision.kind.choice} refused: {item.text!r} is a {item.role}, one click activates it"
+        popup = screen.covered.get(item.index)
+        closed = f"{close_popup(popup)} then " if popup is not None else ""
+        try:
+            desktop.click_at(screen.to_points(item), button=button, count=count)
+        except Missed as e:
+            return f"{closed}{decision.kind.choice} refused: {item.text!r} was not clicked, {e}"
+        mates = row_mates(items, limit=None).get(item.index)
+        row = f" beside {beside(mates)}" if mates else ""
+        return f"{closed}{said} {item.text!r}{row}"
+
+    return handler
+
+
+def _drag(decision: Decision, screen: Screen, items: list[Item], ctx: Context) -> str:
+    """Drag the item the item answer named onto the one the target answer named.
+
+    Nothing is dragged out from under a popup or onto one: the popup would take the press or the
+    drop, and a drag moves things, so the step refuses and the next one can close the popup first.
+    """
+    by_index = {str(it.index): it for it in items}
+    source = by_index.get(decision.item.choice) if decision.item is not None else None
+    target = by_index.get(decision.target.choice) if decision.target is not None else None
+    if source is None or target is None or source is target:
+        return "drag_item refused: it needs two different items on screen"
+    if {source.index, target.index} & set(screen.covered):
+        return f"drag_item refused: {source.text!r} or {target.text!r} is under a popup"
+    try:
+        desktop.drag(screen.to_points(source), screen.to_points(target))
+    except Missed as e:
+        return f"drag_item refused: {source.text!r} was not dragged, {e}"
+    return f"dragged {source.text!r} onto {target.text!r}"
 
 
 def press_showed(screen: Screen) -> bool:
@@ -291,12 +343,12 @@ def _use_browser(decision: Decision, screen, items, ctx: Context) -> str:
     """Go to the browser the browser answer named, and open the website the site answer named.
 
     No browser answer means one browser to work in, the configured one. `none` is the page already
-    open there, so bringing the browser forward is the whole action. A catalog key is its URL, and
-    `other` is a site outside the catalog, which only the writer can name: the URL its focus names when
-    it names one, else the one it proposes from the goal. The writer reads the
-    browser's open tabs too, since the page a goal is about is often one the user already has open
-    behind another tab, and a URL it names from them is shown in its own tab, not opened again.
-    Opening a URL activates the browser too, so the three cases differ only in the page.
+    open there, so bringing the browser forward is the whole action. A catalog key is its URL, and `other`
+    is a site outside the catalog: the URL the writer's focus names when it names one, which code reads out
+    (so that needs no writer), else the one the writer proposes from the goal. The writer reads the browser's
+    open tabs too, since the page a goal is about is often one the user already has open behind another
+    tab, and a URL that is one of them is shown in its own tab, not opened again. Opening a URL activates
+    the browser too, so the three cases differ only in the page.
     """
     browser = decision.browser.choice if decision.browser is not None else ctx.browser
     site = decision.site.choice
@@ -308,14 +360,13 @@ def _use_browser(decision: Decision, screen, items, ctx: Context) -> str:
     tabs: list[tuple[str, str]] = []
     if url is None:
         # A URL the writer's focus names is the page to open: the writer already read this screen and
-        # said where to go, so its guess from the goal alone cannot be allowed to take its place.
+        # said where to go, so its guess from the goal alone cannot be allowed to take its place. That
+        # path needs no writer of its own, since the URL was read out by code.
         url = url_named_in(ctx.guidance.focus if ctx.guidance else None)
-        if url:
-            tabs = desktop.browser_tabs(browser)
-        elif ctx.writer is None:
+        if not url and ctx.writer is None:
             return "use_browser refused: the site is outside the catalog and no writer is available to propose a URL"
-        else:
-            tabs = desktop.browser_tabs(browser)
+        tabs = desktop.browser_tabs(browser)
+        if not url:
             try:
                 url = compose_url(ctx.writer, ctx.goal, ctx.history, ctx.guidance, tabs)
             except WriterError as e:
@@ -343,6 +394,37 @@ def _open_app(decision: Decision, screen, items, ctx: Context) -> str:
     if desktop.activate(app, timeout=OPEN_SECONDS):
         return f"opened {app}"
     return f"open_app failed: {app} did not come to the front with a window"
+
+
+CLIPBOARD_OUT_OF_REACH = ("paste", "cut")  # never into, or out of, a field that holds a credential
+
+
+def looks_like_a_credential_field(field: Field | None) -> bool:
+    """A field the system calls secure, or one whose label or placeholder names a password, a code, a card."""
+    return field is not None and (
+        field.role == "AXSecureTextField" or looks_credential(field.label) or looks_credential(field.placeholder)
+    )
+
+
+def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
+    """Press the shortcut the shortcut answer named, from the catalog and nowhere else.
+
+    `none` means no shortcut in the list is the one the goal needs, and the history line says so, so
+    the next step does not ask again. What the keys did shows on the next capture, which is the only
+    witness: a copy changes nothing on screen, and the idle count bounds a run that only copies.
+    """
+    name = decision.shortcut.choice if decision.shortcut is not None else "none"
+    shortcut = SHORTCUTS.get(name)
+    if shortcut is None:
+        return "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    if shortcut.browser and screen.app != ctx.browser and screen.app not in BROWSER_APPS:
+        # The same keys do something else elsewhere: Cmd-W closes a document window, Cmd-R replies in Mail.
+        return f"press_shortcut refused: {name.replace('_', ' ')} works in a browser, and {screen.app or 'no app'} is in front"
+    if name in CLIPBOARD_OUT_OF_REACH and looks_like_a_credential_field(screen.field):
+        # The clipboard may hold a password copied from a manager, and a cut takes one out of its field.
+        return f"press_shortcut refused: {name} would act on a field that looks like a credential"
+    desktop.press(shortcut.key, command=shortcut.command, shift=shortcut.shift, option=shortcut.option, control=shortcut.control)
+    return f"pressed the {name.replace('_', ' ')} shortcut"
 
 
 def _type_email(decision, screen: Screen, items, ctx: Context) -> str:
@@ -530,8 +612,13 @@ def wait(screen: Screen, items: list[Item], ctx: Context) -> str:
 
 
 _HANDLERS = {
+    "drag_item": _drag,
+    "right_click_item": _point("right", 1, "right-clicked"),
+    "double_click_item": _point("left", 2, "double-clicked"),
+    "select_item_text": _point("left", 3, "selected the text of"),
     "use_browser": _use_browser,
     "open_app": _open_app,
+    "press_shortcut": _press_shortcut,
     "type_email": _type_email,
     "type_text": _type_text,
     "press_enter": _key("return", "pressed Return"),

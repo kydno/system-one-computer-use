@@ -247,6 +247,9 @@ def decision(kind: str, confidence: float = 0.9) -> SimpleNamespace:
         chosen=kind,
         clicking=False,
         pressing_offscreen=False,
+        pressing_shortcut=False,
+        pointing=False,
+        dragging=False,
     )
 
 

@@ -24,7 +24,27 @@ from .ax_walk import AX_PRESS, AxAttrs, Frame, walk_actionable
 from .config import ABORT_CORNER_PX
 from .models import TEXT_ROLES, Abort, AxNode, Field, KeyboardFocus
 
-KEYCODES = {"return": 36, "tab": 48, "escape": 53, "a": 0, "delete": 51, "[": 33, "right": 124}
+KEYCODES = {
+    "return": 36, "tab": 48, "escape": 53, "delete": 51, "left": 123, "right": 124, "down": 125, "up": 126,
+    "page_up": 116, "page_down": 121,
+    "[": 33, "]": 30, "=": 24, "-": 27,
+    "a": 0, "b": 11, "c": 8, "d": 2, "f": 3, "i": 34, "l": 37, "n": 45, "o": 31, "p": 35,
+    "r": 15, "s": 1, "t": 17, "u": 32, "v": 9, "w": 13, "x": 7, "z": 6,
+}  # fmt: skip
+# The Quartz names of the events a mouse button posts: pressed, released, and the button's own id.
+MOUSE_BUTTONS = {
+    "left": ("kCGEventLeftMouseDown", "kCGEventLeftMouseUp", "kCGMouseButtonLeft"),
+    "right": ("kCGEventRightMouseDown", "kCGEventRightMouseUp", "kCGMouseButtonRight"),
+}
+MODIFIER_MASKS = {
+    "command": "kCGEventFlagMaskCommand",
+    "shift": "kCGEventFlagMaskShift",
+    "option": "kCGEventFlagMaskAlternate",
+    "control": "kCGEventFlagMaskControl",
+}
+MAX_CLICKS = 3  # a click, a double click, and a triple click: the line or paragraph
+DRAG_STEPS = 12  # moves between pressing and releasing, each with its own look at the abort corner
+DRAG_HOLD = 0.15  # seconds the button is held before the first move and after the last: apps need it to start and to drop
 # Browsers name, on any element inside editable page content, the element its editing belongs to.
 # A focused element with one and no text role is a rich-text editor, such as a Google Doc's hidden
 # key box, which reports itself as a bare AXGroup.
@@ -89,21 +109,68 @@ def _down_then_up(event: Callable[[bool], object]) -> None:
         _post(event(False))
 
 
-def click_at(point: tuple[float, float]) -> None:
+def click_at(point: tuple[float, float], button: str = "left", count: int = 1) -> None:
+    """Click `count` times at `point` with the left or right button; two clicks are a double click.
+
+    Each click carries its number, which is how an app tells a double click from two single ones.
+    """
+    if button not in MOUSE_BUTTONS or not 1 <= count <= MAX_CLICKS:
+        raise ValueError(f"cannot click {count} times with the {button!r} button")
+    down_name, up_name, button_name = MOUSE_BUTTONS[button]
+    kinds = {True: getattr(Quartz, down_name), False: getattr(Quartz, up_name)}
     # Check before moving: the synthetic move would otherwise take the pointer out of the abort corner.
     check_abort()
     _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, point, Quartz.kCGMouseButtonLeft))
+    for number in range(1, count + 1):
+        check_abort()
+
+        def event(down: bool, number: int = number):
+            e = Quartz.CGEventCreateMouseEvent(None, kinds[down], point, getattr(Quartz, button_name))
+            if count > 1:
+                Quartz.CGEventSetIntegerValueField(e, Quartz.kCGMouseEventClickState, number)
+            return e
+
+        _down_then_up(event)
+
+
+def drag(start: tuple[float, float], end: tuple[float, float]) -> None:
+    """Press the left button at `start`, move to `end` in steps, and release there.
+
+    A drag that is interrupted or aborted half way goes back to `start` and lets go there, so
+    nothing stays held and nothing is dropped on whatever the pointer was passing over (a folder,
+    another window, the Trash): the abort corner is the user's emergency stop, and it has no side effect.
+    """
     check_abort()
-    kinds = {True: Quartz.kCGEventLeftMouseDown, False: Quartz.kCGEventLeftMouseUp}
-    _down_then_up(lambda down: Quartz.CGEventCreateMouseEvent(None, kinds[down], point, Quartz.kCGMouseButtonLeft))
+    _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventMouseMoved, start, Quartz.kCGMouseButtonLeft))
+    check_abort()
+    here = start
+    completed = False
+    try:
+        _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, start, Quartz.kCGMouseButtonLeft))
+        sleep_watching(DRAG_HOLD)
+        for n in range(1, DRAG_STEPS + 1):
+            check_abort()
+            here = (start[0] + (end[0] - start[0]) * n / DRAG_STEPS, start[1] + (end[1] - start[1]) * n / DRAG_STEPS)
+            _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDragged, here, Quartz.kCGMouseButtonLeft))
+        sleep_watching(DRAG_HOLD)
+        completed = True
+    finally:
+        try:
+            if not completed and here != start:
+                here = start
+                _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDragged, here, Quartz.kCGMouseButtonLeft))
+        finally:
+            _post(Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, here, Quartz.kCGMouseButtonLeft))
 
 
-def press(key: str, command: bool = False, shift: bool = False) -> None:
+def press(key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:
     check_abort()
     code = KEYCODES[key]
-    flags = Quartz.kCGEventFlagMaskCommand if command else 0
-    if shift:
-        flags |= Quartz.kCGEventFlagMaskShift
+    held = {"command": command, "shift": shift, "option": option, "control": control}
+    flags = 0
+    for name, on in held.items():
+        if on:
+            flags |= getattr(Quartz, MODIFIER_MASKS[name])
 
     def event(down: bool):
         e = Quartz.CGEventCreateKeyboardEvent(None, code, down)
@@ -444,6 +511,7 @@ def focused_field(pid: int | None = None) -> Field | None:
     label = _ax_attr(element, AS.kAXTitleAttribute) or _ax_attr(element, AS.kAXDescriptionAttribute) or ""
     role = str(_ax_attr(element, AS.kAXRoleAttribute) or "")
     selected = _ax_attr(element, "AXSelectedTextRange")
+    selected_text = _ax_attr(element, "AXSelectedText")
     caret = None
     if selected is not None:
         _, span = AS.AXValueGetValue(selected, AS.kAXValueCFRangeType, None)  # PyObjC: (location, length)
@@ -459,6 +527,7 @@ def focused_field(pid: int | None = None) -> Field | None:
         h=h,
         ref=element,
         caret=caret,
+        selected=selected_text if isinstance(selected_text, str) else "",
         editor=role not in TEXT_ROLES
         and (
             _ax_attr(element, EDITABLE_ANCESTOR) is not None

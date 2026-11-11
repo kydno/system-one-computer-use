@@ -59,13 +59,13 @@ def cache_key(body: dict, repeat: int) -> str:
     return hashlib.sha256(json.dumps([body, repeat], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def plan(selected: Selected, model: str, cache: Path, repeats: int) -> dict:
+def plan(selected: Selected, model: str, cache: Path, repeats: int, moves: bool | None = None) -> dict:
     """How many requests a pass would send and how many of those the cache already holds. Counts the
     first request of each decision; a refused question or an app question would add a few more."""
     cached = 0
     for repeat in range(repeats):
         for case, _, _ in selected:
-            state, questions = request(case)
+            state, questions = request(case, moves)
             body = {"model": model, "state": state, "questions": {n: q.wire() for n, q in questions.items() if not is_settled(q)}}
             cached += (cache / f"{cache_key(body, repeat)}.json").is_file()
     asks = len(selected) * repeats
@@ -111,12 +111,14 @@ class EvalClient(DecisionClient):
 def pick_of(decision: decide.Decision, case: Case) -> dict:
     """A decision as the thing a label states: its kind, and the item it clicked or the site it opened."""
     kind = decision.kind.choice
-    clicked = kind == "click_item" and decision.item is not None
+    clicked = kind in ("click_item", *decide.POINTING) and decision.item is not None
     text = next((i["text"] for i in case.items if decision.item and str(i["index"]) == decision.item.choice), None)
     return {
         "kind": kind,
         **({"item": decision.item.choice, "item_text": text} if clicked else {}),
         **({"site": decision.site.choice} if kind == "use_browser" else {}),
+        **({"shortcut": decision.shortcut.choice} if decision.shortcut is not None else {}),
+        **({"target": decision.target.choice} if decision.target is not None else {}),
     }
 
 
@@ -127,7 +129,9 @@ def matches(expect: dict, pick: dict | None) -> bool:
     return all(pick.get(key) == expect[key] for key in ("item", "site") if key in expect)
 
 
-def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[dict], dict, str | None]:
+def run_pass(
+    selected: Selected, factory: Factory, repeats: int, moves: bool | None = None
+) -> tuple[list[dict], dict, str | None]:
     """Ask every selected case `repeats` times. Returns a row per ask, how the clients were used, and
     why the pass stopped early (the budget, or FAILURE_STREAK requests in a row that got no answer), if it did.
     A refusal is the model's answer to a case, so it neither counts toward that streak nor ends it."""
@@ -155,6 +159,7 @@ def run_pass(selected: Selected, factory: Factory, repeats: int) -> tuple[list[d
                             r.guidance,
                             r.browsers,
                             r.apps,
+                            r.moves if moves is None else moves,
                         )
                 except BudgetError as e:
                     stopped = str(e)

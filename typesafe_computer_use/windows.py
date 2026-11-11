@@ -74,11 +74,17 @@ BROWSER_EXES = {"Google Chrome": "chrome", "Microsoft Edge": "msedge", "Firefox"
 
 # Virtual keys for the keys the actions press. macOS's Command becomes Control, except Command-[,
 # a browser's Back, which is Alt-Left on Windows.
-VK = {"return": 0x0D, "tab": 0x09, "escape": 0x1B, "a": 0x41, "delete": 0x2E, "[": 0xDB, "left": 0x25, "right": 0x27}
+VK = {
+    "return": 0x0D, "tab": 0x09, "escape": 0x1B, "delete": 0x2E, "left": 0x25, "right": 0x27, "up": 0x26, "down": 0x28,
+    "page_up": 0x21, "page_down": 0x22,
+    "[": 0xDB, "]": 0xDD, "=": 0xBB, "-": 0xBD,
+    "a": 0x41, "b": 0x42, "c": 0x43, "d": 0x44, "f": 0x46, "i": 0x49, "l": 0x4C, "n": 0x4E, "o": 0x4F, "p": 0x50,
+    "r": 0x52, "s": 0x53, "t": 0x54, "u": 0x55, "v": 0x56, "w": 0x57, "x": 0x58, "z": 0x5A,
+}  # fmt: skip
 VK_CONTROL = 0x11
 VK_SHIFT = 0x10
 VK_ALT = 0x12
-EXTENDED_KEYS = {0x2E, 0x25, 0x27}  # Delete and the arrows live on the extended keypad
+EXTENDED_KEYS = {0x2E, 0x25, 0x26, 0x27, 0x28, 0x21, 0x22}  # Delete, the arrows and Page Up and Down: the extended keypad
 COMMAND_CHORDS = {"[": (VK_ALT, VK["left"])}
 
 INPUT_MOUSE = 0
@@ -88,6 +94,15 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+BUTTON_EVENTS = {
+    "left": (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
+    "right": (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
+}
+MAX_CLICKS = 3  # a click, a double click, and a triple click: the line or paragraph
+DRAG_STEPS = 12  # moves between pressing and releasing, each with its own look at the abort corner
+DRAG_HOLD = 0.15  # seconds the button is held before the first move and after the last: apps need it to start and to drop
 MOUSEEVENTF_WHEEL = 0x0800
 
 
@@ -126,9 +141,21 @@ def display_name(process_name: str) -> str:
     return next((name for name, exe in BROWSER_EXES.items() if exe == stem), process_name)
 
 
-def key_events(key: str, command: bool = False, shift: bool = False) -> list[tuple[int, int]]:
-    """(virtual key, flags) for pressing a key, with its modifiers held around it."""
-    keys = COMMAND_CHORDS.get(key, (VK_CONTROL, VK[key])) if command else (VK[key],)
+def key_events(
+    key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False
+) -> list[tuple[int, int]]:
+    """(virtual key, flags) for pressing a key, with its modifiers held around it.
+
+    Windows has one Control key, which stands for macOS's Command and its Control alike, and Alt is Option.
+    Command with a key that has a chord of its own (`[` is Alt-Left) is that chord, with Shift if asked; Option
+    or Control with it would be dropped silently, so that combination is refused.
+    """
+    if command and key in COMMAND_CHORDS:
+        if option or control:
+            raise ValueError(f"Command-{key} is {COMMAND_CHORDS[key]} on Windows and cannot also hold Option or Control")
+        keys = COMMAND_CHORDS[key]
+    else:
+        keys = (*((VK_CONTROL,) if command or control else ()), *((VK_ALT,) if option else ()), VK[key])
     keys = (VK_SHIFT, *keys) if shift else keys
     down = [(vk, KEYEVENTF_EXTENDEDKEY if vk in EXTENDED_KEYS else 0) for vk in keys]
     up = [(vk, flags | KEYEVENTF_KEYUP) for vk, flags in reversed(down)]
@@ -264,24 +291,87 @@ def _move(point: tuple[int, int]) -> None:
     time.sleep(EVENT_GAP)
 
 
-def click_at(point: tuple[float, float]) -> None:
-    """Move, read back where the cursor landed, then press and release there.
-
-    A cursor that did not reach the target (another desktop has the input, or the point is off
-    every monitor) means the click would land somewhere unknown, so nothing is pressed.
-    """
+def _reach(point: tuple[float, float]) -> tuple[int, int]:
+    """Move the cursor to `point` and read back where it landed. A cursor that did not reach the
+    target (another desktop has the input, or the point is off every monitor) would press somewhere
+    unknown, so nothing is pressed."""
     target = (round(point[0]), round(point[1]))
     _move(target)
     actual = mouse_location()
     if not landed(target, actual):
         raise Missed(f"the cursor went to {actual}, not {target}")
-    _send(_mouse(MOUSEEVENTF_LEFTDOWN))
-    _send(_mouse(MOUSEEVENTF_LEFTUP))
+    return target
 
 
-def press(key: str, command: bool = False, shift: bool = False) -> None:
-    for vk, flags in key_events(key, command, shift):
-        _send(_key(vk=vk, flags=flags))
+def click_at(point: tuple[float, float], button: str = "left", count: int = 1) -> None:
+    """Move, read back where the cursor landed, then press and release there `count` times with the
+    left or right button; two clicks in a row are a double click. The abort corner is looked at
+    between the clicks, and the button comes up even when the press is interrupted."""
+    if button not in BUTTON_EVENTS or not 1 <= count <= MAX_CLICKS:
+        raise ValueError(f"cannot click {count} times with the {button!r} button")
+    down, up = BUTTON_EVENTS[button]
+    check_abort()
+    _reach(point)
+    for n in range(count):
+        if n:
+            check_abort()
+        try:
+            _send(_mouse(down))
+        finally:
+            _send(_mouse(up))
+
+
+def drag(start: tuple[float, float], end: tuple[float, float]) -> None:
+    """Press the left button at `start`, move to `end` in steps, and release there.
+
+    A drag that is interrupted or aborted half way goes back to `start` and lets go there, so nothing
+    stays held and nothing is dropped where the cursor was passing over. The button-up event carries no
+    position, so the cursor is moved to the release point first, never left where the user's hand took it
+    (the abort corner).
+    """
+    check_abort()
+    here = _reach(start)
+    completed = False
+    try:
+        _send(_mouse(MOUSEEVENTF_LEFTDOWN))
+        sleep_watching(DRAG_HOLD)
+        for n in range(1, DRAG_STEPS + 1):
+            check_abort()
+            here = (
+                round(start[0] + (end[0] - start[0]) * n / DRAG_STEPS),
+                round(start[1] + (end[1] - start[1]) * n / DRAG_STEPS),
+            )
+            _move(here)
+        sleep_watching(DRAG_HOLD)
+        completed = True
+    finally:
+        try:
+            _move(here if completed else _round_point(start))
+        finally:
+            _send(_mouse(MOUSEEVENTF_LEFTUP))
+
+
+def _round_point(point: tuple[float, float]) -> tuple[int, int]:
+    return (round(point[0]), round(point[1]))
+
+
+def press(key: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:
+    """Press the key with its modifiers held around it. A key still held when an event fails (a UAC
+    prompt or the lock screen takes the input desktop) is let go, so no modifier stays down."""
+    held: list[tuple[int, int]] = []
+    try:
+        for vk, flags in key_events(key, command, shift, option, control):
+            if not flags & KEYEVENTF_KEYUP:
+                held.append((vk, flags))
+            _send(_key(vk=vk, flags=flags))
+            if flags & KEYEVENTF_KEYUP:
+                held = [h for h in held if h[0] != vk]
+    finally:
+        for vk, flags in reversed(held):
+            # One that cannot be let go (the input desktop is still locked) must not leave the others held,
+            # and must not hide the error that got us here.
+            with suppress(OSError):
+                _send(_key(vk=vk, flags=flags | KEYEVENTF_KEYUP))
 
 
 def type_text(text: str) -> None:

@@ -24,6 +24,7 @@ from PIL import Image
 
 from typesafe_computer_use import actions, runner
 from typesafe_computer_use.actions import Context
+from typesafe_computer_use.decide import POINTING
 from typesafe_computer_use.decisions import Endpoint, Noul
 from typesafe_computer_use.events import Events
 from typesafe_computer_use.models import AxNode, Field, Item, Popup, Screen
@@ -37,6 +38,7 @@ ROW_HEIGHT = 40.0
 ROW_TEXT_HEIGHT = 30.0  # a row's text is shorter than its pitch, so there is a gap between rows
 ROW_X1, ROW_X2 = 100.0, 600.0
 LOADING = "Loading..."
+CLICKS = {("left", 1): "click", ("right", 1): "rightclick", ("left", 2): "doubleclick", ("left", 3): "tripleclick"}
 
 # An off-screen control is parked far above the display, the way Chromium parks a scrolled-out link.
 OFFSCREEN_Y = -4200.0
@@ -140,6 +142,7 @@ class World:
         self.mouse: list[tuple[float, float]] = []
         self.wheel: list[tuple[float, float] | None] = []  # where each scroll parked the pointer, None for the window's center
         self.fake: FakeTypeSafe | None = None  # the classifier `drive` built, for fake.states
+        self.apart: list[bool] = []  # whether each step's perception was told to keep a text area's lines apart
         self.asked: list[str] = []  # the questions the writer put to the user
         self.loading = {p.name: p.loads_in for p in pages}
         self.ticks = 0  # captures taken so far, so a page can show something that moves on its own
@@ -314,24 +317,36 @@ class World:
 
     # ----- the machine ---------------------------------------------------------------------
 
-    def click_at(self, point: tuple[float, float]) -> None:
+    def click_at(self, point: tuple[float, float], button: str = "left", count: int = 1) -> None:
         """A synthetic click, in screen points: find the cell it lands on and press that item.
 
         A page with a `covered_by` overlay takes every mouse click itself, wherever it was aimed:
         that is a cookie banner over the content. A press through accessibility still reaches the
-        element under it, which is the whole point of pressing rather than clicking.
+        element under it, which is the whole point of pressing rather than clicking. A right click
+        or a click that repeats is the action of the same name ("rightclick:Photo", "doubleclick:Photo").
         """
         self.mouse.append(point)
+        way = CLICKS[button, count]
         if self.page.covered_by is not None:
-            self.apply(f"click:{self.page.covered_by}")
+            self.apply(f"{way}:{self.page.covered_by}")
             return
-        px, py = point[0] * SCALE, point[1] * SCALE
-        cells = self.cells()
-        hit = next((c for c in cells if c.box[0] <= px <= c.box[2] and c.box[1] <= py <= c.box[3]), None)
+        hit, cells = self.cell_at(point)
         if hit is not None and self.page.popup is not None and hit.text in self.page.under_popup:
             self.apply(f"click:{self.page.popup}")  # the popup is in front of it and takes the click
             return
-        self.apply(self.click_action(hit, cells) if hit is not None else "click:nothing")
+        self.apply(self.click_action(hit, cells).replace("click:", f"{way}:", 1) if hit is not None else f"{way}:nothing")
+
+    def cell_at(self, point: tuple[float, float]) -> tuple[Cell | None, list[Cell]]:
+        """The cell under a screen point, and every cell of the page."""
+        px, py = point[0] * SCALE, point[1] * SCALE
+        cells = self.cells()
+        return next((c for c in cells if c.box[0] <= px <= c.box[2] and c.box[1] <= py <= c.box[3]), None), cells
+
+    def drag(self, start: tuple[float, float], end: tuple[float, float]) -> None:
+        """A drag from one point to another is "drag:<text taken>><text dropped on>"."""
+        taken, dropped = (hit.text if hit is not None else "nothing" for hit, _ in (self.cell_at(start), self.cell_at(end)))
+        self.mouse.append(start)
+        self.apply(f"drag:{taken}>{dropped}")
 
     def ax_press(self, ref: object) -> bool:
         if not isinstance(ref, Ref) or self._refs.get(ref.name) is not ref:
@@ -339,9 +354,15 @@ class World:
         self.apply(ref.name)
         return True
 
-    def press(self, name: str, command: bool = False, shift: bool = False) -> None:
+    def press(self, name: str, command: bool = False, shift: bool = False, option: bool = False, control: bool = False) -> None:
+        """A key. Command-[ is Back; any other chord with Command, Option or Control is "key:cmd+shift+z",
+        its modifiers in that order; a plain key, or one with Shift alone, is the key's own name."""
         if command and name == "[":
             self.apply("back")
+            return
+        if command or option or control:
+            held = [m for m, on in (("cmd", command), ("ctrl", control), ("opt", option), ("shift", shift)) if on]
+            self.apply("key:" + "+".join([*held, name]))
             return
         self.apply("enter" if name == "return" else name)
 
@@ -379,12 +400,15 @@ class World:
     def install(self, monkeypatch) -> None:
         """Replace the two outer seams: the screen the loop reads and the machine it drives."""
         monkeypatch.setattr(runner, "capture", lambda *a, **k: self.capture())
-        monkeypatch.setattr(runner, "perceive", lambda screen, *a, **k: self.perceive(screen))
+        monkeypatch.setattr(
+            runner, "perceive", lambda screen, *a, **k: (self.apart.append(k.get("apart", False)), self.perceive(screen))[1]
+        )
         monkeypatch.setattr(desktop, "check_abort", lambda: None)
         monkeypatch.setattr(desktop, "sleep_watching", lambda seconds: None)
         monkeypatch.setattr(desktop, "click_at", self.click_at)
         monkeypatch.setattr(desktop, "ax_press", self.ax_press)
         monkeypatch.setattr(desktop, "press", self.press)
+        monkeypatch.setattr(desktop, "drag", self.drag)
         monkeypatch.setattr(desktop, "scroll", self.scroll)
         monkeypatch.setattr(desktop, "hover", lambda at: None)  # nothing in the world reacts to the pointer
         monkeypatch.setattr(desktop, "type_text", self.type_text)
@@ -413,7 +437,8 @@ class FakeTypeSafe:
 
     A policy returns (kind, target) and this maps the target to whatever key the question wants:
     the item's index for click_item and for a scroll aimed at an item, the off-screen control's key
-    for press_offscreen, the site key for use_browser. So a scenario never writes an index, and renumbering the page cannot break it.
+    for press_offscreen, the site key for use_browser, the catalog name for press_shortcut (answered in
+    its own request, with the step's second confidence). So a scenario never writes an index, and renumbering the page cannot break it.
 
     Every decision state lands in `states`, so a test can assert what the model was shown. The
     `verify_typed` Noul that `actions._type_text` makes is a different question about a different
@@ -422,12 +447,27 @@ class FakeTypeSafe:
 
     endpoint = Endpoint("fake", "https://decisions.example.com/v1/decisions", "", "fake/decisions")
 
-    def __init__(self, policy: Policy, noul: float = 0.95, read_only: bool = False):
+    def __init__(
+        self,
+        policy: Policy,
+        noul: float = 0.95,
+        read_only: bool = False,
+        moves: bool = False,
+        shortcuts: Callable[[dict], str] | None = None,
+    ):
         self.policy = policy
+        self.shortcuts = shortcuts  # decides the shortcut from the follow-up's own state, when a scenario wants that
         self.noul = noul
         self.read_only = read_only  # how the goal question at the start of a run is answered
+        self.moves = moves  # how the goal-needs-moves question is: closed unless a scenario opens it
         self.states: list[dict] = []
         self.asked: list[dict] = []  # the questions each decision was asked, so a test can read the criteria offered
+        self.pending: tuple = (
+            None,
+            DEFAULT_CONFIDENCE,
+            DEFAULT_CONFIDENCE,
+        )  # the last step's target, and its item and drop-target confidences, for a follow-up question
+        self.follow_ups: list[dict] = []  # the state each shortcut follow-up was sent, which is all that request sees
 
     def __enter__(self) -> FakeTypeSafe:
         return self
@@ -438,22 +478,44 @@ class FakeTypeSafe:
     def system_one(self, state: dict, questions: dict) -> SimpleNamespace:
         if "read_only" in questions:
             return SimpleNamespace(answers={"read_only": SimpleNamespace(noul=1.0 if self.read_only else 0.0)})
+        if "moves" in questions:
+            return SimpleNamespace(answers={"moves": SimpleNamespace(noul=1.0 if self.moves else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
+        if set(questions) == {"target"}:  # the follow-up to a drag_item: where it is dropped, named by text
+            self.asked.append(questions)
+            target, confidence = self.pending[0][1], self.pending[2]
+            return SimpleNamespace(answers={"target": _answer(self._item_key(state, target), confidence)})
+        if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
+            self.asked.append(questions)
+            self.follow_ups.append(state)
+            target, confidence = self.pending[:2]
+            if self.shortcuts is not None:
+                target = self.shortcuts(state)
+            return SimpleNamespace(answers={"shortcut": _answer(target, confidence)})
         self.states.append(state)
         self.asked.append(questions)
         step = self.policy(state, questions)
         kind, target = step[0], step[1]
+        offered = questions["kind"].criteria if "kind" in questions else {}
+        if kind not in offered and kind not in ("done", "none"):
+            raise AssertionError(f"the scenario takes {kind!r}, which the kind question did not offer: {sorted(offered)}")
         confidence = step[2] if len(step) > 2 else DEFAULT_CONFIDENCE
+        asked_again = confidence[1] if isinstance(confidence, tuple) else confidence
+        dropped = confidence[2] if isinstance(confidence, tuple) and len(confidence) > 2 else asked_again
+        self.pending = (target, asked_again, dropped)
         return SimpleNamespace(answers=self._answers(state, questions, kind, target, confidence))
 
     def _answers(self, state: dict, questions: dict, kind: str, target, confidence: float | tuple[float, float]) -> dict:
         """A step's confidence is one figure for every answer, or (kind, item) when the two differ."""
-        confidence, item_confidence = confidence if isinstance(confidence, tuple) else (confidence, confidence)
+        confidence, item_confidence = confidence[:2] if isinstance(confidence, tuple) else (confidence, confidence)
         answers = {"kind": _answer(kind, confidence), "site": _answer(target if kind == "use_browser" else "none", confidence)}
         if "item" in questions:
-            aimed = kind == "click_item" or (kind in ("scroll_down", "scroll_up") and target is not None)
-            answers["item"] = _answer(self._item_key(state, target) if aimed else "0", item_confidence)
+            aimed = kind in ("click_item", *POINTING, "drag_item") or (
+                kind in ("scroll_down", "scroll_up") and target is not None
+            )
+            what = target[0] if kind == "drag_item" else target
+            answers["item"] = _answer(self._item_key(state, what) if aimed else "0", item_confidence)
         if "offscreen" in questions:
             key = self._offscreen_key(state, target) if kind == "press_offscreen" else "0"
             answers["offscreen"] = _answer(key, confidence)
@@ -564,6 +626,8 @@ def drive(
     events: Events | None = None,
     act: bool = True,
     read_only: bool = False,
+    moves: bool = False,
+    shortcuts: Callable[[dict], str] | None = None,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
@@ -572,7 +636,7 @@ def drive(
     With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
-    fake = FakeTypeSafe(policy, noul, read_only)
+    fake = FakeTypeSafe(policy, noul, read_only, moves, shortcuts)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
     cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)
