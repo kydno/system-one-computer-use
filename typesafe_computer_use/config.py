@@ -15,8 +15,9 @@ DEFAULT_MIN_CONFIDENCE = 0.4
 # page and the next step can leave it. GPT-6 Luna spreads an item's odds over every item on screen:
 # its right click scored 0.11 to 0.24 on three Firebase and Cloud Console runs.
 DEFAULT_READ_ONLY_CONFIDENCE = 0.15
-# How sure the decision model must be that a goal needs a move beyond clicks and typing (a shortcut, a
-# right click, a double click, a selection, a drag) before those moves are offered for the run. A probe of
+# How sure the decision model must be that a goal needs a move beyond clicks and typing (for now a keyboard
+# shortcut; the click variants and the drag join it in later changes) before those moves are offered for the
+# run. A probe of
 # Jev scored 20 goals that need one 0.58 to 0.98 and 16 that do not 0.05 to 0.36; offering the moves to every
 # goal cost 2.6 points of agreement on saved steps that never needed them.
 MOVES_NOUL = 0.5
@@ -73,7 +74,11 @@ class Shortcut:
     shift: bool = False
     option: bool = False
     control: bool = False
+    browser: bool = False  # does its work in a browser only: elsewhere the same keys do something else (Cmd-R is Reply in Mail)
 
+
+# The apps a browser shortcut (new tab, close tab, next tab, reload) is pressed in; the configured browser counts too.
+BROWSER_APPS = ("Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc", "Safari", "Firefox")
 
 # The shortcuts the classifier can pick by name, the kind of move that has no control on screen or
 # whose control a shortcut reaches in one step. Kept short: each one can split the vote with a button
@@ -84,22 +89,25 @@ SHORTCUTS: dict[str, Shortcut] = {
     "paste": Shortcut("v", "Paste the clipboard where the focus is.", command=True),
     "select_all": Shortcut("a", "Select everything in the focused field, document, or page.", command=True),
     "undo": Shortcut("z", "Undo the last change in the app.", command=True),
+    # Redo is Command-Shift-Z; the Windows adapter turns it into Ctrl-Shift-Z, which some apps there answer with Ctrl-Y only.
     "redo": Shortcut("z", "Redo the change that was just undone.", command=True, shift=True),
     "save": Shortcut("s", "Save the document that is open.", command=True),
     "find": Shortcut("f", "Open the find bar to search the page or document for text.", command=True),
-    "new_tab": Shortcut("t", "Open a new, empty tab in the browser.", command=True),
-    "close_tab": Shortcut("w", "Close the current tab or window.", command=True),
-    "next_tab": Shortcut("tab", "Switch to the next tab in the browser.", control=True),
-    "previous_tab": Shortcut("tab", "Switch to the previous tab in the browser.", control=True, shift=True),
-    "reload": Shortcut("r", "Reload the page.", command=True),
+    "new_tab": Shortcut("t", "Open a new, empty tab in the browser.", command=True, browser=True),
+    "close_tab": Shortcut("w", "Close the current tab or window.", command=True, browser=True),
+    "next_tab": Shortcut("tab", "Switch to the next tab in the browser.", control=True, browser=True),
+    "previous_tab": Shortcut("tab", "Switch to the previous tab in the browser.", control=True, shift=True, browser=True),
+    "reload": Shortcut("r", "Reload the page.", command=True, browser=True),
     "zoom_in": Shortcut("=", "Make the page or document larger.", command=True),
     "zoom_out": Shortcut("-", "Make the page or document smaller.", command=True),
     # Added after the one OSWorld task this agent failed, bringing back the last tab that was closed, which no
     # entry above does. They sit in the shortcut question only, a request of its own: the kind question,
     # where each extra entry split the vote, is as it was.
-    "reopen_tab": Shortcut("t", "Reopen the tab or window that was closed last.", command=True, shift=True),
-    "address_bar": Shortcut("l", "Put the cursor in the browser's address bar, with its text selected.", command=True),
-    "bookmark_page": Shortcut("d", "Bookmark the page that is open.", command=True),
+    "reopen_tab": Shortcut("t", "Reopen the tab or window that was closed last.", command=True, shift=True, browser=True),
+    "address_bar": Shortcut(
+        "l", "Put the cursor in the browser's address bar, with its text selected.", command=True, browser=True
+    ),
+    "bookmark_page": Shortcut("d", "Bookmark the page that is open.", command=True, browser=True),
     "new_window": Shortcut("n", "Open a new window, or a new document, in the app.", command=True),
     "open_file": Shortcut("o", "Open the dialog that asks which file to open.", command=True),
     "save_as": Shortcut(

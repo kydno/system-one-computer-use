@@ -9,12 +9,12 @@ from dataclasses import dataclass, field, replace
 
 from PIL import Image, ImageChops
 
-from .config import SHORTCUTS, SITES
+from .config import BROWSER_APPS, SHORTCUTS, SITES
 from .decide import OFFSCREEN_PREFIX, Decision, beside, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
-from .writer import Writer, WriterError, compose_text, compose_url
+from .writer import Writer, WriterError, compose_text, compose_url, looks_credential
 
 VERIFY_THRESHOLD = 0.5
 WAIT_SECONDS = 3.0  # what a wait adds to the settle every step already gets; three of them cover a slow page
@@ -93,6 +93,10 @@ def click_item(item: Item, screen: Screen) -> str:
     return f"{closed}clicked {item.text!r} (accessibility press did not take)"
 
 
+# What an accessibility control is called (`Item.role`) when one click already does what it is for.
+ACTIVATED_BY_ONE_CLICK = frozenset({"button", "link", "checkbox", "radio", "popup", "menu", "tab"})
+
+
 def _point(button: str, count: int, said: str):
     """A right click, a double click, or a triple click on the item the item answer named.
 
@@ -105,6 +109,9 @@ def _point(button: str, count: int, said: str):
         item = next((it for it in items if decision.item is not None and str(it.index) == decision.item.choice), None)
         if item is None:
             return f"{decision.kind.choice} refused: no item on screen was chosen"
+        if count > 1 and item.role in ACTIVATED_BY_ONE_CLICK:
+            # A second click submits twice, toggles a checkbox back, or lands on whatever the next page shows there.
+            return f"{decision.kind.choice} refused: {item.text!r} is a {item.role}, one click activates it"
         popup = screen.covered.get(item.index)
         closed = f"{close_popup(popup)} then " if popup is not None else ""
         try:
@@ -383,6 +390,14 @@ def _open_app(decision: Decision, screen, items, ctx: Context) -> str:
     return f"open_app failed: {app} did not come to the front with a window"
 
 
+CLIPBOARD_OUT_OF_REACH = ("paste", "cut")  # never into, or out of, a field that holds a credential
+
+
+def looks_like_a_credential_field(field: Field | None) -> bool:
+    """A field the system calls secure, or one whose label or placeholder names a password, a code, a card."""
+    return field is not None and (field.role == "AXSecureTextField" or looks_credential(field.label or field.placeholder))
+
+
 def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
     """Press the shortcut the shortcut answer named, from the catalog and nowhere else.
 
@@ -394,6 +409,12 @@ def _press_shortcut(decision: Decision, screen, items, ctx: Context) -> str:
     shortcut = SHORTCUTS.get(name)
     if shortcut is None:
         return "press_shortcut refused: no shortcut in the list is the one the goal needs"
+    if shortcut.browser and screen.app != ctx.browser and screen.app not in BROWSER_APPS:
+        # The same keys do something else elsewhere: Cmd-W closes a document window, Cmd-R replies in Mail.
+        return f"press_shortcut refused: {name.replace('_', ' ')} works in a browser, and {screen.app or 'no app'} is in front"
+    if name in CLIPBOARD_OUT_OF_REACH and looks_like_a_credential_field(screen.field):
+        # The clipboard may hold a password copied from a manager, and a cut takes one out of its field.
+        return f"press_shortcut refused: {name} would act on a field that looks like a credential"
     desktop.press(shortcut.key, command=shortcut.command, shift=shortcut.shift, option=shortcut.option, control=shortcut.control)
     return f"pressed the {name.replace('_', ' ')} shortcut"
 
