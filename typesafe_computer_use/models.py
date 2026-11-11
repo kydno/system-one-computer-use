@@ -17,10 +17,12 @@ ROLE_WORDS = {
     "AXCell": "cell",
     "AXCheckBox": "checkbox",
     "AXComboBox": "field",
+    "AXDisclosureTriangle": "disclosure",
     "AXDockItem": "dock item",
     "AXImage": "image",
     "AXLink": "link",
     "AXMenuBarItem": "menu",
+    "AXMenuItem": "menu item",  # an entry of an open menu: the ones a right click lists
     "AXMenuButton": "button",
     "AXPopUpButton": "popup",
     "AXRadioButton": "radio",

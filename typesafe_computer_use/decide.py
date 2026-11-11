@@ -42,8 +42,8 @@ POINTING = {
     "select_item_text": (
         "Select the whole line or paragraph of an on-screen text item with a triple click (chosen in the item "
         "question), so that it can be copied. Use when the goal needs that text copied and no control on screen "
-        "selects it. Not when the focused field already shows that text as selected. Typing afterwards adds text "
-        "and does not replace the selection."
+        "selects it. Not when the focused field already shows that text as selected. Typing afterwards does not "
+        "act on the selection."
     ),
 }
 DRAG = (
