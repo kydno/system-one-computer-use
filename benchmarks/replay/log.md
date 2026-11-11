@@ -169,3 +169,17 @@ now keeps the lines of the focused text area or editor one item each (`perceive(
 reads the blocks it always did, so no request of a run without the moves changes. The saved cases hold their items
 as they were, so no offline pass can show the effect: it needs a supervised run of a goal that names a line. A word
 inside a line is still not an item. Unit tests cover the split and that the flag follows the gate.
+
+Supervised, on this code (runs `20261110-191418` and `-191556`, each command approved):
+
+- A goal of select all, copy, open the find bar, paste there ran through in order, six steps, judged achieved: the
+  follow-up picked `select_all`, `copy`, `find`, `paste` in turn (1.00, 1.00, 1.00, 0.97), where before it picked
+  `select_all` six times. The field's `selected_text` was read from TextEdit's accessibility tree on the screens
+  after each selection (the whole text after select all; the stale search term in the find field before the
+  paste), so the first hardware read of it works on a Mac. The find bar showed one match for the pasted text.
+- A goal naming the third line of the document, with the focus in the find bar at the start: the first two steps
+  stopped at 0.36 and then triple-clicked the find field (the focus was not in the text area, so the lines were
+  still one block, as designed), the third pressed Escape, and the fourth, with the text area focused and its three
+  lines now items of their own, picked the named line at 0.93 and triple-clicked it. Only that line was selected.
+- The writer's reviews took 65 to 77 s each in these runs (`openai/gpt-6-luna`, reasoning `none`), against 8 to 25 s
+  of the classifier's whole work in the run. If speed is the next goal, the writer's latency is the largest piece.
