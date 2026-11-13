@@ -49,6 +49,7 @@ clicker = "typesafe_computer_use.cli:main"
 clicker-inspect = "typesafe_computer_use.cli:inspect"
 clicker-bench = "typesafe_computer_use.browser.bench:main"
 clicker-eval = "typesafe_computer_use.evals.cli:main"
+clicker-mock = "typesafe_computer_use.mockos.cli:main"
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.8"]

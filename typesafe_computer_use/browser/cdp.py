@@ -22,6 +22,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -80,9 +81,14 @@ def _get_json(url: str, timeout: float = 5.0) -> Any:
 class Chrome:
     """A dedicated Chrome instance. Never touches the user's own profile."""
 
-    def __init__(self, *, port: int | None = None, headed: bool = False, profile: str | None = None):
+    def __init__(
+        self, *, port: int | None = None, headed: bool = False, profile: str | None = None, extra_args: Sequence[str] = ()
+    ):
+        """`extra_args` go on Chrome's command line after the usual ones, before the start page: the
+        mock OS uses them to leave every host name unresolved, fix the scale, and hide scrollbars."""
         self.port = port or free_port()
         self.headed = headed
+        self.extra_args = tuple(extra_args)
         self.profile = profile or tempfile.mkdtemp(prefix="tscu-chrome-")
         self._ephemeral = profile is None
         self.proc: subprocess.Popen | None = None
@@ -108,6 +114,7 @@ class Chrome:
             "--disable-sync",
             "--disable-extensions",
             "--metrics-recording-only",
+            *self.extra_args,
             "about:blank",
         ]
         if not self.headed:

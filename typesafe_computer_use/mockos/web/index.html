@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock OS</title>
+<!-- The mock OS: a fake desktop for the step loop to drive. Nothing here is fetched: every file is
+     local, loaded by file://, as classic scripts. See docs/mock-os.md. -->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="desktop"></div>
+<script src="kit.js"></script>
+<script src="os.js"></script>
+<script src="apps/settings.js"></script>
+<script>MockOS.boot();</script>
+</body>
+</html>
