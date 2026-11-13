@@ -6,7 +6,8 @@ copied from a real run (see docs/mock-os-plan.md).
 
 The oracle is the list of steps that solves a task, as (kind, target) pairs like the policies of
 `tests/world.py`. A target names an item by its text, by (text, role), or by (text, role, beside),
-where `beside` is a text on the same row that tells apart several items of one text and role; `oracle_policy` turns it into the item's index on the
+where `beside` is a text on the same row that tells apart several items of one text and role, or
+`MIDDLE`, the item in the middle of the screen, for a scroll over a page whose text moves; `oracle_policy` turns it into the item's index on the
 screen the step is decided on, so a task never writes an index.
 """
 
@@ -22,6 +23,8 @@ from ...stand_ins import Policy, Step
 Check = Callable[[dict, str | None], bool]  # the final state and the run's answer
 Template = Callable[[int], "Task"]
 
+MOCK_EMAIL = "sam.rivera@mockos.example"  # the made-up address `type_email` types; never the user's CLICKER_EMAIL
+MIDDLE = "*middle"  # an oracle target: whatever item sits in the middle of the screen, for a scroll over the page
 ITEM_KINDS = frozenset({"click_item", *POINTING, "scroll_down", "scroll_up"})
 DEFAULT_SEEDS = (1, 2)  # the seeds `list`, `check` and `run` take a template at, unless a task id names one
 
@@ -108,18 +111,28 @@ def _named(name: str) -> list[Task]:
 
 def _load() -> None:
     """Register every template module's templates."""
-    from . import files, settings  # noqa: F401
+    from . import files, settings, web  # noqa: F401
 
 
 def desktop(r: random.Random, front: str, running: Iterable[str] = (), **given: dict) -> dict:
     """A starting state: every app's content drawn from `r`, `given` in place of an app's own (by its
     state key: settings, files, ...), the clock, the page's own seed, and the apps running."""
-    from . import files, settings
+    from datetime import date
 
-    content = {"settings": settings.content, "files": files.content}
+    from . import files, settings, web
+
+    moment = given.get("clock") or clock(r)
+    today = date.fromisoformat(moment[:10])
+    content = {
+        "settings": settings.content,
+        "files": files.content,
+        "shop": web.shop_content,
+        "tickets": lambda r: web.tickets_content(r, today),
+        "wiki": web.wiki_content,
+    }
     state = {key: given[key] if key in given else build_content(r) for key, build_content in content.items()}
     return {
-        "clock": given.get("clock") or clock(r),
+        "clock": moment,
         "rng": r.randint(1, 2**31 - 1),
         "front": front,
         "running": list(dict.fromkeys([*running, front])),
@@ -144,6 +157,11 @@ def find_item(state: dict, target) -> int:
     """The index of the item a target names, on the screen `state` describes."""
     if isinstance(target, int):
         return target
+    if target == MIDDLE:
+        middle = [it for it in state["screen_items_in_reading_order"] if it.get("where") == "middle-center"]
+        if not middle:
+            raise OracleError("no item sits in the middle of the screen")
+        return int(middle[0]["i"])
     text, role, beside = (target, None, None) if isinstance(target, str) else (*target, None, None)[:3]
     items = state["screen_items_in_reading_order"]
     found = [it for it in items if it["text"] == text and (role is None or it.get("role") == role)]

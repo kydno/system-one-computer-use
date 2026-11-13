@@ -95,7 +95,7 @@ class FakePage:
             return snapshot(self.n, self.focus)
         if name == "apps":
             return ["Settings", "Chromium"]
-        if name.startswith("ax.") or name in ("release", "launch", "clearField"):
+        if name.startswith("ax.") or name in ("release", "launch", "clearField", "browser.open", "browser.show"):
             return "" if name == "ax.value" else True
         raise AssertionError(f"unexpected call {name}")
 
@@ -219,7 +219,8 @@ def test_typing_inserts_text_and_the_browser_is_left_out_of_the_apps(adapter, pa
     adapter.type_text("hello")
     assert ("Input.insertText", {"text": "hello"}) in page.cdp_calls
     assert adapter.installed_apps() == ["Settings"]
-    assert adapter.open_url("Chromium", "https://shop.mockos.example/") is False
+    assert adapter.open_url("Chromium", "https://shop.mockos.example/")
+    assert page.calls[-1] == ("browser.open", "https://shop.mockos.example/")
 
 
 def test_the_page_reaches_chromium_only_through_cdp_which_tests_refuse():

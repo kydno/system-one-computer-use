@@ -253,8 +253,11 @@ class MockDesktop:
         return launched
 
     def open_url(self, browser: str, url: str) -> bool:
-        """No mock browser yet: it comes with the fake sites (see docs/mock-os-plan.md)."""
-        return False
+        """Open `url` in the mock browser, starting it when it is not running: a new tab, unless the
+        one in front is empty, as `open location` opens a page in a real browser."""
+        opened = bool(self._call("browser.open", url))
+        self._input()
+        return opened
 
     def installed_browsers(self) -> list[str]:
         """None to choose between: the one browser is the run's own."""
@@ -273,7 +276,9 @@ class MockDesktop:
         return [(str(title), str(url)) for title, url in self._now().get("tabs") or ()]
 
     def show_tab(self, browser: str, url: str) -> bool:
-        return False
+        shown = bool(self._call("browser.show", url))
+        self._input()
+        return shown
 
     def open_path(self, path: Path, as_text: bool = False) -> None:
         raise NotImplementedError("the mock OS shows no file of this machine's")

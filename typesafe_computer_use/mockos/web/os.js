@@ -87,6 +87,8 @@ const MockOS = (function () {
     scrollTo = null;
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     render();
+    // A part may start in the middle of something, as a page the seed has still loading.
+    for (const part of Object.values(parts)) if (part.resume) part.resume(state);
     return true;
   }
 

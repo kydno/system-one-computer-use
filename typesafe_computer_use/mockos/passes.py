@@ -41,9 +41,9 @@ from ..runner import RunConfig, RunState
 from ..stand_ins import FakeTypeSafe, FakeWriter
 from .desktop import BROWSER, MockDesktop
 from .page import MockPage
+from .tasks import MOCK_EMAIL as EMAIL
 from .tasks import Task, oracle_policy
 
-EMAIL = "sam.rivera@mockos.example"  # the made-up address `type_email` types; never the user's CLICKER_EMAIL
 WRITER_ESTIMATE_USD = 0.02  # charged for a writer reply that reports no cost, so the cap still holds
 PASSES = Path("benchmarks") / "mockos"
 PHASES = ("capture", "ocr", "ax", "decide", "act", "settle", "total")  # the step phases a row keeps, as mean seconds
