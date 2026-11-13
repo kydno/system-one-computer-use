@@ -267,8 +267,9 @@ def run_task(
     seconds = time.perf_counter() - started
     final = page.dump()
     answer = state.answer.text if state is not None and state.answer is not None else None
+    claimed = state is not None and state.answer is not None and state.answer.achieved
     try:
-        score = int(bool(task.check(final, answer))) if error is None else 0
+        score = int(bool(task.check(final, answer)) and not (task.trap and claimed)) if error is None else 0
     except Exception as e:
         score, error = 0, f"the check failed: {type(e).__name__}: {e}"
     (out / "mockos.json").write_text(
@@ -281,7 +282,7 @@ def run_task(
 def oracle(page: MockPage, task: Task, out: Path, *, ocr: str = "dom", latency: str = "typical") -> Outcome:
     """Run the task's scripted solution through the real loop, with stand-ins for both models."""
     fake = FakeTypeSafe(oracle_policy(task.oracle), read_only=task.read_only, moves="moves" in task.tags)
-    writer = FakeWriter(texts=list(task.writes))
+    writer = FakeWriter(texts=list(task.writes), url=task.url, reviews=list(task.reviews))
     return run_task(page, task, out, decisions=lambda: fake, writer=writer, ocr=ocr, latency=latency)
 
 

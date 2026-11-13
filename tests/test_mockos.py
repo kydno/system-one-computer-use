@@ -279,7 +279,8 @@ def test_every_task_has_a_unique_id_a_goal_a_check_and_a_starting_state():
     assert len({t.id for t in tasks}) == len(tasks)
     for task in tasks:
         assert task.goal and callable(task.check) and 1 <= task.tier <= 4
-        assert task.seed["front"] == "Settings" and task.seed["clock"].startswith("2026-")
+        assert task.seed["front"] in task.seed["running"] and task.seed["clock"].startswith("2026-")
+        assert {"settings", "files"} <= set(task.seed), "every app's content, for a task that opens another app"
         json.dumps(task.seed)  # what MockOS.load takes is plain JSON
 
 

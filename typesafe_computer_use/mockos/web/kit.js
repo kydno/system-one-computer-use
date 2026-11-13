@@ -91,9 +91,11 @@ const Kit = (function () {
     );
   }
 
-  function textField({ label, placeholder, value, onInput, onKey, key, search, password }) {
+  function textField({ label, placeholder, value, onInput, onKey, onBlur, key, search, password, autofocus, cls }) {
     const field = h("input", {
-      class: search ? "field search" : "field",
+      class: (search ? "field search" : "field") + (cls ? ` ${cls}` : ""),
+      "data-autofocus": autofocus ? "" : null,
+      onblur: (e) => onBlur && !MockOS.rendering && onBlur(e.target.value),
       type: password ? "password" : "text",
       role: search ? "searchbox" : "textbox",
       "aria-label": label,
@@ -110,5 +112,59 @@ const Kit = (function () {
     return h("div", { class: "search-wrap" }, h("span", { class: "glass", "aria-hidden": "true" }, "⌕"), field);
   }
 
-  return { h, own, button, toggle, popup, radios, textField };
+  // A row that can be dragged: a press, a move, and a release over a drop target dispatches the
+  // target's action with `payload` added.
+  function draggable(payload) {
+    return { onmousedown: (event) => MockOS.startDrag(event, payload) };
+  }
+
+  function dropTarget(action) {
+    return { "data-drop": JSON.stringify(action) };
+  }
+
+  // A context menu on an element: a right click opens `items()` where it landed.
+  function contextMenu(items) {
+    return {
+      oncontextmenu: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const list = items(event);
+        if (list && list.length) MockOS.openMenuAt(event.clientX, event.clientY, list);
+      },
+    };
+  }
+
+  // A sheet over a window: modal, so a click outside it lands on its backdrop and does nothing,
+  // and a press through accessibility on a control under it is refused (see MockOS.ax.press).
+  function sheet({ title, body, buttons, key }) {
+    return h(
+      "div",
+      { class: "sheet-backdrop", "data-see-through": "", "data-modal": "", onclick: (e) => e.stopPropagation() },
+      h(
+        "div",
+        { class: "sheet", role: "dialog", "aria-label": title, key },
+        h("div", { class: "sheet-title" }, title),
+        body,
+        h("div", { class: "sheet-buttons" }, buttons),
+      ),
+    );
+  }
+
+  // A text area, for a note's or a message's body. Its lines are read where they are drawn.
+  function textArea({ label, placeholder, value, onInput, key, rows }) {
+    return h("textarea", {
+      class: "area",
+      role: "textbox",
+      "aria-label": label,
+      placeholder,
+      value: value || "",
+      key,
+      rows: rows || 8,
+      spellcheck: "false",
+      oninput: (e) => onInput && onInput(e.target.value),
+      onclick: (e) => e.stopPropagation(),
+    });
+  }
+
+  return { h, own, button, toggle, popup, radios, textField, textArea, draggable, dropTarget, contextMenu, sheet };
 })();

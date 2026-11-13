@@ -15,7 +15,8 @@ const MockOS = (function () {
   const DISPLAY = { w: 1440, h: 900 };
   const BAR_H = 40; // models.MENU_BAR_PT: the loop leaves this strip out of change detection
   const OFFSCREEN_Y = -4200; // where a control scrolled out of its pane is parked, as Chromium parks one
-  const apps = {}; // name -> {pid, frame, title(state), render(state), key(state, event), reduce(state, action)}
+  const apps = {}; // name -> {pid, frame, title(state), render(state), key(state, event), reduce(state, action), initial()}
+  const parts = {}; // scope -> {reduce(state, action), initial()}: every app, and every fake site in the browser
 
   let state = null;
   let random = null;
@@ -24,6 +25,7 @@ const MockOS = (function () {
   let deferred = [];
   let timers = [];
   let scrollTo = null; // an element key to bring into view on the next render, once
+  let rendering = false; // a field removed by a render blurs, and that blur is no user's
   const ids = new WeakMap();
   const byId = new Map();
   let nextId = 1;
@@ -79,6 +81,7 @@ const MockOS = (function () {
     state.clipboard = state.clipboard || "";
     state.overlay = null;
     state.log = [];
+    for (const [scope, part] of Object.entries(parts)) if (part.initial && !(scope in state)) state[scope] = part.initial();
     random = generator(state.rng || 1);
     latency = (options && options.latency) || "typical";
     scrollTo = null;
@@ -95,9 +98,8 @@ const MockOS = (function () {
     state.log.push(JSON.parse(JSON.stringify(action)));
     if (action.picked) state.overlay = null; // an item picked from a menu closes the menu
     const [scope] = action.type.split(".");
-    const app = Object.values(apps).find((a) => a.scope === scope);
     if (scope === "os") reduce(action);
-    else if (app && app.reduce) app.reduce(state, action);
+    else if (parts[scope] && parts[scope].reduce) parts[scope].reduce(state, action);
     render();
   }
 
@@ -126,6 +128,36 @@ const MockOS = (function () {
     dispatch({ type: "os.menu", x: Math.round(r.left), y: Math.round(r.bottom + 4), w: Math.round(r.width), items });
   }
 
+  // A context menu at the point a right click landed.
+  function openMenuAt(x, y, items) {
+    dispatch({ type: "os.menu", x: Math.round(x), y: Math.round(y), w: 0, items });
+  }
+
+  // ----- dragging -----------------------------------------------------------------------------
+  // A drag is a press on an element made with `Kit.draggable`, a move, and a release over an
+  // element made with `Kit.dropTarget`: the drop's action is dispatched with the drag's payload.
+  // It is built from mouse events, which CDP's input events raise; HTML5 drag and drop is not.
+
+  let dragging = null;
+
+  function startDrag(event, payload) {
+    if (event.button !== 0) return;
+    dragging = { payload, x: event.clientX, y: event.clientY, moved: false };
+  }
+
+  function onMouseMove(event) {
+    if (dragging && Math.hypot(event.clientX - dragging.x, event.clientY - dragging.y) > 6) dragging.moved = true;
+  }
+
+  function onMouseUp(event) {
+    const drag = dragging;
+    dragging = null;
+    if (!drag || !drag.moved) return;
+    const target = paintedAt(event.clientX, event.clientY);
+    const drop = target && target.closest("[data-drop]");
+    if (drop) dispatch({ ...JSON.parse(drop.dataset.drop), ...drag.payload });
+  }
+
   function reveal(key) {
     scrollTo = key;
   }
@@ -140,7 +172,12 @@ const MockOS = (function () {
     const scrolls = {};
     for (const el of root.querySelectorAll("[data-key]")) if (el.scrollTop) scrolls[el.dataset.key] = el.scrollTop;
 
-    root.replaceChildren(bar(), ...windows(), dock(), ...overlay());
+    rendering = true;
+    try {
+      root.replaceChildren(bar(), ...windows(), dock(), ...overlay());
+    } finally {
+      rendering = false;
+    }
 
     for (const [key, top] of Object.entries(scrolls)) {
       const el = keyed(key);
@@ -160,6 +197,13 @@ const MockOS = (function () {
         if (selection && el.setSelectionRange) el.setSelectionRange(selection[0], selection[1]);
       }
     }
+    // A field that appears to be typed into at once, as a name being edited does, takes the focus once.
+    const wants = root.querySelector("[data-autofocus]");
+    if (wants && document.activeElement !== wants && !wants.dataset.focused) {
+      wants.focus({ preventScroll: true });
+      if (wants.select) wants.select();
+    }
+    if (wants) wants.dataset.focused = "1";
     if (scrollTo) {
       const el = keyed(scrollTo);
       scrollTo = null;
@@ -238,10 +282,11 @@ const MockOS = (function () {
           h(
             "div",
             {
-              class: "mi",
+              class: item.disabled ? "mi disabled" : "mi",
               role: "menuitem",
               "aria-label": item.label,
-              onclick: Kit.own(() => dispatch({ ...item.action, picked: true })),
+              "aria-disabled": item.disabled ? "true" : null,
+              onclick: Kit.own(() => (item.disabled ? null : dispatch({ ...item.action, picked: true }))),
             },
             h("span", { class: "check" }, item.checked ? "✓" : ""),
             h("span", {}, item.label),
@@ -515,14 +560,17 @@ const MockOS = (function () {
     const display = { x1: 0, y1: 0, x2: DISPLAY.w, y2: DISPLAY.h };
     const win = document.querySelector(`.window[data-app="${CSS.escape(front)}"]`);
     const menus = [...document.querySelectorAll("#desktop > .menu")];
+    const chromium = apps.Chromium;
+    const browser = chromium && state.running.includes("Chromium") && chromium.tabs ? chromium.tabs(state) : null;
     const children = [win, ...menus].filter(Boolean).flatMap((el) => tree(el, display));
     return {
       id: snapshots,
       app: front,
       pid: app ? app.pid : 0,
       window: app ? app.frame : null,
-      url: null, // the mock browser comes in a later phase
-      tabs: [],
+      // the browser's active tab and its tabs, whichever app is in front, as AppleScript answers on a Mac
+      url: browser ? browser.url : null,
+      tabs: browser ? browser.tabs : [],
       focus: focus(),
       tree: { id: 0, role: "AXApplication", label: front, frame: null, press: false, children },
       lines: lines(),
@@ -548,6 +596,9 @@ const MockOS = (function () {
     press(id) {
       const el = element(id);
       if (!el) return false;
+      // Under a sheet, a window's controls take no press, as a Mac's are disabled under one.
+      const modal = el.closest(".window") && el.closest(".window").querySelector("[data-modal]");
+      if (modal && !modal.contains(el)) return false;
       // A text field takes a press as the focus, as a click on it would give it.
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") el.focus();
       el.click();
@@ -585,10 +636,18 @@ const MockOS = (function () {
   // An app's actions are named after it: "settings.open" goes to Settings' own `reduce`.
   function register(name, app) {
     apps[name] = { ...app, scope: name.toLowerCase() };
+    parts[name.toLowerCase()] = app;
+  }
+
+  // A part with state and actions of its own that is no app: a fake site in the browser.
+  function part(scope, definition) {
+    parts[scope] = definition;
   }
 
   function boot() {
     document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousemove", onMouseMove, true);
+    document.addEventListener("mouseup", onMouseUp, true);
     // The page is ready to load a task once every app has registered.
     MockOS.ready = true;
   }
@@ -598,7 +657,10 @@ const MockOS = (function () {
     DISPLAY,
     BAR_H,
     register,
+    part,
     boot,
+    openMenuAt,
+    startDrag,
     load,
     dump,
     dispatch,
@@ -617,6 +679,9 @@ const MockOS = (function () {
     browser: null,
     get state() {
       return state;
+    },
+    get rendering() {
+      return rendering;
     },
   };
 })();

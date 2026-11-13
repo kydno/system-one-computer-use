@@ -62,7 +62,17 @@
       s.query = action.text;
     } else if (action.type === "settings.press") {
       const row = rowOf(s, action.row);
-      if (row) row.presses = (row.presses || 0) + 1;
+      if (!row) return;
+      s.sheet = row.sheet === "reset" ? { kind: "reset" } : { kind: "style", row: row.id, value: row.value };
+    } else if (action.type === "settings.style") {
+      if (s.sheet) s.sheet.value = action.value;
+    } else if (action.type === "settings.done") {
+      const sheet = s.sheet;
+      s.sheet = null;
+      if (sheet && sheet.kind === "style") rowOf(s, sheet.row).value = sheet.value;
+      if (sheet && sheet.kind === "reset" && action.confirm) s.resets += 1;
+    } else if (action.type === "settings.cancel") {
+      s.sheet = null;
     }
   }
 
@@ -87,6 +97,8 @@
       });
     if (row.kind === "radio") return Kit.radios({ label: row.label, options: row.options, value: row.value, key, onPick: (value) => set({ value }) });
     if (row.kind === "value") return h("span", { class: "value" }, row.value);
+    if (row.kind === "button" && row.sheet === "style")
+      return h("div", { class: "inline" }, h("span", { class: "value" }, row.value), Kit.button({ label: row.button, key, onPress: () => MockOS.dispatch({ type: "settings.press", row: row.id }) }));
     if (row.kind === "button")
       return Kit.button({ label: row.button, key, onPress: () => MockOS.dispatch({ type: "settings.press", row: row.id }) });
     return null;
@@ -174,14 +186,36 @@
                 "aria-selected": !query && p.id === (s.loading || s.pane) ? "true" : "false",
                 onclick: own(() => MockOS.dispatch({ type: "settings.open", pane: p.id })),
               },
-              h("span", { class: "icon", style: `background:${p.color}` }, p.icon),
+              h("span", { class: "icon", style: `background:${p.color}`, "aria-hidden": "true" }, p.icon),
               h("span", {}, p.name),
             ),
           ),
         ),
       ),
       h("div", { class: "main", key: "settings-main" }, query ? results(s) : s.loading ? null : pane(s)),
+      sheet(s),
     );
+  }
+
+  function sheet(s) {
+    const d = s.sheet;
+    if (!d) return null;
+    const cancel = Kit.button({ label: "Cancel", onPress: () => MockOS.dispatch({ type: "settings.cancel" }) });
+    if (d.kind === "reset")
+      return Kit.sheet({
+        title: "Reset all settings?",
+        body: h("div", { class: "sheet-text" }, "Every setting returns to how it came. This cannot be undone."),
+        buttons: [cancel, Kit.button({ label: "Reset", primary: true, onPress: () => MockOS.dispatch({ type: "settings.done", confirm: true }) })],
+      });
+    const row = rowOf(s, d.row);
+    return Kit.sheet({
+      title: `${row.label} notifications`,
+      body: [
+        h("div", { class: "form-label" }, "Alert style"),
+        Kit.radios({ label: "Alert style", options: ["None", "Banners", "Alerts"], value: d.value, onPick: (value) => MockOS.dispatch({ type: "settings.style", value }) }),
+      ],
+      buttons: [cancel, Kit.button({ label: "Done", primary: true, onPress: () => MockOS.dispatch({ type: "settings.done" }) })],
+    });
   }
 
   function key(state, event) {

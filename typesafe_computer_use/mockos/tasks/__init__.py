@@ -39,6 +39,9 @@ class Task:
     steps: int = 30  # the step limit
     tags: tuple[str, ...] = ()  # the loop paths it exercises
     read_only: bool = False  # the goal only asks something: how the oracle's stand-in answers the gate
+    reviews: tuple[dict, ...] = ()  # what the oracle's writer makes of each stop, as `FakeWriter` takes them
+    url: str = ""  # the address the oracle's writer proposes when the run opens a site outside the catalog
+    trap: bool = False  # nothing can be done: the run passes only when it changed nothing and did not claim success
 
     @property
     def template(self) -> str:
@@ -87,13 +90,47 @@ def select(ids: Iterable[str] = (), tier: int | None = None, tag: str | None = N
     then those of `tier` and with `tag`."""
     _load()
     ids = list(ids)
-    tasks = [t for i in ids for t in ([build(i)] if "@" in i else [build(f"{i}@{s}") for s in DEFAULT_SEEDS])] if ids else every()
+    tasks = [t for i in ids for t in _named(i)] if ids else every()
     return [t for t in tasks if (tier is None or t.tier == tier) and (tag is None or tag in t.tags)]
+
+
+def _named(name: str) -> list[Task]:
+    """A task id, a template at its default seeds, or a family ("settings") at all of its templates."""
+    if "@" in name:
+        return [build(name)]
+    if "/" not in name:
+        family = sorted(t for t in TEMPLATES if t.startswith(f"{name}/"))
+        if not family:
+            raise KeyError(f"no template named {name!r}; `clicker-mock list` lists them")
+        return [build(f"{t}@{s}") for t in family for s in DEFAULT_SEEDS]
+    return [build(f"{name}@{s}") for s in DEFAULT_SEEDS]
 
 
 def _load() -> None:
     """Register every template module's templates."""
-    from . import settings  # noqa: F401
+    from . import files, settings  # noqa: F401
+
+
+def desktop(r: random.Random, front: str, running: Iterable[str] = (), **given: dict) -> dict:
+    """A starting state: every app's content drawn from `r`, `given` in place of an app's own (by its
+    state key: settings, files, ...), the clock, the page's own seed, and the apps running."""
+    from . import files, settings
+
+    content = {"settings": settings.content, "files": files.content}
+    state = {key: given[key] if key in given else build_content(r) for key, build_content in content.items()}
+    return {
+        "clock": given.get("clock") or clock(r),
+        "rng": r.randint(1, 2**31 - 1),
+        "front": front,
+        "running": list(dict.fromkeys([*running, front])),
+        **state,
+    }
+
+
+def clock(r: random.Random) -> str:
+    """A moment in 2026, on a weekday morning or afternoon."""
+    month, day = r.randint(1, 12), r.randint(1, 28)
+    return f"2026-{month:02d}-{day:02d}T{r.randint(8, 18):02d}:{r.choice((0, 5, 12, 20, 34, 41, 47, 55)):02d}"
 
 
 # ----- the oracle ------------------------------------------------------------------------------

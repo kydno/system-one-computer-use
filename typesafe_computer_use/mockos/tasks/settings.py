@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import random
 
-from . import Task, rng, says, template
+from . import Task, desktop, rng, says, template
 
 # (pane name, icon letter, icon color, groups): each group is (title, rows), and each row is
 # (label, kind, options or None, note or None). Every label is unique across the app, so a check
@@ -39,6 +39,7 @@ CATALOGUE: tuple[tuple[str, str, str, tuple], ...] = (
                     ("Language", POPUP, ("English", "Deutsch", "Español", "Français", "Italiano", "Nederlands"), None),
                 ),
             ),
+            ("Reset", (("Reset all settings", BUTTON, ("Reset…", "reset"), "Return every setting to how it came"),)),
         ),
     ),
     (
@@ -130,6 +131,10 @@ CATALOGUE: tuple[tuple[str, str, str, tuple], ...] = (
                     ("Daily summary", SWITCH, None, "Collect quieter notifications into one delivery"),
                     ("Summary time", POPUP, ("8:00", "12:00", "18:00", "21:00"), None),
                 ),
+            ),
+            (
+                "Apps",
+                tuple((app, BUTTON, ("Options…", "style"), None) for app in ("Browser", "Calendar", "Files", "Mail", "Notes")),
             ),
         ),
     ),
@@ -379,7 +384,7 @@ VALUES = {
     "Available": ("212.4 GB of 494.4 GB", "61.0 GB of 245.1 GB", "1.2 TB of 1.9 TB"),
     "Installed version": ("14.2.1", "15.0.2", "15.1"),
 }
-BUTTON_LABEL = "Options…"
+STYLES = ("None", "Banners", "Alerts")  # an app's notification style, on the sheet its Options… button opens
 
 
 def _slug(text: str) -> str:
@@ -405,22 +410,19 @@ def content(r: random.Random) -> dict:
                 elif kind == VALUE:
                     row["value"] = r.choice(VALUES[label])
                 elif kind == BUTTON:
-                    row["button"] = BUTTON_LABEL
+                    row["button"], row["sheet"] = options
+                    if row["sheet"] == "style":
+                        row["value"] = r.choice(STYLES)
                 out_rows.append(row)
             out_groups.append({"title": title, "rows": out_rows})
         panes.append({"id": _slug(name), "name": name, "icon": icon, "color": color, "groups": out_groups})
     labels = [row["label"] for pane in panes for group in pane["groups"] for row in group["rows"]]
     assert len(labels) == len(set(labels)), "every row label is unique"
-    return {"pane": panes[0]["id"], "query": "", "loading": None, "highlight": None, "panes": panes}
-
-
-def clock(r: random.Random) -> str:
-    month, day = r.randint(1, 12), r.randint(1, 28)
-    return f"2026-{month:02d}-{day:02d}T{r.randint(8, 18):02d}:{r.choice((0, 5, 12, 20, 34, 41, 47, 55)):02d}"
+    return {"pane": panes[0]["id"], "query": "", "loading": None, "highlight": None, "sheet": None, "resets": 0, "panes": panes}
 
 
 def seed_for(r: random.Random, settings: dict) -> dict:
-    return {"clock": clock(r), "rng": r.randint(1, 2**31 - 1), "front": "Settings", "running": ["Settings"], "settings": settings}
+    return desktop(r, "Settings", settings=settings)
 
 
 def rows_of(settings: dict) -> dict[str, dict]:
@@ -627,4 +629,63 @@ def scroll(seed: int) -> Task:
         check=check,
         oracle=(("press_offscreen", row["label"]),),
         tags=("press_offscreen", "scroll"),
+    )
+
+
+@template("settings/nested", 2)
+def nested(seed: int) -> Task:
+    """Change one app's option, where every app's row carries the same Options… button."""
+    name = "settings/nested"
+    r = rng(name, seed)
+    settings = content(r)
+    pane = next(p for p in settings["panes"] if p["name"] == "Notifications")
+    rows = [row for g in pane["groups"] for row in g["rows"] if row.get("sheet") == "style"]
+    row = r.choice(rows)
+    wanted = r.choice([s for s in STYLES if s != row["value"]])
+    settings["pane"] = pane["id"]
+    start = copy.deepcopy(settings)
+
+    def check(final: dict, answer: str | None) -> bool:
+        s = final["settings"]
+        return rows_of(s)[row["id"]]["value"] == wanted and unchanged_but(s, start, row["id"])
+
+    return Task(
+        id=f"{name}@{seed}",
+        tier=2,
+        goal=f"In Settings, set the notification style for {row['label']} to {wanted}.",
+        seed=seed_for(r, settings),
+        check=check,
+        oracle=(
+            ("click_item", ("Options…", "button", row["label"])),
+            ("click_item", (wanted, "radio")),
+            ("click_item", ("Done", "button")),
+        ),
+        tags=("click_item", "repeated", "dialog"),
+    )
+
+
+@template("settings/reset-confirm", 3)
+def reset_confirm(seed: int) -> Task:
+    """Reset every setting, through a confirmation sheet."""
+    name = "settings/reset-confirm"
+    r = rng(name, seed)
+    settings = content(r)
+    start = copy.deepcopy(settings)
+
+    def check(final: dict, answer: str | None) -> bool:
+        s = final["settings"]
+        return s["resets"] == 1 and unchanged_but(s, start)
+
+    return Task(
+        id=f"{name}@{seed}",
+        tier=3,
+        goal="Reset all settings in Settings.",
+        seed=seed_for(r, settings),
+        check=check,
+        oracle=(
+            ("scroll_down", ("Language", "popup")),
+            ("click_item", ("Reset…", "button")),
+            ("click_item", ("Reset", "button")),
+        ),
+        tags=("dialog", "scroll"),
     )
