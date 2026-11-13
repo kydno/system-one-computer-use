@@ -28,8 +28,8 @@ class FakeTypeSafe:
 
     A policy returns (kind, target) and this maps the target to whatever key the question wants:
     the item's index for click_item and for a scroll aimed at an item, the off-screen control's key
-    for press_offscreen, the site key for use_browser, the catalog name for press_shortcut (answered in
-    its own request, with the step's second confidence). So a scenario never writes an index, and renumbering the page cannot break it.
+    for press_offscreen, the site key for use_browser, the catalog name for press_shortcut and the app
+    for open_app (each answered in its own request, with the step's second confidence). So a scenario never writes an index, and renumbering the page cannot break it.
 
     Every decision state lands in `states`, so a test can assert what the model was shown. The
     `verify_typed` Noul that `actions._type_text` makes is a different question about a different
@@ -77,6 +77,9 @@ class FakeTypeSafe:
             self.asked.append(questions)
             target, confidence = self.pending[0][1], self.pending[2]
             return SimpleNamespace(answers={"target": _answer(self._item_key(state, target), confidence)})
+        if set(questions) == {"app"}:  # the follow-up to an open_app: the app the step named
+            self.asked.append(questions)
+            return SimpleNamespace(answers={"app": _answer(self.pending[0], self.pending[1])})
         if set(questions) == {"shortcut"}:  # the follow-up to a press_shortcut: the step's own target, not a new decision
             self.asked.append(questions)
             self.follow_ups.append(state)

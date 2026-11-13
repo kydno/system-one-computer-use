@@ -7,7 +7,8 @@ copied from a real run (see docs/mock-os-plan.md).
 The oracle is the list of steps that solves a task, as (kind, target) pairs like the policies of
 `tests/world.py`. A target names an item by its text, by (text, role), or by (text, role, beside),
 where `beside` is a text on the same row that tells apart several items of one text and role, or
-`MIDDLE`, the item in the middle of the screen, for a scroll over a page whose text moves; `oracle_policy` turns it into the item's index on the
+`MIDDLE`, the item in the middle of the screen, for a scroll over a page whose text moves. A fourth
+element, `after`, takes the first match after the item that starts with that text, in reading order; `oracle_policy` turns it into the item's index on the
 screen the step is decided on, so a task never writes an index.
 """
 
@@ -45,6 +46,12 @@ class Task:
     reviews: tuple[dict, ...] = ()  # what the oracle's writer makes of each stop, as `FakeWriter` takes them
     url: str = ""  # the address the oracle's writer proposes when the run opens a site outside the catalog
     trap: bool = False  # nothing can be done: the run passes only when it changed nothing and did not claim success
+    actions: int | None = None  # the actions the oracle takes, when some of its steps take none (a stop, a question)
+
+    @property
+    def best(self) -> int:
+        """The fewest actions that solve the task: what the oracle takes."""
+        return len(self.oracle) if self.actions is None else self.actions
 
     @property
     def template(self) -> str:
@@ -111,7 +118,7 @@ def _named(name: str) -> list[Task]:
 
 def _load() -> None:
     """Register every template module's templates."""
-    from . import files, settings, web  # noqa: F401
+    from . import cross, files, office, settings, web  # noqa: F401
 
 
 def desktop(r: random.Random, front: str, running: Iterable[str] = (), **given: dict) -> dict:
@@ -119,7 +126,7 @@ def desktop(r: random.Random, front: str, running: Iterable[str] = (), **given: 
     state key: settings, files, ...), the clock, the page's own seed, and the apps running."""
     from datetime import date
 
-    from . import files, settings, web
+    from . import files, office, settings, web
 
     moment = given.get("clock") or clock(r)
     today = date.fromisoformat(moment[:10])
@@ -129,6 +136,9 @@ def desktop(r: random.Random, front: str, running: Iterable[str] = (), **given: 
         "shop": web.shop_content,
         "tickets": lambda r: web.tickets_content(r, today),
         "wiki": web.wiki_content,
+        "mail": lambda r: office.mail_content(r, today),
+        "calendar": lambda r: office.calendar_content(r, today),
+        "notes": lambda r: office.notes_content(r, today),
     }
     state = {key: given[key] if key in given else build_content(r) for key, build_content in content.items()}
     return {
@@ -162,8 +172,13 @@ def find_item(state: dict, target) -> int:
         if not middle:
             raise OracleError("no item sits in the middle of the screen")
         return int(middle[0]["i"])
-    text, role, beside = (target, None, None) if isinstance(target, str) else (*target, None, None)[:3]
+    text, role, beside, after = (target, None, None, None) if isinstance(target, str) else (*target, None, None, None)[:4]
     items = state["screen_items_in_reading_order"]
+    if after is not None:  # the first match after the item that starts with `after`, in reading order
+        start = next((n for n, it in enumerate(items) if it["text"].startswith(after)), None)
+        if start is None:
+            raise OracleError(f"no item starts with {after!r}: the screen shows {[it['text'] for it in items]}")
+        items = items[start + 1 :]
     found = [it for it in items if it["text"] == text and (role is None or it.get("role") == role)]
     if not found:  # perception joined the text with the line under it into one block, as for a result and its pane
         found = [it for it in items if it["text"].startswith(f"{text} ") and (role is None or it.get("role") == role)]

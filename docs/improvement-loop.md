@@ -11,9 +11,13 @@ with it. Rules for agents are in [AGENTS.md](../AGENTS.md).
 | 0. Free checks | Do the tests pass? How many bytes does each saved step's request cost now? | $0 | `uv run pytest`, `clicker-eval size` |
 | 1. Decision cases | On a saved screen, does the decision model pick the right action, how sure is it, and for how many tokens? | cents a pass | `clicker-eval decisions` |
 | 2. Supervised runs | Does the fix work in the real app? | the maintainer's attention | `clicker "<goal>" --act`, or the menu bar |
+| Mock OS | Does the change still get whole tasks done, in how many steps, requests, dollars and seconds? | cents a pass, nothing when cached | `clicker-mock run` ([mock OS](mock-os.md)) |
 
 Tiers 0 and 1 never touch the machine's screen, input, or apps. Only tier 2 shows that a change
 works for real, so a batch of changes ends with it. Offline numbers are evidence, not that proof.
+The mock OS reacts, so it shows a change working end to end, but on fake apps: a saving measured
+there is a claim for tier 2 or OSWorld to confirm. It starts a Chromium, which on the maintainer's
+Mac needs their yes; `clicker-mock check` asks no model, and `run` spends from the same batch.
 
 ## How a case is made
 
@@ -94,5 +98,5 @@ log; a pull request names a run by its folder and step, never by what was on its
   verdicts on supervised runs replace them over time.
 - The answer model on the free tier routes to a different model per call and is rate-limited, so its
   numbers are sampled and advisory, never a gate.
-- Offline cannot show that a new ability works, because the saved screens do not react. That needs
-  a tier that does.
+- Offline cannot show that a new ability works, because the saved screens do not react. The mock OS
+  ([mock OS](mock-os.md)) is the tier that does, on fake apps.

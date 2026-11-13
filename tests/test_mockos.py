@@ -24,7 +24,7 @@ from typesafe_computer_use.evals.budget import BudgetError, Ledger
 from typesafe_computer_use.mockos import compare, passes, profile, replay
 from typesafe_computer_use.mockos.desktop import FieldRef, MockDesktop, Node, lines_in
 from typesafe_computer_use.mockos.page import MockPage
-from typesafe_computer_use.mockos.tasks import OracleError, build, find_item, oracle_policy, says, select
+from typesafe_computer_use.mockos.tasks import MIDDLE, OracleError, build, find_item, oracle_policy, says, select
 from typesafe_computer_use.mockos.tasks import settings as settings_tasks
 from typesafe_computer_use.platform_adapter import current, using
 from typesafe_computer_use.runner import RunConfig
@@ -588,3 +588,67 @@ def test_profile_counts_items_sources_roles_and_settle_per_app_without_any_text(
     assert settings["settle_seconds"]["p50"] == 0.4
     assert "Wireless" not in json.dumps(numbers) and "Network" not in json.dumps(numbers)
     assert "Settings" in profile.table(numbers)
+
+
+def test_an_oracle_target_can_be_the_first_match_after_an_item_or_the_middle_of_the_screen():
+    rows = {
+        "screen_items_in_reading_order": [
+            {"i": 0, "text": "Ana Ruiz Lunch", "role": "cell", "where": "top-left"},
+            {"i": 1, "text": "Flag", "role": "button", "where": "top-left"},
+            {"i": 2, "text": "Ben Ode Invoice", "role": "cell", "where": "middle-center"},
+            {"i": 3, "text": "Flag", "role": "button", "where": "middle-left"},
+        ]
+    }
+    assert find_item(rows, ("Flag", "button", None, "Ben Ode")) == 3
+    assert find_item(rows, ("Flag", "button", None, "Ana Ruiz")) == 1
+    assert find_item(rows, MIDDLE) == 2
+    with pytest.raises(OracleError, match="no item starts with"):
+        find_item(rows, ("Flag", "button", None, "Cy"))
+
+
+def test_every_app_family_has_templates_and_every_tier_is_covered():
+    tasks = select()
+    families = {t.template.split("/")[0] for t in tasks}
+    assert families == {"settings", "files", "shop", "tickets", "wiki", "browser", "mail", "calendar", "notes", "cross"}
+    assert {t.tier for t in tasks} == {1, 2, 3, 4}
+    assert len({t.template for t in tasks}) == 47
+    assert [t.id for t in select(["notes"])][:2] == ["notes/append@1", "notes/append@2"]
+
+
+def test_an_oracle_that_stops_or_asks_counts_only_the_actions_it_takes():
+    ask = build("cross/ask@1")
+    assert ask.best == 2 and len(ask.oracle) == 3 and ask.replies
+    assert build("settings/toggle@1").best == 1
+
+
+def test_a_trap_passes_only_when_the_run_did_not_claim_success(tmp_path, monkeypatch):
+    task = build("files/restore-missing@1")
+    loaded = []
+
+    class Page:
+        session = SimpleNamespace(call=lambda *a: {})
+
+        def load(self, seed, latency):
+            loaded.append(seed)
+
+        def call(self, name, *args):
+            return ["Files"] if name == "apps" else None
+
+        def dump(self):
+            return copy.deepcopy(task.seed)
+
+    for achieved in (True, False):
+        answer = SimpleNamespace(text="It is not in the Trash.", achieved=achieved)
+        monkeypatch.setattr(
+            runner, "run", lambda *a, answer=answer, **k: SimpleNamespace(answer=answer, history=[], outcome="done")
+        )
+        outcome = passes.run_task(Page(), task, tmp_path / str(achieved), decisions=lambda: None, writer=None)
+        assert outcome.score == (0 if achieved else 1)
+
+
+def test_the_decision_stand_in_names_the_app_an_open_app_step_opens():
+    fake = FakeTypeSafe(scripted(("open_app", "Calendar")))
+    question = {"kind": Choice({"open_app": "", "done": ""})}
+    fake.system_one(state={"screen_items_in_reading_order": []}, questions=question)
+    reply = fake.system_one(state={}, questions={"app": Choice({"Calendar": "", "Notes": ""})})
+    assert reply.answers["app"].choice == "Calendar"

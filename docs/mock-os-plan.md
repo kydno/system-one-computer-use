@@ -1,7 +1,13 @@
 # Mock OS: a reactive eval tier that costs cents (plan)
 
-**Status: a plan. Nothing in this document is built.** It was written on 2026-11-13 from a
-planning session with the maintainer, for the agent or person who builds it. It gives the design,
+**Status: built, except what needs the maintainer's Mac.** Phases 0 to 4 are in the tree, with
+docs in [mock-os.md](mock-os.md): all six apps, the three sites, 47 templates, and 94 oracles that
+pass in headless Chromium. Not done: the survey of the real apps, so `profile build` and
+`profile check`; tuning the suite to 70 to 85% solved and a first baseline pass, which need the
+real models; and a CI job, which is open question 3. The open questions below still stand; where
+the build had to pick, it took the option that needs no answer: the adapter-only crop (question 1),
+hand-written DOM and the system font (question 2). What follows is the plan as written on
+2026-11-13 from a planning session with the maintainer, kept as the design record. It gives the design,
 the reasoning behind each choice, the order to build in, and what is still open. Where it says
 "verify", the claim is a reasoned expectation that the build has to confirm; everything else was
 read from the code at commit `038592c`.

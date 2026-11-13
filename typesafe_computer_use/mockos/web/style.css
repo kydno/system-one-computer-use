@@ -186,3 +186,49 @@ input, textarea { font: inherit; color: inherit; caret-color: transparent; }
 .cookie-banner .btn.primary { color: #fff; }
 .site ul { margin: 0 0 10px 0; }
 .site li { margin: 4px 0; }
+
+/* Mail */
+.mail .boxes { width: 180px; flex: none; border-right: 1px solid #d2d2d7; background: #ececf0; padding: 10px 8px; }
+.count { margin-left: auto; color: #555; font-size: 12px; }
+.selected .count { color: #fff; }
+.mlist { width: 360px; flex: none; border-right: 1px solid #d2d2d7; overflow-y: auto; }
+.mrow { padding: 8px 12px; border-bottom: 1px solid #e6e6ea; }
+.mrow.selected { background: #dbe6fb; }
+.mrow.unread .mfrom { font-weight: bold; }
+.mtop { display: flex; justify-content: space-between; gap: 8px; }
+.mdate { color: #777; font-size: 12px; }
+.msubject { color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mactions { display: flex; gap: 6px; margin-top: 4px; }
+.btn.mini { height: 22px; padding: 0 8px; font-size: 12px; }
+.btn.mini.on { background: #ffe9a8; }
+.mread { flex: 1; overflow-y: auto; padding: 16px 24px; }
+.mread h2 { margin: 0 0 8px 0; font-size: 18px; }
+.mbody { margin-top: 14px; }
+.mbody p { margin: 0 0 8px 0; }
+
+/* Calendar */
+.month-title { font-size: 18px; margin: 0 0 0 12px; }
+.cgrid { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(0, 1fr); grid-template-rows: 28px; border-right: 1px solid #d2d2d7; }
+.chead { text-align: center; padding: 5px 0; font-weight: bold; color: #555; border-bottom: 1px solid #d6d6db; }
+.cday { border-right: 1px solid #e6e6ea; border-bottom: 1px solid #e6e6ea; padding: 3px 5px; overflow: hidden; min-height: 0; }
+.cday.other { background: #f3f3f5; color: #999; }
+.cday.on { background: #e7effd; }
+.cday.today .cnum { background: #e5484d; color: #fff; border-radius: 10px; display: inline-block; padding: 0 6px; }
+.cnum { font-size: 12px; text-align: right; }
+.chip { font-size: 11px; line-height: 16px; background: #d6e4fb; border: 1px solid #9fbbea; border-radius: 4px; padding: 0 4px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cday-list { width: 260px; flex: none; padding: 12px 14px; overflow-y: auto; }
+.cday-list h3 { font-size: 14px; margin: 0 0 10px 0; }
+.cevent { display: flex; gap: 10px; padding: 6px 4px; border-bottom: 1px solid #eee; }
+.picker-month { border: 1px solid #c8c8ce; border-radius: 8px; padding: 8px; margin: 6px 0; background: #fff; }
+.pgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: 6px; text-align: center; }
+.pday { height: 26px; line-height: 24px; border: 1px solid #d0d0d6; border-radius: 6px; }
+.pday.on { background: #2f6fdf; color: #fff; }
+
+/* Notes */
+.nlist { width: 300px; flex: none; border-right: 1px solid #d2d2d7; overflow-y: auto; background: #f7f7f9; }
+.nrow { padding: 8px 12px; border-bottom: 1px solid #e6e6ea; }
+.nrow.selected { background: #ffe9a8; }
+.ntitle { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nmeta { display: flex; gap: 8px; font-size: 12px; white-space: nowrap; overflow: hidden; }
+.neditor { flex: 1; padding: 14px 18px; display: flex; }
+.neditor .area { flex: 1; border: none; font-size: 14px; line-height: 20px; padding: 4px; }

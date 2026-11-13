@@ -266,6 +266,7 @@ def run_task(
         error = f"{type(e).__name__}: {e}"
     seconds = time.perf_counter() - started
     final = page.dump()
+    out.mkdir(parents=True, exist_ok=True)  # a run that failed before it began made no folder
     answer = state.answer.text if state is not None and state.answer is not None else None
     claimed = state is not None and state.answer is not None and state.answer.achieved
     try:
@@ -329,7 +330,7 @@ def row(outcome: Outcome, name: str, settings: dict, page: MockPage, git: dict) 
         "said_done": summary.get("goal_achieved"),
         "error": outcome.error.split(":", 1)[0] if outcome.error else None,
         "steps": summary.get("steps_taken"),
-        "oracle_steps": len(outcome.task.oracle),
+        "oracle_steps": outcome.task.best,
         "seconds": outcome.seconds,
         "loop_seconds": round(outcome.seconds - live, 3),
         "model_seconds": round(calls.get("recorded_seconds", 0.0), 3),

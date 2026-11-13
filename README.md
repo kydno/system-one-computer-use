@@ -153,6 +153,7 @@ a one-command machine in Google Cloud.
 - [Layout](docs/layout.md): every module and what it owns
 - [Known limits](docs/known-limits.md)
 - [Sandbox](docs/sandbox.md): a Linux computer in a container, for running the agent on a screen that is not yours
+- [Mock OS](docs/mock-os.md): a fake desktop in Chromium with 47 task templates, for evals that react and cost cents
 
 ## Contributing
 

@@ -109,14 +109,12 @@ def _check(args) -> int:
             outcome = oracle(page, task, folder / task.id.replace("/", "-"), ocr=args.ocr, latency=args.latency)
             replay.write(outcome.folder)
             steps = len(outcome.state.history) if outcome.state is not None else None
-            exact = steps == len(task.oracle)
+            exact = steps == task.best
             ok = outcome.score == 1 and exact
             failed += not ok
             why = "" if ok else f"  [{outcome.error or ('check failed' if not outcome.score else f'took {steps} steps')}]"
             ended = outcome.state.outcome if outcome.state is not None else "-"
-            print(
-                f"{'pass' if ok else 'FAIL'}  {task.id:28s} {ended:14s} steps {steps}/{len(task.oracle)}  {outcome.seconds:.1f}s{why}"
-            )
+            print(f"{'pass' if ok else 'FAIL'}  {task.id:28s} {ended:14s} steps {steps}/{task.best}  {outcome.seconds:.1f}s{why}")
     print(f"{len(tasks) - failed}/{len(tasks)} oracles passed; run folders: {folder}")
     return 1 if failed else 0
 

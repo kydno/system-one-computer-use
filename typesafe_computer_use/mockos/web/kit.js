@@ -151,8 +151,9 @@ const Kit = (function () {
   }
 
   // A text area, for a note's or a message's body. Its lines are read where they are drawn.
-  function textArea({ label, placeholder, value, onInput, key, rows }) {
+  function textArea({ label, placeholder, value, onInput, key, rows, autofocus }) {
     return h("textarea", {
+      "data-autofocus": autofocus ? "" : null,
       class: "area",
       role: "textbox",
       "aria-label": label,
