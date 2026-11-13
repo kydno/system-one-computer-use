@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The locked panel while the run has the screen: one row, the step and what
-/// the run did last. It takes no clicks; Stop is on the status item.
+/// the run did last, and Stop at its right end, the only part that takes clicks.
 struct RunStripView: View {
 
     @ObservedObject var model: RunModel
@@ -21,9 +21,12 @@ struct RunStripView: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentTransition(.opacity)
+
+            HoverButton(systemName: K.RunStrip.stopSymbol, help: "Stop") {
+                model.stop()
+            }
         }
         .padding(.horizontal, K.InputBar.horizontalPadding)
         .frame(width: K.Panel.width, height: K.InputBar.height)
-        .accessibilityElement(children: .combine)
     }
 }

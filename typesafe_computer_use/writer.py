@@ -434,6 +434,38 @@ def compose_url(
     return url if valid_url(url) else ""
 
 
+PLAN_SYSTEM = (
+    "An agent is about to drive a user's computer toward the user's goal. A small classifier picks each "
+    "action, one at a time. It can click an on-screen item, type into a focused field, press Return or "
+    "Escape, scroll, go back, open a website by its https address, and open an app installed on this "
+    "computer by its name. It cannot read, compare, or remember: when the run ends, a reviewer reads the "
+    "screens the agent passed through and puts together what they hold. The goal means opening several "
+    "things in turn, which no single next move says, so write the plan the classifier follows: at most six "
+    "short numbered steps, each one such move described by what the screen will show, such as 'Open the "
+    "first conversation in the list' or 'Go back to the list'. Repeat a pair of steps for the next item in "
+    "words, such as 'Do the same for the next conversation down, until five are opened', rather than listing "
+    "each. The steps only visit what the goal needs; the reading and comparing is the reviewer's. When "
+    "earlier_tasks are given, they are what the user asked before in the same session, and the goal may "
+    "lean on them. Plain text, one step per line. Set ok to false when the goal needs one place only, or "
+    "when no plan would help."
+)
+MAX_PLAN_CHARS = 600
+
+
+def compose_plan(writer: Writer, goal: str, guidance: Guidance | None = None) -> str:
+    """The steps a goal that means opening several things in turn should take, for the classifier to follow;
+    empty when the writer declined. Made from the goal alone: the screen a run starts on is most often an
+    unrelated app."""
+    data = _structured(
+        writer,
+        system=PLAN_SYSTEM,
+        packet={"goal": goal, **(guidance.writer_state() if guidance else {}), "now": now_context()},
+        properties={"ok": {"type": "boolean"}, "plan": {"type": "string"}},
+        max_tokens=300,
+    )
+    return data["plan"].strip()[:MAX_PLAN_CHARS] if data["ok"] else ""
+
+
 @dataclass(frozen=True)
 class Answer:
     """What the writer made of a stop: the words for the user, and how the run goes on when it can.
@@ -457,8 +489,11 @@ ANSWER_SYSTEM = (
     "An agent is driving a user's computer toward the user's goal. A small classifier picks each "
     "action, and it has stopped and handed the run to you. You receive the goal, the actions taken, "
     "why the classifier stopped, a capture of the screen as it is now, the text read from that "
-    "screen, and the text of the screens it passed through on the way, oldest first. You may also "
-    "receive the focus the classifier was working on, the earlier times it stopped with what you "
+    "screen, and the text of the screens it passed through on the way, oldest first. Each of those says "
+    "the action that reached it, reached_by, and holds only the lines no later screen and not the current "
+    "one shows, so the lines around them are left out: what a screen holds belongs to what reached_by "
+    "opened, such as the conversation with the person it clicked, never to a name elsewhere. You may also "
+    "receive the plan the run started with, the focus the classifier was working on, the earlier times it stopped with what you "
     "said and the focus you gave each time, what the user said when asked, and the tasks the user "
     "gave before this one in the same session with what came of each, which a short goal may lean "
     "on. What you said earlier was read from screens of this run, some of which may have since "
@@ -548,8 +583,11 @@ def compose_answer(
     earlier_stops: list[dict] | None = None,
     can_ask: bool = False,
     moves: bool = False,
+    may_do: str | None = None,
 ) -> Answer:
     """What to tell the user now that the classifier has stopped, and how the run could go on.
+
+    `may_do` says what the run's permissions let it do, when they hold some actions back.
 
     The classifier can stop on the right page but cannot say what the page says. The writer reads the
     capture itself as well as its text, since OCR misreads a letter here and there and drops layout.
@@ -568,6 +606,7 @@ def compose_answer(
         "actions_taken": history,
         **({"earlier_stops": earlier_stops} if earlier_stops else {}),
         "user_can_be_asked": can_ask,
+        **({"what_the_run_may_do": may_do} if may_do else {}),
         "frontmost_app": screen.app,
         "browser_active_tab_url": screen.url,
         "screen_text_in_reading_order": [

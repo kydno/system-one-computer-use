@@ -171,12 +171,12 @@ def test_run_json_shows_tokens_per_model_and_the_calls_line_is_unchanged(monkeyp
     (model,) = {request["model"] for request in writer.requests}
     assert run["usage"] == {
         "classifier": {
-            "requests": 3,
+            "requests": 4,
             "input_tokens": 0,
             "cached_input_tokens": 0,
             "output_tokens": 0,
             "cost": None,
-        },  # the goal read-only, the goal needing moves, then the step
+        },  # the goal read-only, the goal needing moves, the goal needing a plan, then the step
         model: {
             "requests": len(writer.requests),
             "input_tokens": 700,
@@ -190,9 +190,9 @@ def test_run_json_shows_tokens_per_model_and_the_calls_line_is_unchanged(monkeyp
     assert set(run["usage_by_role"]) == {"decision", "reviewer"}
     assert run["usage_by_role"]["reviewer"][model]["requests"] == len(writer.requests)
     assert run["ended_at"]
-    assert run["calls"]["classifier"]["calls"] == 3
+    assert run["calls"]["classifier"]["calls"] == 4
     log = (tmp_path / "run" / "run.log").read_text()
-    assert "calls: classifier 3 (75%, " in log and "writer 1 (25%, " in log
+    assert "calls: classifier 4 (80%, " in log and "writer 1 (20%, " in log
 
 
 def test_the_run_folder_names_the_models_asked_even_when_none_replied(monkeypatch, tmp_path):

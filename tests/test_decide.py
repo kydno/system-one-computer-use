@@ -136,6 +136,8 @@ def test_a_duplicated_label_names_its_row_and_a_unique_one_does_not(screen, make
         make_item(5, "Buy", x1=420, x2=480),
         make_item(6, "Buy", x1=420, x2=480, y1=200, y2=230),
     ]
+    twins = [make_item(0, "Profile", x1=10, x2=60), make_item(1, "Profile", x1=20, x2=50), make_item(2, "Inbox", x1=200, x2=300)]
+    assert row_mates(twins) == {0: ["Inbox"], 1: ["Inbox"]}  # a copy of the item names no row
     assert row_mates(wide)[5] == ["Col 0", "Col 1", "Col 2"]  # a criterion stays short
     assert row_mates(wide, limit=None)[5] == [f"Col {i}" for i in range(5)]  # a history line takes the whole row
     state = base_state("buy a ticket to Coldplay", screen, items, [])

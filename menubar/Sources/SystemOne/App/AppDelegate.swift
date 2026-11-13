@@ -15,8 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var onPanelOpen: (() -> Void)?
     /// Fires at the *start* of the close, `K.Motion.panelClose` before the window leaves the screen.
     var onPanelClose: (() -> Void)?
-    /// A menu in place of the panel for a left click, or nil for the panel.
-    var menuForClick: (() -> NSMenu?)?
+    /// A left click taken in place of the panel toggle; true when it was.
+    var takeClick: (() -> Bool)?
     var contextMenu: (() -> NSMenu)?
     var onTerminate: (() -> Void)?
 
@@ -50,10 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         status.onToggle = { [weak self] button in
             self?.panelController.toggle(anchoredTo: button)
         }
-        status.menuForClick = { [weak self] in self?.menuForClick?() }
+        status.takeClick = { [weak self] in self?.takeClick?() ?? false }
         status.contextMenu = { [weak self] in self?.contextMenu?() ?? NSMenu() }
         status.onWillShowMenu = { [weak self] in
-            // The status strip stays under the run's menu; it takes no clicks.
+            // The status strip stays under the menu.
             guard let self, !self.panelController.isPassive else { return }
             self.panelController.close()
         }

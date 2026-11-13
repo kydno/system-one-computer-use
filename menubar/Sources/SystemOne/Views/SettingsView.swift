@@ -13,6 +13,9 @@ struct SettingsView: View {
     @FocusState private var focusedKey: String?
     @State private var saved: [String: String] = [:]
     @State private var decisionModel = DecisionModel.current
+    @State private var runPermission = RunPermission.current
+    /// The permissions section's caret: folded to its title until opened.
+    @State private var isPermissionOpen = false
     @State private var drafts: [String: String] = [:]
     @State private var errorText: String?
     @State private var intrinsicHeight: CGFloat = 0
@@ -83,12 +86,20 @@ struct SettingsView: View {
 
             Divider()
 
+            AbortKeyRow(isLive: !model.isClosing)
+
+            Divider()
+
+            permissionRow
+
+            Divider()
+
             decisionModelPicker
 
             Divider()
 
             ReviewerModelView(
-                model: saved[ReviewerRouting.modelKey],
+                model: saved[ReviewerRouting.modelKey] ?? saved[ReviewerRouting.legacyModelKey],
                 routing: saved[ReviewerRouting.key],
                 effort: saved[ReviewerEffort.key],
                 write: write
@@ -156,7 +167,45 @@ struct SettingsView: View {
                 PillButton(title: "Save", isEnabled: hasDraft) { save(setting) }
             }
 
-            caption(setting.caption)
+            if !setting.caption.isEmpty { caption(setting.caption) }
+        }
+    }
+
+    // MARK: - Run permissions
+
+    /// Opened, the picker fades in under the title and the box grows to it on its own curve (see
+    /// `resize`), as the reviewer's results do. A fold that animated its own height as well fought
+    /// that resize and jerked the panel. Folded, the title still says which permission holds.
+    private var permissionRow: some View {
+        VStack(alignment: .leading, spacing: K.Settings.rowGap) {
+            Button {
+                withAnimation(Motion.curve(K.Motion.buttonHover, reduceMotion: reduceMotion)) {
+                    isPermissionOpen.toggle()
+                }
+            } label: {
+                HStack(spacing: K.InputBar.elementGap) {
+                    Text("Permissions")
+                        .font(.system(size: K.RunBox.bodyFontSize, weight: .medium))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                    Text(runPermission.title)
+                        .font(.system(size: K.Settings.captionSize))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: K.Usage.caretSize, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isPermissionOpen ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Permissions, \(runPermission.title)")
+            .accessibilityValue(isPermissionOpen ? "Expanded" : "Collapsed")
+
+            if isPermissionOpen {
+                PermissionPicker(selection: runPermission) { write(RunPermission.key, $0.rawValue) }
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -214,7 +263,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func field(_ setting: EnvSetting, stored: String?, text: Binding<String>) -> some View {
         let prompt = stored == nil
-            ? (setting.isSecret ? "Paste your key" : "you@example.com")
+            ? (setting.isSecret ? "Paste your key" : "Type a value")
             : (setting.isSecret ? "Replace the saved key" : "Replace")
         if setting.isSecret {
             SecureField(prompt, text: text)
@@ -264,6 +313,7 @@ struct SettingsView: View {
     private func load() {
         saved = EnvFile.values().filter { !$0.value.isEmpty }
         decisionModel = DecisionModel.current
+        runPermission = RunPermission.current
         focusedKey = EnvSetting.all.first { saved[$0.key] == nil }?.key
     }
 

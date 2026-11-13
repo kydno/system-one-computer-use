@@ -69,6 +69,8 @@ final class RunModel: ObservableObject {
     @Published private(set) var errorText: String?
     @Published private(set) var runFolder: URL?
     @Published private(set) var seconds: Double?
+    /// The action the run's question asks to take, under ask-first permissions; nil for a writer's question.
+    @Published private(set) var permissionRequest: AgentEvent.PermissionRequest?
     /// What the run cost in USD, as its replies reported it; nil when none did.
     @Published private(set) var cost: Double?
     /// The runs before this one since the last Clear, oldest first.
@@ -90,6 +92,12 @@ final class RunModel: ObservableObject {
 
     /// The gear: the settings box shows in place of the run box.
     @Published private(set) var isShowingSettings = false
+
+    /// `/permissions`: the session's permissions card shows in place of the run box.
+    @Published private(set) var isShowingPermissions = false
+    /// What this session's runs may do, over what Settings says; nil follows
+    /// Settings. Holds until Clear, which starts a new session.
+    @Published private(set) var sessionPermission: RunPermission?
 
     // MARK: - Hooks, set by the composition root
 
@@ -189,7 +197,28 @@ final class RunModel: ObservableObject {
 
     func openSettings() {
         guard !isAsking else { return }
+        isShowingPermissions = false
         isShowingSettings = true
+    }
+
+    // MARK: - This session's permissions
+
+    /// What the field takes as a command rather than a goal.
+    static let permissionCommands: Set<String> = ["/perm", "/permission", "/permissions"]
+
+    func openPermissions() {
+        guard !isAsking else { return }
+        isShowingSettings = false
+        isShowingPermissions = true
+    }
+
+    func closePermissions() {
+        isShowingPermissions = false
+    }
+
+    /// Nil drops the override, and the next run follows Settings again.
+    func setSessionPermission(_ permission: RunPermission?) {
+        sessionPermission = permission
     }
 
     func closeSettings() {
@@ -200,8 +229,12 @@ final class RunModel: ObservableObject {
 
     /// Enter in the field: a reply while the run asks, otherwise a new goal.
     func submit() {
+        let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         if isAsking {
             reply(inputText)
+        } else if Self.permissionCommands.contains(typed.lowercased()) {
+            inputText = ""
+            openPermissions()
         } else if canSubmit {
             start(inputText.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -210,6 +243,7 @@ final class RunModel: ObservableObject {
     func start(_ newGoal: String) {
         guard !isRunning, !isAsking else { return }
         isShowingSettings = false
+        isShowingPermissions = false
         if phase == .finished, let finished = current { past.append(finished) }
         switch Project.clicker() {
         case .failure(let error):
@@ -223,6 +257,8 @@ final class RunModel: ObservableObject {
             root = found.root
             // No step limit: Stop, `done`, low confidence or a stall ends the run.
             var arguments = ["--events", "--act", "--steps", String(K.Run.unlimitedSteps)]
+            // Unset, the run reads CLICKER_PERMISSIONS from `.env`, which Settings writes.
+            if let sessionPermission { arguments += ["--permissions", sessionPermission.rawValue] }
             let earlier = past.compactMap(\.earlierTask).suffix(K.Run.earlierTasks)
             if !earlier.isEmpty,
                let data = try? JSONSerialization.data(withJSONObject: Array(earlier)),
@@ -249,12 +285,17 @@ final class RunModel: ObservableObject {
     func reply(_ text: String) {
         guard isAsking, let process else { return }
         phase = .running
+        permissionRequest = nil
         inputText = ""
         if !isPinned { requestClose?() }
         DispatchQueue.main.asyncAfter(deadline: .now() + K.Motion.panelClose + K.Run.screenSettle) {
             process.send(text)
         }
     }
+
+    /// The card's two buttons: the run takes a yes as leave to act, and anything else as a no.
+    func allow() { reply("yes") }
+    func deny() { reply("no") }
 
     /// As Ctrl-C in the terminal: the run stops where it is and says so.
     func stop() {
@@ -267,6 +308,7 @@ final class RunModel: ObservableObject {
     func clear() {
         guard canClear else { return }
         past = []
+        sessionPermission = nil
         reset(goal: nil)
         phase = .idle
     }
@@ -309,9 +351,12 @@ final class RunModel: ObservableObject {
         case .focus(_, let focus):
             note = focus
             noteTitle = "Focus"
+        case .permission(let request):
+            permissionRequest = request
         case .question(let text):
             phase = .asking(text)
             isShowingSettings = false
+            isShowingPermissions = false
             inputText = ""
             requestOpen?()
         case .answer(let text, let wasAchieved):
@@ -321,7 +366,9 @@ final class RunModel: ObservableObject {
             ended = true
             answer = answer ?? end.answer
             achieved = achieved ?? end.achieved
-            outcome = end.why ?? end.outcome
+            // Stop and the abort key reach the run as Ctrl-C does, but nobody
+            // here pressed Ctrl-C, so the box says only that it was aborted.
+            outcome = end.why ?? end.outcome.replacingOccurrences(of: " (Ctrl-C)", with: "")
             seconds = end.seconds
             cost = end.cost
             if let root { runFolder = Project.folder(end.folder, in: root) }
@@ -353,6 +400,7 @@ final class RunModel: ObservableObject {
         achieved = nil
         outcome = nil
         errorText = nil
+        permissionRequest = nil
         runFolder = nil
         seconds = nil
         cost = nil

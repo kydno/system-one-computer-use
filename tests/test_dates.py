@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 
 from typesafe_computer_use.dates import date_hints, describe_offset, first_date
@@ -54,3 +55,20 @@ def test_the_menu_bar_clock_dates_nothing(screen, make_item):
     ]
     hints = date_hints(items, screen, TODAY)
     assert hints == {2: "dated 2026-10-02 (in 16 days)", 3: "near a line dated 2026-10-02 (in 16 days)"}
+
+
+def test_a_tab_keeps_its_date_to_itself(screen, make_item):
+    """A tab titled with a date dated every other tab and the toolbar under them as near it."""
+    items = [
+        replace(make_item(0, "Weekly notes", y1=66, y2=108), role="radio"),
+        replace(make_item(1, "Sep 30 recap - Video", x1=600, x2=900, y1=66, y2=108), role="radio"),
+        replace(make_item(2, "Back", y1=120, y2=160), role="button"),
+        make_item(3, "Coldplay | Oct 2", y1=600, y2=630),
+        make_item(4, "Buy", y1=640, y2=670),
+    ]
+    hints = date_hints(items, screen, TODAY)
+    assert hints == {
+        1: "dated 2026-09-30 (in 14 days)",
+        3: "dated 2026-10-02 (in 16 days)",
+        4: "near a line dated 2026-10-02 (in 16 days)",
+    }

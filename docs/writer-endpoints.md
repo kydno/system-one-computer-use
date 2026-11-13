@@ -1,36 +1,36 @@
 # Writer endpoints
 
-The writer types text, proposes URLs, and reads the screen whenever the classifier stops. By
-default it is Claude on `api.anthropic.com`, or on OpenRouter when `OPENROUTER_API_KEY` is set
-and no other endpoint is named. These variables change the model or send it to another endpoint.
+The writer is a run's one LLM: it types text, proposes URLs, and reads the screen whenever the
+classifier stops. By default it is Claude on `api.anthropic.com`, or on OpenRouter when
+`OPENROUTER_API_KEY` is set and no other endpoint is named. Since it reads screenshots, the model
+has to see images, unless `CLICKER_WRITER_VISION=false`. These variables change the model or send
+it to another endpoint.
 
 | variable | required | purpose |
 |---|---|---|
 | `CLICKER_WRITER_BASE_URL` | no | send the writer to another endpoint; unset means `api.anthropic.com` |
 | `CLICKER_WRITER_API_KEY` | no | the key for `CLICKER_WRITER_BASE_URL`, if it checks one |
 | `CLICKER_WRITER_API` | no | what that endpoint speaks: `anthropic` (the default) or `openai` |
-| `CLICKER_WRITER_MODEL` | no | types text and proposes URLs; defaults to `claude-haiku-4-5`, on OpenRouter `inception/mercury-3` at medium effort |
-| `CLICKER_ANSWER_MODEL` | no | reads the screen whenever the classifier stops; defaults to `claude-sonnet-5`, on OpenRouter `openai/gpt-6.1-terra` |
-| `CLICKER_WRITER_VISION` | no | `false` for an answer model that reads text only; defaults to `true` |
-| `CLICKER_WRITER_REASONING` | no | the reasoning effort the writer's calls ask an OpenAI-API model for, such as `none`; unset leaves it to the model, except `medium` for OpenRouter's default writer. A call with an effort gets tokens to think with on top of its own limit (1024 at `low`, 2048 at `medium`, 4096 at `high`). Thinking can still run past that on some calls and cut the reply off; a reply cut off at its limit is asked for once more with twice the room |
-| `CLICKER_ANSWER_REASONING` | no | the same for the answer model; unset leaves it to the model, except `low` for OpenRouter's default answer model |
-| `CLICKER_ANSWER_SORT` | no | the order OpenRouter tries the answer model's providers in: `price` for the cheapest first, `throughput` for the fastest; unset leaves it to OpenRouter, which weighs price and uptime. Either way it falls back to the next provider when one fails. The menu bar app's settings set this and `CLICKER_ANSWER_MODEL` |
+| `CLICKER_WRITER_MODEL` | no | the LLM, for writing and for reading the screen; defaults to `claude-sonnet-5`, on OpenRouter `openai/gpt-6.1-terra` at low effort. `CLICKER_ANSWER_MODEL`, which named a second model for the reading until the two were made one, still names it when this is unset |
+| `CLICKER_WRITER_VISION` | no | `false` for a model that reads text only; defaults to `true` |
+| `CLICKER_WRITER_REASONING` | no | the reasoning effort the writing calls ask an OpenAI-API model for, such as `none`; unset leaves it to the model, except `low` for OpenRouter's default model. A call with an effort gets tokens to think with on top of its own limit (1024 at `low`, 2048 at `medium`, 4096 at `high`). Thinking can still run past that on some calls and cut the reply off; a reply cut off at its limit is asked for once more with twice the room |
+| `CLICKER_ANSWER_REASONING` | no | the same for the calls that read the screen; unset leaves it to the model, except `low` for OpenRouter's default model. The menu bar app's effort bars set both |
+| `CLICKER_ANSWER_SORT` | no | the order OpenRouter tries the model's providers in when it reads the screen: `price` for the cheapest first, `throughput` for the fastest; unset leaves it to OpenRouter, which weighs price and uptime. Either way it falls back to the next provider when one fails. The menu bar app's settings set this and `CLICKER_WRITER_MODEL` |
 | `CLICKER_WRITER_PROVIDER` | no | the one OpenRouter provider the writer's calls go to, by its slug or tag such as `deepinfra/fp8`, with no fallback, so a busy provider fails the call; unset leaves routing to OpenRouter |
 
 ## OpenRouter
 
 With `OPENROUTER_API_KEY` set, and neither `CLICKER_WRITER_BASE_URL` nor `ANTHROPIC_BASE_URL`
 with an Anthropic key, token or profile beside it, the writer goes to `https://openrouter.ai/api/v1` over OpenAI's Chat Completions API, with that key and
-no other. Any chat model OpenRouter serves can write or answer, by its OpenRouter id:
+no other. Any chat model OpenRouter serves can be the LLM, by its OpenRouter id:
 `typesafe/jev-router` picks a model and effort per request, and other vendors' models work as
-well as Claude. The answer model reads a screenshot, so pick one
-that sees images or set `CLICKER_WRITER_VISION=false`. `CLICKER_WRITER_API=anthropic` keeps the
+well as Claude. It reads screenshots, so pick one that sees images or set
+`CLICKER_WRITER_VISION=false`. `CLICKER_WRITER_API=anthropic` keeps the
 writer on Anthropic's own API even with the OpenRouter key set.
 
 ```
 OPENROUTER_API_KEY=sk-or-...
-CLICKER_WRITER_MODEL=typesafe/jev-router
-CLICKER_ANSWER_MODEL=anthropic/claude-sonnet-5
+CLICKER_WRITER_MODEL=anthropic/claude-sonnet-5
 ```
 
 ## Other models
@@ -43,7 +43,7 @@ parameters, so the schema is also spelled out in the prompt, and code fences or 
 the JSON are tolerated. On the OpenAI API a `json_schema` response format is asked for first, then
 `json_object`, then none, stepping down only when the endpoint refuses one. Thinking is turned off,
 since a model that thinks by default spends the writer's small token budgets on it and returns no
-text. The answer model reads a screenshot; for a model that reads text only, set
+text. The model reads a screenshot when the classifier stops; for a model that reads text only, set
 `CLICKER_WRITER_VISION=false` and it gets the screen's text alone. A reply that cannot be read
 refuses the step it was for, and the run goes on.
 
@@ -58,13 +58,11 @@ that checks no key.
 # LM Studio, either of its two APIs
 CLICKER_WRITER_BASE_URL=http://localhost:1234
 CLICKER_WRITER_MODEL=qwen3.8-flash-next
-CLICKER_ANSWER_MODEL=qwen3.8-flash-next
 
 # any OpenAI-compatible server
 CLICKER_WRITER_API=openai
 CLICKER_WRITER_BASE_URL=https://api.deepseek.com/v1
 CLICKER_WRITER_API_KEY=sk-...
 CLICKER_WRITER_MODEL=deepseek-v4.1-flash
-CLICKER_ANSWER_MODEL=deepseek-v4.1-flash
 CLICKER_WRITER_VISION=false
 ```

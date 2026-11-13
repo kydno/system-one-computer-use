@@ -61,7 +61,7 @@ def page(screen, monkeypatch):
 def test_a_press_on_a_web_page_that_changes_nothing_falls_back_to_the_mouse(page, calls):
     """Google Flights takes AXPress on a calendar day, says yes, and selects nothing."""
     live, _ = page
-    assert click_item(REGISTER, live) == "clicked 'Register Now' (accessibility press changed nothing on screen)"
+    assert click_item(REGISTER, live) == "clicked 'Register Now' (after an accessibility press that showed nothing)"
     assert calls == [("click", (100.0, 60.0))]
 
 
@@ -72,12 +72,33 @@ def test_a_press_on_a_web_page_that_shows_is_left_at_that(page, calls):
     assert calls == []
 
 
+def test_a_press_that_shows_on_a_later_look_is_left_at_that(page, calls, monkeypatch):
+    """A link that fetches the next page before painting it had not changed the screen 0.4 s after the
+    press, and a pointer click went to the same spot on a page that was already on its way."""
+    live, shown = page
+    later = shown["image"].copy()
+    later.paste((255, 255, 255), (900, 500, 1100, 700))
+    looks = iter([shown["image"], later])
+    monkeypatch.setattr(desktop, "screenshot", lambda: next(looks))
+    assert click_item(REGISTER, live) == "pressed 'Register Now' via accessibility"
+    assert calls == []
+
+
+def test_a_press_that_never_shows_gets_every_look_then_the_mouse(page, calls, monkeypatch):
+    live, _ = page
+    slept = []
+    monkeypatch.setattr(desktop, "sleep_watching", slept.append)
+    assert click_item(REGISTER, live) == "clicked 'Register Now' (after an accessibility press that showed nothing)"
+    assert slept == [actions.PRESS_SECONDS] * actions.PRESS_LOOKS
+    assert calls == [("click", (100.0, 60.0))]
+
+
 def test_a_blinking_caret_or_a_ticking_clock_is_not_a_press_that_showed(page, calls):
     live, shown = page
     live = replace(live, field=field())
     shown["image"].paste((255, 255, 255), (20, 40, 420, 100))  # inside the focused field, in capture pixels
     shown["image"].paste((255, 255, 255), (1700, 0, 2000, 60))  # the menu bar
-    assert click_item(REGISTER, live) == "clicked 'Register Now' (accessibility press changed nothing on screen)"
+    assert click_item(REGISTER, live) == "clicked 'Register Now' (after an accessibility press that showed nothing)"
     assert calls == [("click", (100.0, 60.0))]
 
 
@@ -1081,3 +1102,41 @@ def test_refused_restore_has_no_keyboard_fallback(monkeypatch):
     monkeypatch.setattr(desktop, "ax_set_value", lambda *a: False)
     monkeypatch.setattr(desktop, "clear_field", lambda: pytest.fail("must not clear the current focus"))
     assert not actions.restore_field(field(ref=object()), "new query")
+
+
+@pytest.fixture
+def back(screen, monkeypatch):
+    """A Back press, the looks taken after it, and `shown`: what each look sees, in order (the last repeats)."""
+    log: list = []
+    shown: list = [screen.image.copy()]
+    monkeypatch.setattr(desktop, "press", lambda key, command=False: log.append(("press", key, command)))
+    monkeypatch.setattr(desktop, "sleep_watching", lambda seconds: log.append(("sleep", seconds)))
+    monkeypatch.setattr(desktop, "screenshot", lambda: shown.pop(0) if len(shown) > 1 else shown[0])
+    return log, shown
+
+
+def test_a_back_that_changed_the_screen_says_so_and_keeps_its_look(screen, back):
+    log, shown = back
+    shown[0].paste((255, 255, 255), (0, 300, 1400, 1200))  # the page before this one
+    assert actions.perform(pointing("go_back", None), screen, [], None) == "went back"
+    assert log == [("press", "[", True), ("sleep", actions.PRESS_SECONDS)]
+    assert actions.last_look() == actions.Look(shown[0], changed=True)
+
+
+def test_a_back_that_shows_a_look_later_still_went_back(screen, back):
+    """A page slower than one look to start its navigation is not said to have changed nothing."""
+    log, shown = back
+    later = screen.image.copy()
+    later.paste((255, 255, 255), (0, 300, 1400, 1200))
+    shown.append(later)
+    assert actions.perform(pointing("go_back", None), screen, [], None) == "went back"
+    assert log.count(("sleep", actions.PRESS_SECONDS)) == 2
+
+
+def test_a_back_that_left_the_screen_as_it_was_says_so(screen, back):
+    """Back leaves an in-page popover where it is, and the next step should read that rather than "went back"."""
+    log, _ = back
+    assert actions.perform(pointing("go_back", None), screen, [], None) == "went back (nothing changed)"
+    assert log.count(("sleep", actions.PRESS_SECONDS)) == actions.BACK_LOOKS
+    look = actions.last_look()
+    assert look is not None and not look.changed
