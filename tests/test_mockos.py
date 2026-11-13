@@ -318,13 +318,10 @@ def test_a_toggle_task_passes_only_once_its_switch_is_on_and_nothing_else_moved(
 def test_a_popup_and_a_radio_task_check_the_value_asked_for():
     for name in ("settings/popup@1", "settings/radio@1"):
         task = build(name)
-        target = next(step for step in task.oracle if step[1][1] in ("menu item", "radio"))[1][0]
+        target = task.oracle[-1][1][0]  # the option the last step picks
+        label = task.oracle[0][1][0] if name.startswith("settings/popup") else task.oracle[0][1][2]
         state = copy.deepcopy(task.seed)
-        row = next(
-            r
-            for r in settings_tasks.rows_of(state["settings"]).values()
-            if target in r.get("options", ()) and r["value"] != target
-        )
+        row = _row(state, label)
         assert not task.check(state, None)
         row["value"] = target
         assert task.check(state, None)

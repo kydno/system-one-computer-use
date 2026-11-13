@@ -68,6 +68,7 @@ POOLS = {
     "/Trash": ("old resume.docx", "draft 1.txt", "blurry photo.jpg"),
 }
 TRASHED_FROM = "/Home/Documents"
+SEP = " \u203a "  # between the folders of a path, as the Files app writes one
 
 
 def size_text(n: int | None) -> str:
@@ -290,7 +291,7 @@ def move_dialog(seed: int) -> Task:
     folder = r.choice(("/Home/Documents/Receipts", "/Home/Documents/Travel", "/Home/Documents/Taxes 2025"))
     start = copy.deepcopy(f)
     to = f"{folder}/{name(path)}"
-    shown = " › ".join(folder.replace("/Home", "Home").split("/"))
+    shown = SEP.join(folder.replace("/Home", "Home").split("/"))
 
     def check(final: dict, answer: str | None) -> bool:
         return same_entries(final, start, but={path: None, to: start["entries"][path]})
@@ -298,7 +299,7 @@ def move_dialog(seed: int) -> Task:
     return Task(
         id=f"{title}@{seed}",
         tier=3,
-        goal=f"Move {name(path)} from Downloads into Documents › {name(folder)}.",
+        goal=f"Move {name(path)} from Downloads into Documents{SEP}{name(folder)}.",
         seed=seed_for(r, f),
         check=check,
         oracle=(
@@ -330,7 +331,7 @@ def find_nested(seed: int) -> Task:
     return Task(
         id=f"{title}@{seed}",
         tier=3,
-        goal=f"How big is the file {name(path)}? It is somewhere in Documents › Projects.",
+        goal=f"How big is the file {name(path)}? It is somewhere in Documents{SEP}Projects.",
         seed=seed_for(r, f),
         check=check,
         oracle=tuple(steps),
