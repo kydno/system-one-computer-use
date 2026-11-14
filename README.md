@@ -81,7 +81,7 @@ cp .env.example .env     # fill in the keys
 | `CLICKER_EMAIL` | no | enables the `type_email` action |
 | `CLICKER_BROWSER` | no | the default browser; unset, the Mac's own default browser when `use_browser` can drive it, else `Google Chrome`. When others are installed, Jev picks the one the goal names or the one in front |
 
-`.env` lives at the repo root and is read by every entry point (`clicker`, `clicker-inspect`).
+`.env` lives at the repo root and is read by every entry point (`clicker`, `clicker-inspect`, `clicker-takeover`).
 With only `OPENROUTER_API_KEY` set, both the classifier and the writer run on OpenRouter; see
 [decision models](docs/decision-models.md) for the models and how the key is chosen. To run the writer on another model or endpoint (LM Studio, Ollama, any OpenAI-compatible
 server), see [writer endpoints](docs/writer-endpoints.md).
@@ -98,6 +98,7 @@ uv run clicker "open the Playground" --act           # drives the machine, up to
 uv run clicker "log in" --act --steps 20 --delay 3   # longer, and up to 3 s for a slow page to settle
 uv run clicker "log in" --act --handoffs 0           # the classifier alone: its first stop ends the run
 uv run clicker-inspect "any goal"                    # 3-2-1, capture, open the annotated screen + payload
+uv run clicker-takeover runs/<timestamp>             # an LLM goes on from where a stopped run left off
 ```
 
 Clear the terminal first. It is on screen, so its text is OCR input.
@@ -105,7 +106,9 @@ Clear the terminal first. It is on screen, so its text is OCR input.
 To stop a live run, press Ctrl-C in the terminal or slam the mouse into the top-left corner of
 the screen. The loop also stops itself on `done`, low confidence, a stall, or the step limit,
 and the writer then reads the screen and prints the answer. Every run writes
-`runs/<timestamp>/`, so a stall can be [replayed offline](docs/run-folder.md).
+`runs/<timestamp>/`, so a stall can be [replayed offline](docs/run-folder.md). A run that stops
+short of its goal also leaves `handoff.json` there, and `clicker-takeover` hands it to an LLM
+computer-use agent that starts from that story and the screen (see [takeover](docs/takeover.md)).
 
 ## From the menu bar
 
@@ -143,6 +146,7 @@ a one-command machine in Google Cloud.
 
 - [How a step works](docs/how-a-step-works.md): perception, the three-part decision, the action space, stalls, and the hand-off to the writer
 - [Run folder](docs/run-folder.md): what every run writes, the timing line, and offline replay
+- [Takeover](docs/takeover.md): `clicker-takeover`, an LLM on OpenRouter that goes on from a stopped run's `handoff.json`
 - [Browser backend](docs/browser-backend.md): DOM perception over Chrome DevTools, no OCR, no screen permission
 - [Decision models](docs/decision-models.md): OpenRouter or TypeSafe, and the models that answer
 - [Writer endpoints](docs/writer-endpoints.md): every writer variable, and other models over the Anthropic or OpenAI API

@@ -1,12 +1,15 @@
-"""Command-line entry points: `clicker` and `clicker-inspect`."""
+"""Command-line entry points: `clicker`, `clicker-inspect`, and `clicker-takeover`."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
+
+import openai
 
 from . import config
 from .actions import Context
@@ -17,6 +20,7 @@ from .perception import capture, perceive
 from .platform_adapter import desktop
 from .report import annotate, ax_count, render_payload
 from .runner import RunConfig, run
+from .takeover import DEFAULT_TAKEOVER_DELAY, TakeoverError, take_over
 from .timing import format_timing
 from .writer import make_writer, provider
 
@@ -206,3 +210,34 @@ def inspect(argv: list[str] | None = None) -> None:
     if not args.no_open:
         desktop.open_path(annotated)
         desktop.open_path(text, as_text=True)
+
+
+def takeover(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="clicker-takeover",
+        description=(
+            "Hand a run that stopped short of its goal to an LLM computer-use agent on OpenRouter, which drives "
+            "this computer from the screen it is on now, with the run's handoff.json as its story."
+        ),
+    )
+    parser.add_argument("folder", type=Path, help="the run folder that holds handoff.json")
+    parser.add_argument("--steps", type=int, default=config.DEFAULT_TAKEOVER_STEPS, help="most turns of the takeover model")
+    parser.add_argument(
+        "--delay", type=float, default=DEFAULT_TAKEOVER_DELAY, help="seconds after each turn's actions before the next screenshot"
+    )
+    args = parser.parse_args(argv)
+    config.load_dotenv(DOTENV)
+    if not config.openrouter_key():
+        sys.exit("clicker-takeover needs OPENROUTER_API_KEY: the takeover model runs on OpenRouter")
+    if not desktop.accessibility_trusted():
+        sys.exit(
+            "this terminal, or the app that started clicker-takeover, lacks Accessibility permission; "
+            "grant it in System Settings > Privacy & Security"
+        )
+    client = openai.OpenAI(base_url=config.OPENROUTER_CHAT_URL, api_key=os.environ["OPENROUTER_API_KEY"].strip())
+    try:
+        taken = take_over(args.folder, client, steps=args.steps, delay=args.delay)
+    except TakeoverError as e:
+        sys.exit(str(e))
+    if taken.outcome.startswith("aborted"):
+        sys.exit(130)
