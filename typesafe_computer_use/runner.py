@@ -215,10 +215,12 @@ class RunState:
     held: list[dict] = field(default_factory=list)  # each action the permissions held, and what came of it
 
 
-def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
+def run(cfg: RunConfig, ctx_factory, events: Events | None = None, *, decisions=None) -> RunState:
     """Drive the loop. ctx_factory(typesafe, history) builds the action Context.
 
     With `events`, the run reports to a front end as it goes instead of printing (see events.py).
+    `decisions` builds the decision client, a context manager; by default `DecisionClient`, looked up
+    when the run starts. A cached, budgeted, or scripted client comes in here, as the mock OS's do.
     """
     cfg.out.mkdir(parents=True, exist_ok=True)
     log = Log(cfg.out / "run.log", events)
@@ -231,7 +233,7 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
     started = time.time()
     models: dict[str, str | None] = {}
     try:
-        with DecisionClient() as typesafe:
+        with (decisions or DecisionClient)() as typesafe:
             ctx = metered(ctx_factory(typesafe, state.history), state.calls)
             models = configured_models(typesafe, ctx)
             log(f"models: decisions {models['decisions']}, writer {models['writer']}, answer {models['answer']}")
