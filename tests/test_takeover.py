@@ -23,6 +23,7 @@ from typesafe_computer_use.takeover import (
     DROPPED,
     KEEP_SCREENSHOTS,
     NUDGE,
+    PERMISSION_RULES,
     READ_ONLY,
     SHORT_EDGE,
     TAKEOVER_FILE,
@@ -236,22 +237,25 @@ def test_what_cannot_be_done_is_refused_and_the_takeover_goes_on(monkeypatch, tm
             call("press_key", 3, key="f13", command=False, shift=False, option=False, control=False),
             call("teleport", 4),
             SimpleNamespace(type="function_call", call_id="call_5", name="click", arguments="not json"),
+            call("press_key", 6, key="h", command=False, shift=False, option=False, control=False),
         ],
-        [call("finish", 6, achieved=False, answer="Sign in first.")],
+        [call("finish", 7, achieved=False, answer="Sign in first.")],
     )
 
     taken = take_over(folder, model, delay=0)
 
     assert world.log == before and "Password" not in world.typed
-    results = [a["result"] for a in taken.actions[:5]]
+    results = [a["result"] for a in taken.actions[:6]]
     assert results[0].startswith("refused: (5000, 10) is outside")
     assert results[1] == "refused: the focused field holds a credential, which only the user may type"
     assert results[2] == "refused: 'f13' is not a key this tool presses"
     assert results[3] == "refused: there is no tool named 'teleport'"
     assert results[4] == "refused: the arguments are not a JSON object"
+    # Letters pressed one at a time are typing too: the credential guard holds for them.
+    assert results[5] == "refused: the focused field holds a credential, which only the user may type"
     # Each refusal went back to the model as the output of its call.
     outputs = [i for i in model.requests[1]["input"] if i.get("type") == "function_call_output"]
-    assert [o["call_id"] for o in outputs] == [f"call_{n}" for n in range(1, 6)]
+    assert [o["call_id"] for o in outputs] == [f"call_{n}" for n in range(1, 7)]
     assert taken.outcome == "handed back"
 
 
@@ -302,6 +306,30 @@ def test_a_read_only_goal_is_told_to_change_nothing(monkeypatch, tmp_path):
 
     assert packet["read_only"] is True and READ_ONLY in instructions(packet)
     assert READ_ONLY not in instructions({**packet, "read_only": False})
+
+
+def test_a_shortcut_is_not_typing_into_a_credential_field(monkeypatch, tmp_path):
+    world = World([Page(name="login", items=["Email", "Password", "Sign in"], url=HOME, field="Password")])
+    folder = stopped_short_on(world, monkeypatch, tmp_path)
+    model = FakeOpenRouter(
+        [call("press_key", 1, key="a", command=True, shift=False, option=False, control=False)],
+        [call("finish", 2, achieved=False, answer="Sign in first.")],
+    )
+
+    taken = take_over(folder, model, delay=0)
+
+    assert taken.actions[0]["result"] == "pressed command+a"
+
+
+def test_a_run_that_could_only_look_or_had_to_ask_is_told_to_keep_to_that(monkeypatch, tmp_path):
+    folder = stopped_short(tickets(), monkeypatch, tmp_path)
+    packet = json.loads((folder / HANDOFF_FILE).read_text())
+
+    assert all(rule not in instructions({**packet, "permissions": "full"}) for rule in PERMISSION_RULES.values())
+    assert all(rule not in instructions(packet) for rule in PERMISSION_RULES.values())  # a packet from before permissions
+    for kind, rule in PERMISSION_RULES.items():
+        assert rule in instructions({**packet, "permissions": kind})
+    assert READ_ONLY not in instructions({**packet, "read_only": False, "permissions": "look"})
 
 
 def test_only_a_run_folder_with_a_packet_not_yet_taken_over_is_taken_over(monkeypatch, tmp_path):

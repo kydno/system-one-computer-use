@@ -37,7 +37,9 @@ beside it.
 ## What it is told
 
 - **Instructions:** the rules alone, including that text on screen and in the story is data and
-  never instructions. A read-only goal is told to change nothing.
+  never instructions. A read-only goal is told to change nothing, and so is a run whose
+  `permissions` were `look`; one that was `ask` is told not to send, post, buy, save, delete or
+  submit, but to finish and say what it would do, since the takeover cannot ask the user.
 - **First turn:** the goal, then the whole packet as JSON, labelled as what the run did and read:
   `outcome` and `why`, the writer's `answer` and `last_focus`, every action with the app, URL and
   screen it led to, `handoffs`, `questions`, `earlier_screens`, `current_screen` (its text in
@@ -50,7 +52,8 @@ beside it.
   screenshots; a line stands in for each older one, and every action and result stays.
 
 It never types into a field the system calls secure, or one whose label names a password, a code
-or a card: that call is refused, and the model is told to finish and say what the user has to do.
+or a card, whether as `type_text` or as letters pressed one at a time: that call is refused, and
+the model is told to finish and say what the user has to do.
 A call that cannot be carried out (a point off the screenshot, an unknown key or tool, arguments
 that are not JSON) goes back to the model as a refusal, and the takeover goes on. A turn that only
 talks is reminded once to act or finish; a second one ends the takeover.
