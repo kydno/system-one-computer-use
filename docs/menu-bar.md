@@ -99,7 +99,7 @@ surface and position controls, and backdrop sampling.
 
 ## Not yet verified
 
-The app has been compiled, in CI, and never run. The first thing to check is Menu-Bar-Chat's own
+The app has been compiled and never run. The first thing to check is Menu-Bar-Chat's own
 acceptance test, with a run in the middle: put the cursor mid-sentence in TextEdit, open the
 panel, start a dry run, and see that TextEdit stays in front, the decision describes TextEdit's
 window, and keystrokes still land in TextEdit after the panel closes. Then the same with **Drive

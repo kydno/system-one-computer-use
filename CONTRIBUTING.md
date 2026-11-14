@@ -36,11 +36,11 @@ uv run ruff check . && uv run ruff format .
 uv run pytest -q
 ```
 
-CI runs the same on macOS, and the tests again on Linux: they are pure logic, and
-`tests/conftest.py` stands in for the platform modules where they cannot be installed. A third job
-checks `infra/gcp` (format, validation, and `terraform test` against mock providers) and
-`scripts/osworld-gcp`, with no cloud credentials. A fourth compiles the menu bar app in `menubar/`; a change
-there also needs a run by hand, since nothing in CI opens it.
+There is no CI, so run these yourself. The tests are pure logic, and `tests/conftest.py` stands in
+for the platform modules where they cannot be installed, so they also run on Linux. A change to
+`infra/gcp` or `scripts/osworld-gcp` should pass `terraform fmt -check`, `terraform validate`,
+`terraform test` and `shellcheck` locally. A change to the menu bar app in `menubar/` should pass
+`swift build` and also needs a run by hand.
 
 Add a replay-based note to the PR when a change alters what the model sees:
 which run folder, which step, what the decision was before and after. `clicker-eval size` gives the

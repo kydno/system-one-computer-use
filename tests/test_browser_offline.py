@@ -1,7 +1,7 @@
 """Offline tests for the browser backend. No Chrome, no network, no API key.
 
 A stub session replays canned JS results, so the perception parsing, the action
-set filtering, change detection and the step loop are all testable in CI.
+set filtering, change detection and the step loop are all testable offline.
 """
 
 from __future__ import annotations

@@ -3,7 +3,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kydno/system-one-computer-use/actions/workflows/ci.yaml"><img alt="CI" src="https://github.com/kydno/system-one-computer-use/actions/workflows/ci.yaml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white">
   <img alt="macOS, Windows experimental" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20(experimental)-000000">
