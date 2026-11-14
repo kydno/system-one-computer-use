@@ -41,10 +41,10 @@ downloads OSWorld 2.0's tasks, a gated Hugging Face dataset, and needs `HF_TOKEN
 
 A run reads its keys from `.env`: `OPENROUTER_API_KEY` or `TYPESAFE_API_KEY` for this agent's
 classifier (see [decision models](decision-models.md)) and `OPENAI_API_KEY` for both.
-This agent's writer and answer model in OSWorld are Luna too, so a run compares the agent with Luna
+This agent's LLM in OSWorld is Luna too, so a run compares the agent with Luna
 inside it to Luna
 alone: `run-jev` points the `CLICKER_WRITER_*` settings at OpenAI's API and `gpt-6-luna`, with no
-reasoning for the writer's short calls and `low` for the answer model. `.env` overrides any of them. `--ocr` is required, since a result depends on the OCR that read the
+reasoning for its short writing calls and `low` for reading the screen. `.env` overrides any of them. `--ocr` is required, since a result depends on the OCR that read the
 screen: `rapidocr` is the benchmark backend, and `vision` is macOS's own and runs only there.
 `OSWORLD_PROVIDER` picks OSWorld's VM provider, `docker` by default. Both runs keep OSWorld's
 screen recording and its VNC server on, so the VM can be watched live. Every command prints what

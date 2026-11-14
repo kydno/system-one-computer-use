@@ -91,6 +91,12 @@ def main(argv: list[str] | None = None) -> None:
         default=config.DEFAULT_HANDOFFS,
         help="times the writer may send a stopped run back to the classifier with a new focus (0: every stop is final)",
     )
+    parser.add_argument(
+        "--permissions",
+        choices=config.PERMISSIONS,
+        help="full: take every action; ask: ask before an action that would change something; look: never take one "
+        "(default: CLICKER_PERMISSIONS, else full)",
+    )
     parser.add_argument("--out", type=Path, default=Path("runs") / time.strftime("%Y%m%d-%H%M%S"), help="run folder")
     parser.add_argument("--image", type=Path, help="replay a saved capture instead of the live screen (never acts)")
     parser.add_argument("--app", help="frontmost app to report during replay")
@@ -119,6 +125,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         writer = make_writer()
         config.writer_vision()  # a bad value stops the run here, not at its first stop
+        permissions = args.permissions or config.permissions()
     except ValueError as e:
         sys.exit(str(e))
     if writer is None:
@@ -130,6 +137,8 @@ def main(argv: list[str] | None = None) -> None:
         say(f"writer disabled: {why}; type_text, writer-proposed URLs and the final answer need one")
     else:
         say(f"writer: {provider(writer)}")
+    if permissions != "full":
+        say(f"permissions: {permissions}")
 
     cfg = RunConfig(
         goal=args.goal,
@@ -140,6 +149,7 @@ def main(argv: list[str] | None = None) -> None:
         read_only_confidence=args.read_only_confidence,
         delay=args.delay,
         handoffs=args.handoffs,
+        permissions=permissions,
         image=args.image,
         app=args.app,
         url=args.url,

@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// The settings box's reviewer section: the model `clicker` hands the screen to
-/// whenever the decision model stops (`CLICKER_ANSWER_MODEL`), found by
-/// searching OpenRouter, how hard it thinks (`CLICKER_ANSWER_REASONING`), and how
-/// OpenRouter picks its provider (`CLICKER_ANSWER_SORT`). Writes go through the
-/// settings box, which owns `.env`.
+/// The settings box's LLM section: the one model `clicker` writes text with and
+/// hands the screen to whenever the decision model stops (`CLICKER_WRITER_MODEL`),
+/// found by searching OpenRouter, how hard it thinks (`CLICKER_ANSWER_REASONING`
+/// and `CLICKER_WRITER_REASONING`), and how OpenRouter picks its provider for
+/// reading the screen (`CLICKER_ANSWER_SORT`). Writes go through the settings
+/// box, which owns `.env`.
 struct ReviewerModelView: View {
 
     /// What `.env` names, nil for none.
@@ -52,12 +53,13 @@ struct ReviewerModelView: View {
 
     private var header: some View {
         HStack(spacing: K.InputBar.elementGap) {
-            Text("Reviewer model")
+            Text("LLM")
                 .font(.system(size: K.RunBox.bodyFontSize, weight: .medium))
                 .foregroundStyle(.primary)
             Spacer(minLength: 0)
             EffortBars(effort: ReviewerEffort.named(effort), isDefaultModel: model == nil) {
                 write(ReviewerEffort.key, $0.rawValue)
+                write(ReviewerEffort.writerKey, $0.rawValue)
             }
             Text(displayName(current))
                 .font(.system(size: K.Settings.captionSize))
@@ -66,7 +68,7 @@ struct ReviewerModelView: View {
                 .truncationMode(.middle)
                 .help(current)
             if model != nil {
-                PillButton(title: "Default") { write(ReviewerRouting.modelKey, "") }
+                PillButton(title: "Default") { setModel("") }
             }
         }
     }
@@ -221,9 +223,15 @@ struct ReviewerModelView: View {
     }
 
     private func choose(_ option: OpenRouter.Model) {
-        write(ReviewerRouting.modelKey, option.id == K.Reviewer.defaultModel ? "" : option.id)
+        setModel(option.id == K.Reviewer.defaultModel ? "" : option.id)
         isSearchFocused = false
         query = ""
+    }
+
+    /// One model writes and reads, so the key that named a second one goes.
+    private func setModel(_ id: String) {
+        write(ReviewerRouting.modelKey, id)
+        write(ReviewerRouting.legacyModelKey, "")
     }
 }
 

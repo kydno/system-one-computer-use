@@ -22,6 +22,7 @@ DATE_RE = re.compile(
     re.IGNORECASE,
 )
 NEAR_ROWS_PT = 60
+KEEPS_ITS_DATE = {"tab", "radio"}  # a browser's tabs are AXRadioButton: a date in one's title is that page's, not its row's
 
 
 def now_context() -> dict:
@@ -69,13 +70,17 @@ def date_hints(items: list[Item], screen: Screen, today: date | None = None) -> 
 
     The menu bar strip takes no part. Its clock is a date, and it would date every tab and button
     under it as near a line dated today: noise, and in OSWorld's Chrome tasks 7% of every request.
+
+    A tab keeps its date to itself, for the same reason. One tab titled with a date dated every other
+    tab and the toolbar under them, 57 items of a step's 98, as near a line dated three weeks ago.
     """
     items = [it for it in items if not screen.in_menu_bar(it)]
     dated = {it.index: d for it in items if (d := first_date(it.text, today)) is not None}
     hints = {i: f"dated {describe_offset(d, today)}" for i, d in dated.items()}
+    by_index = {it.index: it for it in items}
+    dated = {i: d for i, d in dated.items() if by_index[i].role not in KEEPS_ITS_DATE}
     if not dated:
         return hints
-    by_index = {it.index: it for it in items}
     for it in items:
         if it.index in hints:
             continue

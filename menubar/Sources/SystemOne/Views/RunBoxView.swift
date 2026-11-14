@@ -67,7 +67,9 @@ struct RunBoxView: View {
         }
 
         let asking = live ? model.question : nil
-        if let asking {
+        if asking != nil, let request = model.permissionRequest {
+            PermissionCard(request: request, onDeny: model.deny, onAllow: model.allow)
+        } else if let asking {
             section("System One asks") { bodyText(asking) }
         } else if let answer = run.answer {
             section("Answer", trailing: verdict(run.achieved)) { bodyText(answer) }

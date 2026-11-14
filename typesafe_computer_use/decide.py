@@ -61,6 +61,19 @@ PRESS_OFFSCREEN = (
     "scrolled out of view or not yet shown."
 )
 
+# Said only on a screen with an item clicked earlier in the run, so every other request is as it was.
+CLICKED_BEFORE_RULE = (
+    " An item marked clicked_before was clicked earlier in this run, on this same page, and says what that "
+    "did: when the goal means going through several things in turn, pick one not yet clicked, and never "
+    "one whose click changed nothing."
+)
+
+# Said only in a run that has a plan, so a run without one asks the question it always asked.
+PLAN_RULE = (
+    " The plan is how a reviewer expects the goal to be reached, step by step: take the step that the "
+    "previous actions show comes next. 'done' still means the goal itself, not the plan."
+)
+
 # Said only while a focus is set, so a run the writer never steered asks the question it always asked.
 FOCUS_RULE = (
     " The current focus is the next step on the way to the goal, set by a reviewer that read the "
@@ -168,6 +181,8 @@ def row_mates(items: list[Item], limit: int | None = ROW_MATES) -> dict[int, lis
     Three rows of events each end in a 'Buy'. The label says nothing about which; the row does,
     and the row is a fact the layout holds, so the code reads it and hands it over. `limit`
     keeps a criterion short; None takes the whole row, for a line that has to identify it.
+
+    A copy of the item is no mate: level with it, it is the item again, and names no row.
     """
     counts = Counter(it.text for it in items)
     out: dict[int, list[str]] = {}
@@ -175,7 +190,8 @@ def row_mates(items: list[Item], limit: int | None = ROW_MATES) -> dict[int, lis
         if counts[it.text] < 2:
             continue
         cy, half = it.center[1], max(1.0, it.y2 - it.y1) / 2
-        mates = sorted((o for o in items if o is not it and abs(o.center[1] - cy) < half), key=lambda o: o.x1)
+        level = (o for o in items if o.text != it.text and abs(o.center[1] - cy) < half)
+        mates = sorted(level, key=lambda o: o.x1)
         if mates:
             out[it.index] = [o.text for o in mates[:limit]]
     return out
@@ -277,6 +293,7 @@ def base_state(
                 **({"when": hints[it.index]} if it.index in hints else {}),
                 **({"beside": mates[it.index]} if it.index in mates else {}),
                 **({"under": screen.covered[it.index].title} if it.index in screen.covered else {}),
+                **({"clicked_before": screen.clicked_before[it.index]} if it.index in screen.clicked_before else {}),
             }
             for it in items
         ],
@@ -366,6 +383,7 @@ def build_questions(
                 "makes the most progress toward the goal right now? Do not repeat an action "
                 "that was just taken unless the screen changed, and never one listed as already "
                 "tried on this screen: each of those led straight back here."
+                + (PLAN_RULE if guidance and guidance.plan else "")
                 + (FOCUS_RULE if guidance and guidance.focus else "")
             ),
             criteria=kind_criteria(browser, email, bool(screen.offscreen), browsers, apps, moves, len(items) >= 2),
@@ -405,6 +423,7 @@ def build_questions(
                 "role come from the app's accessibility tree and are real controls; plain items are "
                 "text read from the screen. Never pick an item that an action listed as already tried "
                 "on this screen clicked or pressed: each of those led straight back here."
+                + (CLICKED_BEFORE_RULE if screen.clicked_before else "")
             ),
             criteria=item_criteria(screen, items),
         )
@@ -566,6 +585,24 @@ def needs_moves(client: DecisionClient, goal: str) -> float:
     return client.system_one(state={"goal": goal}, questions={"moves": question}).answers["moves"].noul
 
 
+def needs_plan(client: DecisionClient, goal: str) -> float:
+    """Probability that reaching the goal means opening several things in turn and putting together what
+    they hold, rather than reaching one place.
+
+    Asked once a run, of the goal alone, as `read_only` is. The classifier picks one action at a time and
+    cannot remember: on a goal that asked which of a user's conversations was the closest, it scrolled the
+    list for sixteen steps and opened none of them, since nothing in the goal names one to open.
+    """
+    question = Noul(
+        instructions=(
+            "Does reaching this goal mean opening several things one after another, such as each of several "
+            "conversations, listings, files, or pages, and putting together what they hold, rather than "
+            "reaching one place or one item?"
+        )
+    )
+    return client.system_one(state={"goal": goal}, questions={"plan": question}).answers["plan"].noul
+
+
 def read_only(client: DecisionClient, goal: str) -> float:
     """Probability that the goal only asks to find something out, and changes nothing on the way.
 
@@ -579,6 +616,30 @@ def read_only(client: DecisionClient, goal: str) -> float:
         )
     )
     return client.system_one(state={"goal": goal}, questions={"read_only": question}).answers["read_only"].noul
+
+
+def changes_something(client: DecisionClient, goal: str, screen: Screen, action: str, beside: list[str] | None = None) -> float:
+    """Probability that the action about to be taken changes something, rather than only opening or
+    reading it: the question a run with `ask` or `look` permissions puts before each click, key, or
+    typing. Asked of the action alone, with where it is taken, so the goal cannot argue it through:
+    a goal that says to check stock does not make "Add to Bag" a way of reading."""
+    state = {
+        "goal": goal,
+        "frontmost_app": screen.app,
+        "browser_active_tab_url": screen.url,
+        "focused_field": screen.field.summary() if screen.field else None,
+        "action": action,
+        **({"beside_the_item": beside} if beside else {}),
+    }
+    question = Noul(
+        instructions=(
+            "Would taking this action change something for the user or anyone else: send, post, buy, add to a "
+            "cart, save, delete, submit a form, like, follow, reply, change a setting, or write into a message, "
+            "post, comment, document or form? Opening a page, a menu, a conversation, a listing or a tab, "
+            "choosing a filter or a sort, and typing into a search box change nothing."
+        )
+    )
+    return client.system_one(state=state, questions={"changes": question}).answers["changes"].noul
 
 
 def verify_typed(client: DecisionClient, goal: str, field_before: Field, typed: str, field_after: Field | None) -> float:

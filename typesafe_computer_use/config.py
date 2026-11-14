@@ -22,12 +22,21 @@ DEFAULT_READ_ONLY_CONFIDENCE = 0.15
 # goal cost 2.6 points of agreement on saved steps that never needed them.
 MOVES_NOUL = 0.5
 READ_ONLY_NOUL = 0.8  # how sure the decision model must be that a goal changes nothing before it counts as read-only
+# How sure the decision model must be that a goal means opening several things in turn before the writer
+# is asked for a plan. Not yet calibrated on a probe of goals; CLICKER_PLAN=on or off settles it without asking.
+PLAN_NOUL = 0.5
+# What a run may do without asking (CLICKER_PERMISSIONS, or --permissions): `full` takes every action,
+# `ask` puts each action that would change something to the user first, `look` never takes one.
+PERMISSIONS = ("full", "ask", "look")
+# How sure the decision model must be that an action changes something (sends, buys, saves, posts,
+# submits) before `ask` or `look` holds it. Not yet calibrated on a probe; unsure holds it.
+CHANGES_NOUL = 0.5
 DEFAULT_STEPS = 100
 DEFAULT_DELAY = 2.0
 DEFAULT_HANDOFFS = 10  # each one is a call to the answer model, a few seconds and a few cents
 EARLIER_TASKS = 8  # the earlier tasks of a session the writer reads; the thread, not the whole session
-DEFAULT_WRITER_MODEL = "claude-haiku-4-5"
-DEFAULT_ANSWER_MODEL = "claude-sonnet-5"  # runs only when the classifier stops, on a screenshot: worth a stronger reader
+# One LLM writes text and reads the screen when the classifier stops, so it has to read screenshots.
+DEFAULT_WRITER_MODEL = "claude-sonnet-5"
 DEFAULT_BROWSER = "Google Chrome"
 ANTHROPIC_HOST = "api.anthropic.com"
 WRITER_APIS = ("anthropic", "openai")
@@ -42,11 +51,9 @@ DEFAULT_TYPESAFE_DECISION_MODEL = "jev-latest"
 
 # The writer on OpenRouter, when OPENROUTER_API_KEY is set and no other writer endpoint is named.
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1"
-DEFAULT_OPENROUTER_WRITER_MODEL = "inception/mercury-3"  # short text calls: a fast, cheap model
-DEFAULT_OPENROUTER_ANSWER_MODEL = "openai/gpt-6.1-terra"
-# For the default models only; a named model keeps its own.
-DEFAULT_OPENROUTER_WRITER_REASONING = "medium"
-DEFAULT_OPENROUTER_ANSWER_REASONING = "low"
+DEFAULT_OPENROUTER_WRITER_MODEL = "openai/gpt-6.1-terra"
+# For the default model only; a named model keeps its own.
+DEFAULT_OPENROUTER_REASONING = "low"
 # How OpenRouter may order the answer model's providers: cheapest first, or fastest first.
 ANSWER_SORTS = ("price", "throughput")
 
@@ -184,8 +191,13 @@ def anthropic_credential() -> bool:
 
 
 def writer_model() -> str:
+    """The one LLM of a run: it writes free text and proposes URLs, and reads the screen whenever the
+    classifier stops (see `answer_model`). CLICKER_WRITER_MODEL names it.
+
+    CLICKER_ANSWER_MODEL named a second model for the reading until the two were made one; it still
+    names the LLM when CLICKER_WRITER_MODEL is unset, so an older `.env` keeps the model it chose."""
     default = DEFAULT_OPENROUTER_WRITER_MODEL if openrouter_writer() else DEFAULT_WRITER_MODEL
-    return os.environ.get("CLICKER_WRITER_MODEL") or default
+    return os.environ.get("CLICKER_WRITER_MODEL") or os.environ.get("CLICKER_ANSWER_MODEL") or default
 
 
 def writer_api() -> str:
@@ -238,6 +250,25 @@ def moves_override() -> bool | None:
     return {"on": True, "off": False}.get(raw)
 
 
+def plan_override() -> bool | None:
+    """CLICKER_PLAN: `on` asks the writer for a plan at the start of every run, `off` never does,
+    whatever the goal says. `auto`, or nothing, leaves it to the decision model (see `decide.needs_plan`)."""
+    raw = os.environ.get("CLICKER_PLAN", "").strip().lower() or "auto"
+    if raw not in ("auto", "on", "off"):
+        raise ValueError(f"CLICKER_PLAN must be auto, on or off, not {raw!r}")
+    return {"on": True, "off": False}.get(raw)
+
+
+def permissions() -> str:
+    """CLICKER_PERMISSIONS: `full` (the default) takes every action the classifier picks, `ask` asks the
+    user before an action that would change something, and `look` never takes one, so the run only
+    opens, reads, searches and scrolls. The menu bar app's setting writes it to `.env`."""
+    raw = os.environ.get("CLICKER_PERMISSIONS", "").strip().lower() or "full"
+    if raw not in PERMISSIONS:
+        raise ValueError(f"CLICKER_PERMISSIONS must be full, ask or look, not {raw!r}")
+    return raw
+
+
 def writer_vision() -> bool:
     """Whether the answer model gets the screenshot. Off for a model that reads text only."""
     raw = os.environ.get("CLICKER_WRITER_VISION", "").strip().lower() or "true"
@@ -247,25 +278,21 @@ def writer_vision() -> bool:
 
 
 def answer_model() -> str:
-    default = DEFAULT_OPENROUTER_ANSWER_MODEL if openrouter_writer() else DEFAULT_ANSWER_MODEL
-    return os.environ.get("CLICKER_ANSWER_MODEL") or default
+    """The model that reads the screen when the classifier stops: the writer's own."""
+    return writer_model()
 
 
 def writer_reasoning() -> str | None:
     """The reasoning effort the writer's short calls ask an OpenAI-API model for; None leaves it to the model.
 
-    OpenRouter's default writer asks for medium effort unless CLICKER_WRITER_REASONING says otherwise."""
-    default = (
-        DEFAULT_OPENROUTER_WRITER_REASONING if _openrouter_default(writer_model(), DEFAULT_OPENROUTER_WRITER_MODEL) else None
-    )
+    OpenRouter's default model asks for low effort unless CLICKER_WRITER_REASONING says otherwise."""
+    default = DEFAULT_OPENROUTER_REASONING if _openrouter_default(writer_model(), DEFAULT_OPENROUTER_WRITER_MODEL) else None
     return os.environ.get("CLICKER_WRITER_REASONING", "").strip() or default
 
 
 def answer_reasoning() -> str | None:
-    """The same for the answer model, which judges the screen and may be worth more thought."""
-    default = (
-        DEFAULT_OPENROUTER_ANSWER_REASONING if _openrouter_default(answer_model(), DEFAULT_OPENROUTER_ANSWER_MODEL) else None
-    )
+    """The same for the calls that read the screen, which judge it and may be worth more thought."""
+    default = DEFAULT_OPENROUTER_REASONING if _openrouter_default(answer_model(), DEFAULT_OPENROUTER_WRITER_MODEL) else None
     return os.environ.get("CLICKER_ANSWER_REASONING", "").strip() or default
 
 

@@ -33,7 +33,9 @@ PACKET_KEYS = {
     "earlier_screens",
     "current_screen",
     "moves",
+    "plan",
     "read_only",
+    "permissions",
 }
 
 

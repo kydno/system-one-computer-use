@@ -9,12 +9,14 @@ import traceback
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from PIL import Image
 
 from .actions import Context, Look, last_look, moved, perform, wait, writer_scroll
 from .calls import Calls, MeteredClassifier, MeteredWriter
 from .config import (
+    CHANGES_NOUL,
     DEFAULT_DELAY,
     DEFAULT_HANDOFFS,
     DEFAULT_MIN_CONFIDENCE,
@@ -22,12 +24,26 @@ from .config import (
     DEFAULT_STEPS,
     MAX_OPTIONS,
     MOVES_NOUL,
+    PLAN_NOUL,
     READ_ONLY_NOUL,
     answer_model,
     moves_override,
+    plan_override,
     writer_model,
 )
-from .decide import STOP_KINDS, Decision, browser_names, decide, kind_criteria, needs_moves, offscreen_records, read_only
+from .decide import (
+    STOP_KINDS,
+    Decision,
+    browser_names,
+    changes_something,
+    decide,
+    kind_criteria,
+    needs_moves,
+    needs_plan,
+    offscreen_records,
+    read_only,
+    row_mates,
+)
 from .decisions import DecisionClient, DecisionError
 from .events import Events
 from .models import Abort, EarlierTask, Field, Guidance, Item, Screen, Signature, same_screen, signature
@@ -35,7 +51,7 @@ from .perception import OcrCache, capture, perceive
 from .platform_adapter import desktop
 from .report import Log, annotate, ax_count, render_payload, top
 from .timing import format_timing, phase, summarize
-from .writer import Answer, WriterError, compose_answer
+from .writer import Answer, Fill, WriterError, compose_answer, compose_plan, compose_text
 
 # Two ways a run stalls, both read off the screen rather than off the history line, because an
 # action's description says what was attempted and only the next capture says what came of it.
@@ -58,6 +74,34 @@ QUOTED = re.compile(r"\u201c(.+?)\u201d|\"(.+?)\"|\u2018(.+?)\u2019|(?<!\w)'(.+?
 WAITING = "wait for the screen to finish loading"  # the focus a handoff records when the writer called for a wait
 HANDOFF_FILE = "handoff.json"  # what a run that ended short of the goal leaves for an outer agent to go on from
 HANDOFF_RAW = "handoff-raw.png"  # the screen it ended on, as captured
+# The kinds of action a run with `ask` or `look` permissions checks before taking: the ones that land on
+# something and can change it. A scroll, a wait, Escape, going back, and going to a site or an app only
+# move the run, and a right click or a selection only shows what an item offers.
+GUARDED_KINDS = frozenset(
+    {
+        "click_item",
+        "double_click_item",
+        "drag_item",
+        "press_offscreen",
+        "press_shortcut",
+        "type_text",
+        "type_email",
+        "press_enter",
+    }
+)
+# "go" is a yes only as the whole reply or as "go ahead": "go back" and "go to the reviews instead" are not.
+YES = frozenset({"y", "yes", "yeah", "yep", "ok", "okay", "sure", "go ahead", "allow", "do it"})
+# What the writer is told the run may do, for the permissions other than `full`.
+MAY_DO = {
+    "ask": (
+        "the user must allow each action that would change something (send, buy, save, post, submit, delete) "
+        "before it is taken; the run asks them itself, so a focus may name such an action"
+    ),
+    "look": (
+        "only look: open, read, search and scroll, never take an action that would change something (send, buy, "
+        "save, post, submit, delete, add to a cart); never give a focus that needs one"
+    ),
+}
 
 # The outcomes the writer is handed, each in words it can pass on. A dry run took no action and
 # an abort is the user's own stop, so neither has anything to report.
@@ -75,6 +119,14 @@ STOPPED = {
         "so the run ends with this answer"
     ),
     "step limit": "the run used every step it was allowed",
+    "look only": (
+        "the next action would have changed something, and this run may only look, so it was not taken: "
+        "answer from what is on screen, or give a focus that only opens or reads"
+    ),
+    "declined": (
+        "the next action would have changed something, and the user did not allow it, so it was not taken; "
+        "what they said is under user_said"
+    ),
     "no decision": "the decision model gave no usable answer for this screen: it refused, failed, or was unreachable",
 }
 
@@ -100,6 +152,7 @@ class RunConfig:
     read_only_confidence: float = DEFAULT_READ_ONLY_CONFIDENCE  # the floor instead, for a goal that only looks
     delay: float = DEFAULT_DELAY
     handoffs: int = DEFAULT_HANDOFFS  # stops the writer may send the classifier back from; 0 makes every stop final
+    permissions: str = "full"  # full, ask or look: what the run may do without asking (see config.permissions)
     image: Path | None = None  # replay a saved capture (never acts)
     app: str | None = None  # frontmost app to report during replay
     url: str | None = None  # browser URL to report during replay
@@ -145,6 +198,8 @@ class RunState:
     outcome: str = "crashed"  # every way out of the loop names its own; only an exception leaves this
     ocr_cache: OcrCache = field(default_factory=OcrCache)  # carries one step's OCR into the next
     view: tuple[Screen, list[Item]] | None = None  # the latest capture, until an action makes it stale
+    clicks: dict[tuple, str] = field(default_factory=dict)  # (app, page, item text) -> what clicking it did
+    pending_click: tuple | None = None  # the last click, until the next capture shows what it did
     answer: Answer | None = None  # the writer's latest; the last one is the run's answer
     answered: Signature | None = None  # the screen the writer's latest answer was read from
     guidance: Guidance = field(default_factory=Guidance)  # the writer's focus and the user's replies, as they stand
@@ -154,7 +209,10 @@ class RunState:
     read_only: bool = False  # the goal only asks to find something out, so the lower floor applies
     moves: bool = False  # the goal needs a move beyond clicking and typing, so the run is offered the moves that are
     moves_by: str = "gate"  # who settled it: the gate's question about the goal, or CLICKER_MOVES
+    plan_by: str = "gate"  # who settled whether the writer was asked for a plan: the gate, or CLICKER_PLAN
     handed_on: bool = False  # the run ended short of the goal and wrote `handoff.json` for an outer agent
+    allowed: set[tuple] = field(default_factory=set)  # (app, page, action) the user allowed, so the same one is not asked twice
+    held: list[dict] = field(default_factory=list)  # each action the permissions held, and what came of it
 
 
 def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
@@ -180,6 +238,9 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             state.read_only = goal_only_looks(ctx, cfg.goal, log)
             state.moves = goal_needs_moves(ctx, cfg.goal, log)
             state.moves_by = "CLICKER_MOVES" if moves_override() is not None else "gate"
+            state.plan_by = "CLICKER_PLAN" if plan_override() is not None else "gate"
+            if goal_needs_plan(ctx, cfg.goal, log):
+                state.guidance = replace(state.guidance, plan=plan_for(ctx, cfg.goal, state.guidance, log))
             for step in range(1, cfg.steps + 1):
                 ctx = replace(ctx, guidance=state.guidance)  # a handoff sets the focus, and the action it asked for spends it
                 if run_step(cfg, ctx, state, step, log):
@@ -209,8 +270,12 @@ def run(cfg: RunConfig, ctx_factory, events: Events | None = None) -> RunState:
             "seconds": round(time.time() - started, 1),
             "models": models,
             "read_only": state.read_only,
+            "permissions": cfg.permissions,
+            "held": state.held,
             "moves": state.moves,
             "moves_by": state.moves_by,
+            "plan": state.guidance.plan,
+            "plan_by": state.plan_by,
             "calls": state.calls.summary(),
             "usage": state.calls.tokens(),
             "usage_by_role": state.calls.by_role(),
@@ -289,6 +354,7 @@ def handoff_packet(cfg: RunConfig, ctx: Context, state: RunState, raw: str | Non
         "outcome": state.outcome,
         "why": STOPPED[state.outcome],
         "answer": answer.text if answer else None,
+        "plan": state.guidance.plan,
         "last_focus": (answer.focus or None) if answer else None,
         "actions": actions,
         "handoffs": [asdict(h) for h in state.handoffs],
@@ -303,6 +369,7 @@ def handoff_packet(cfg: RunConfig, ctx: Context, state: RunState, raw: str | Non
             if kind not in STOP_KINDS
         ],
         "read_only": state.read_only,
+        "permissions": cfg.permissions,
     }
 
 
@@ -348,6 +415,41 @@ def goal_needs_moves(ctx: Context, goal: str, log: Log) -> bool:
     needs = p >= MOVES_NOUL
     log(f"moves: {'offered' if needs else 'not offered'} ({p:.2f})")
     return needs
+
+
+def goal_needs_plan(ctx: Context, goal: str, log: Log) -> bool:
+    """Whether the writer is asked for a plan, by the decision model. Unsure, no answer, or no writer is a
+    run without one: the requests stay as they were. CLICKER_PLAN=on or off settles it without asking."""
+    if ctx.writer is None:
+        return False
+    forced = plan_override()
+    if forced is not None:
+        log(
+            f"plan: {'asked for' if forced else 'not asked for'} (CLICKER_PLAN={'on' if forced else 'off'}, so the goal is not asked about)"
+        )
+        return forced
+    try:
+        p = needs_plan(ctx.typesafe, goal)
+    except DecisionError as e:
+        log(f"plan: unknown ({e}), so none is asked for")
+        return False
+    needs = p >= PLAN_NOUL
+    log(f"plan: {'asked for' if needs else 'not asked for'} ({p:.2f})")
+    return needs
+
+
+def plan_for(ctx: Context, goal: str, guidance: Guidance, log: Log) -> str | None:
+    """The writer's plan for the goal, or None when it declined or failed: the run goes on without one."""
+    try:
+        plan = compose_plan(ctx.writer, goal, guidance)
+    except WriterError as e:
+        log(f"plan: none ({e})")
+        return None
+    if not plan:
+        log("plan: none (the writer saw no plan to make)")
+        return None
+    log("plan:\n" + "\n".join(f"  {line}" for line in plan.splitlines() if line.strip()))
+    return plan
 
 
 def metered(ctx: Context, calls: Calls) -> Context:
@@ -537,7 +639,18 @@ def review(cfg: RunConfig, ctx: Context, state: RunState, stopped: str, can_ask:
         {"after_action": h.actions, "why": STOPPED[h.outcome], "you_said": h.said, "focus_given": h.focus} for h in state.handoffs
     ]
     return compose_answer(
-        ctx.writer, cfg.goal, screen, items, state.history, stopped, earlier, state.guidance, earlier_stops, can_ask, state.moves
+        ctx.writer,
+        cfg.goal,
+        screen,
+        items,
+        state.history,
+        stopped,
+        earlier,
+        state.guidance,
+        earlier_stops,
+        can_ask,
+        state.moves,
+        MAY_DO.get(cfg.permissions),
     )
 
 
@@ -548,17 +661,35 @@ def earlier_screens(state: RunState, final: Signature, budget: int = EARLIER_LIN
     and the run's own captures are the only place the answer may come from. A screen seen twice
     is sent once. The newest screens are kept whole and the oldest dropped once the line budget
     is spent, since the writer reads all of it in one call.
+
+    Each screen says the action that reached it, `reached_by`, and holds only the lines that neither the
+    screen it ended on, sent whole beside them, nor a newer screen of these already holds; a screen with
+    none left is not sent. A run that opened forty
+    conversations from one inbox passed screens that each held the whole inbox list, the tab strip
+    and the menus beside one conversation: the line budget held six of them, and with every name on
+    every screen and no address that names anyone, the answer gave one person's words to another.
     """
-    out: list[Signature] = []
+    shown = {text for text, _ in final[3]}
+    out: list[tuple[Signature, str | None, list[str]]] = []
     lines_left = budget
-    for seen, _ in reversed(state.seen):
-        if same_screen(seen, final) or any(same_screen(seen, kept) for kept in out):
+    for k in range(len(state.seen) - 1, -1, -1):
+        seen = state.seen[k][0]
+        if same_screen(seen, final) or any(same_screen(seen, kept) for kept, _, _ in out):
             continue
-        lines_left -= len(seen[3])
+        text = [line for line, _ in seen[3] if line not in shown]
+        if not text:
+            continue
+        shown.update(text)
+        lines_left -= len(text)
         if lines_left < 0:
             break
-        out.append(seen)
-    return [{"app": app, "url": url, "text": [text for text, _ in lines]} for app, url, _, lines in reversed(out)]
+        # The last action taken on another screen: a wait, or a click that changed nothing, did not reach it.
+        reached = next((what for on, what in reversed(state.seen[:k]) if what is not None and not same_screen(on, seen)), None)
+        out.append((seen, reached, text))
+    return [
+        {"app": app, "url": url, **({"reached_by": reached} if reached else {}), "text": text}
+        for (app, url, _, _), reached, text in reversed(out)
+    ]
 
 
 def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log) -> bool:
@@ -575,6 +706,7 @@ def run_step(cfg: RunConfig, ctx: Context, state: RunState, step: int, log: Log)
     state.clicked = None
     items = perceive(screen, MAX_OPTIONS, cfg.goal, timing, cache, apart=state.moves)
     state.view = (screen, items)
+    remember_clicks(state, screen, items)
     if not screen_moved(state, screen, items, log):
         return False
     tried = tried_here(state)
@@ -746,6 +878,10 @@ def resolve(
     if decision.kind.choice == "type_text":
         # What to write may have been read on another page: a fare found on the way, typed into a document.
         ctx = replace(ctx, earlier=earlier_screens(state, state.last))
+    allowed = permitted(cfg, ctx, state, screen, items, decision, log)
+    if allowed is None:
+        return False
+    ctx = allowed
     with phase(timing, "act"):
         what = perform(decision, screen, items, ctx)
     state.view = None
@@ -753,10 +889,189 @@ def resolve(
         state.guidance = state.guidance.followed()
         log("  the focus is followed; back to the goal")
     state.clicked = clicked_field(screen, items, decision, what)
+    state.pending_click = click_taken(screen, items, decision, what)
     state.history.append(what)
     log(f"  did: {what}")
     log.event("action", text=what, actions=len(state.history))
     return not repeating(state, what, decision.kind.choice == "wait", log, decision.kind.choice in NAVIGATIONS)
+
+
+def permitted(
+    cfg: RunConfig, ctx: Context, state: RunState, screen: Screen, items: list[Item], decision: Decision, log: Log
+) -> Context | None:
+    """The context to take this action with, under the run's permissions; None when it may not be taken,
+    with the outcome set.
+
+    With `full` every action goes, as it always did. Otherwise each click, key and typing is first put
+    to the decision model as an action alone: would it change something? One that would is never taken
+    under `look`, and under `ask` waits for the user's yes. A run nobody can ask is a run that may
+    only look. Unsure, or no answer, holds the action: a wrong hold costs a handoff, a wrong click on
+    "Place order" costs money. The read-only gate does not stand in for this: it asks about the goal,
+    and a goal that only checks stock was still one click from "Add to Bag".
+
+    Typing is written before it is asked about, so the question shows the words that would go in, and
+    the context returned carries them, so the same words are typed.
+    """
+    kind = decision.kind.choice
+    if cfg.permissions == "full" or kind not in GUARDED_KINDS:
+        return ctx
+    if kind == "type_text":
+        ctx = replace(ctx, fill=prewritten(ctx, screen, items))
+        if ctx.fill is not None and not ctx.fill.text:
+            return ctx  # the writer declined: nothing would be typed, and the action refuses itself
+    held = HeldAction.of(decision, screen, items, ctx.fill)
+    key = click_key(screen.app, screen.url, held.what)
+    if key in state.allowed:
+        return ctx
+    item = next((it for it in items if decision.item is not None and str(it.index) == decision.item.choice), None)
+    beside = row_mates(items).get(item.index) if item is not None and (decision.clicking or decision.pointing) else None
+    try:
+        p = changes_something(ctx.typesafe, cfg.goal, screen, held.what, beside)
+    except DecisionError as e:
+        log(f"  could not tell whether {held.what} changes something ({e}), so it is held")
+        p = 1.0
+    if p < CHANGES_NOUL:
+        return ctx
+    record = {"step_action": len(state.history) + 1, "action": held.what, "changes": round(p, 3), "permissions": cfg.permissions}
+    state.held.append(record)
+    if cfg.permissions == "look" or ctx.ask is None:
+        why = "this run may only look" if cfg.permissions == "look" else "nobody is there to allow it"
+        log(f"  {held.what} would change something ({p:.2f}) and {why}; stopping")
+        record["result"] = "held"
+        state.outcome = "look only"
+        return None
+    question = f"May I {held.what}? It would change something. Reply yes to go ahead."
+    log(f"  {held.what} would change something ({p:.2f}); asking")
+    # What the menu bar app draws its card from; the question that follows is what it answers.
+    log.event("permission", kind=held.kind, title=held.title, text=held.text, where=held.where, question=question)
+    reply = ctx.ask(question).strip()
+    record["reply"] = reply
+    log(f"  > {reply}", echo=False)
+    if cfg.act and not cfg.replay:
+        desktop.activate(screen.app)  # answering may have taken another app to the front; put the work back there
+    if said_yes(reply):
+        log("  allowed")
+        record["result"] = "allowed"
+        state.allowed.add(key)
+        return ctx
+    log("  not allowed; stopping")
+    record["result"] = "declined"
+    if reply:  # a "no, open the reviews instead" is something for the writer to go on
+        state.guidance = state.guidance.heard(question, reply)
+    state.outcome = "declined"
+    return None
+
+
+def prewritten(ctx: Context, screen: Screen, items: list[Item]) -> Fill | None:
+    """The text a type_text would put in the focused field, written now; None when it cannot be, and
+    the action is left to refuse itself as it would have."""
+    if ctx.writer is None or not (screen.field and screen.field.is_text):
+        return None
+    try:
+        return compose_text(ctx.writer, ctx.goal, screen, items, ctx.history, ctx.guidance, ctx.earlier)
+    except WriterError:
+        return None
+
+
+@dataclass(frozen=True)
+class HeldAction:
+    """An action the permissions put to the user, in the words the log, the question and the app's card use."""
+
+    kind: str  # type, click, key, drag or shortcut: what the app draws its icon from
+    what: str  # the action in a phrase: "type 'see you at 6' into Message"
+    title: str  # the card's line: "Type into Message"
+    text: str | None  # the words that would be typed, shown under the title
+    where: str  # the app, and the page without its query: "Brave Browser · instagram.com/direct"
+
+    @staticmethod
+    def of(decision: Decision, screen: Screen, items: list[Item], fill: Fill | None) -> HeldAction:
+        kind = decision.kind.choice
+        into = field_name(screen.field) if screen.field is not None else "the focused field"
+        text = fill.text if fill is not None and fill.text else None
+        if kind == "type_text":
+            # Return follows the words when the writer says to submit them, which sends a message: say so.
+            then = " and press Return" if text and fill.submit else ""
+            what = (f"type {text!r} into {into}" if text else f"type into {into}") + then
+            held = ("type", what, f"Type into {into}{then}")
+        elif kind == "type_email":
+            held = ("type", f"type your email into {into}", f"Type your email into {into}")
+        elif kind == "press_enter":
+            held = ("key", f"press Return in {into}", f"Press Return in {into}")
+        else:
+            what = intended(decision, screen, items)
+            sort = "drag" if decision.dragging else "shortcut" if decision.pressing_shortcut else "click"
+            held = (sort, what, what[:1].upper() + what[1:])
+        return HeldAction(*held, text=text if kind == "type_text" else None, where=place(screen))
+
+
+def field_name(f: Field) -> str:
+    """What a field is called on screen: its label, else its placeholder, else its role in words
+    ("the text area"), never the raw accessibility role."""
+    named = (f.label or f.placeholder or "").strip()
+    if named:
+        return named
+    role = re.sub(r"(?<!^)(?=[A-Z])", " ", f.role.removeprefix("AX")).lower().strip()
+    return f"the {role or 'focused field'}"
+
+
+def place(screen: Screen) -> str:
+    """The app, and the page without its query or fragment, for the user to tell where an action is."""
+    if not screen.url:
+        return screen.app
+    parts = urlparse(screen.url)
+    page = (parts.netloc.removeprefix("www.") + parts.path).rstrip("/")
+    return f"{screen.app} · {page[:60]}" if page else screen.app
+
+
+def said_yes(reply: str) -> bool:
+    """A yes as people type it: "yes", "Yes please", "ok, go ahead", "go ahead". Anything else is a no."""
+    words = re.sub(r"[^\w\s]", " ", reply.lower()).split()
+    return bool(words) and (words[0] in YES or " ".join(words[:2]) in YES or words == ["go"])
+
+
+def click_key(app: str, url: str | None, text: str) -> tuple:
+    """What identifies a clicked item from one visit of its page to the next: the app, the page without its
+    query or fragment, and the item's words."""
+    page = url.split("#")[0].split("?")[0] if url else None
+    return (app, page, " ".join(text.lower().split()))
+
+
+def click_taken(screen: Screen, items: list[Item], decision: Decision, what: str) -> tuple | None:
+    """The click just made, for the next capture to say what it did: its key, and the screen it was made on."""
+    if not (decision.clicking or decision.pointing) or REFUSED.match(what):
+        return None
+    item = next((it for it in items if str(it.index) == decision.item.choice), None)
+    if item is None:
+        return None
+    return click_key(screen.app, screen.url, item.text), screen.app, screen.url, signature(screen, items)
+
+
+def remember_clicks(state: RunState, screen: Screen, items: list[Item]) -> None:
+    """Say what the last click did, now that its screen is captured, and mark each item on this screen
+    that was clicked before with what that did.
+
+    The classifier remembers nothing past the last eight actions, and the repeat rule counts an action
+    only on the same screen. On a messages inbox whose "active 2m ago" lines change by the minute, no
+    two captures were the same screen: asked to go through the conversations, the run opened the same
+    two again and again, and kept clicking a name in a strip of status notes that only opened a popover.
+    What a click did is a fact the code sees, so it goes on the item.
+    """
+    if state.pending_click is not None:
+        key, app, url, before = state.pending_click
+        state.pending_click = None
+        if screen.app != app:
+            did = f"opened {screen.app}"
+        elif screen.url != url and screen.url:
+            did = f"opened {screen.url}"
+        elif same_screen(before, signature(screen, items)):
+            did = "changed nothing"
+        else:
+            did = "changed this page without leaving it, such as opening a popover"
+        state.clicks[key] = did
+    screen.clicked_before.clear()
+    screen.clicked_before.update(
+        {it.index: state.clicks[key] for it in items if (key := click_key(screen.app, screen.url, it.text)) in state.clicks}
+    )
 
 
 def named_by_focus(decision: Decision, items: list[Item], focus: str | None) -> str | None:

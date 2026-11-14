@@ -1733,13 +1733,13 @@ def test_l52_the_run_counts_the_requests_each_model_took(monkeypatch, tmp_path):
     )
 
     assert world.page.name == "checkout"
-    # Whether the goal only looks, whether it needs a move beyond clicks, five decisions, and the check
-    # of what was typed; the typed text and two readings of a stopped screen.
-    assert state.calls.count == {"classifier": 8, "writer": 3}
+    # Whether the goal only looks, whether it needs a move beyond clicks, whether it needs a plan, five decisions,
+    # and the check of what was typed; the typed text and two readings of a stopped screen.
+    assert state.calls.count == {"classifier": 9, "writer": 3}
     summary = json.loads((tmp_path / "run" / "run.json").read_text())
-    assert summary["calls"]["classifier"]["calls"] == 8 and summary["calls"]["classifier"]["share"] == round(8 / 11, 3)
-    assert summary["calls"]["writer"]["calls"] == 3 and summary["calls"]["writer"]["share"] == round(3 / 11, 3)
-    assert "calls: classifier 8 (73%, " in (tmp_path / "run" / "run.log").read_text()
+    assert summary["calls"]["classifier"]["calls"] == 9 and summary["calls"]["classifier"]["share"] == round(9 / 12, 3)
+    assert summary["calls"]["writer"]["calls"] == 3 and summary["calls"]["writer"]["share"] == round(3 / 12, 3)
+    assert "calls: classifier 9 (75%, " in (tmp_path / "run" / "run.log").read_text()
 
 
 def test_l53_unverified_keystrokes_stay_when_the_field_will_not_take_a_value(monkeypatch, tmp_path):
@@ -1855,9 +1855,9 @@ def test_l56_a_name_the_writer_submits_is_typed_and_saved_in_one_step(monkeypatc
     assert state.history == ["typed 'Favorites' into 'Name' via accessibility and pressed Return"]
     assert world.log == ["type:Favorites", "enter"]
     assert state.calls.count == {
-        "classifier": 4,
+        "classifier": 5,
         "writer": 2,
-    }  # the goal twice, two decisions and no check; the name and the answer
+    }  # the goal three times, two decisions and no check; the name and the answer
 
 
 def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_step(monkeypatch, tmp_path):
@@ -1894,7 +1894,7 @@ def test_l57_an_item_under_a_popup_is_reached_by_closing_the_popup_in_the_same_s
     (organise,) = [it for it in world.fake.states[0]["screen_items_in_reading_order"] if it["text"] == "Organise"]
     assert organise["under"] == "'Restore pages?'"
     assert world.fake.asked[0]["item"].criteria[str(organise["i"])] == f"Item {organise['i']}."  # told once, in the state
-    assert state.calls.count["classifier"] == 4  # the goal twice, one decision to open the menu, one to stop
+    assert state.calls.count["classifier"] == 5  # the goal three times, one decision to open the menu, one to stop
 
 
 CREDITS = "https://openrouter.ai/settings/credits"
@@ -2639,3 +2639,189 @@ def test_l67_a_url_the_writers_focus_names_is_the_one_opened(monkeypatch, tmp_pa
     assert world.log == [f"open:{DOCS}new", f"open:{DOCS}create"]
     assert state.history == [f"opened {DOCS}new", f"opened {DOCS}create"]
     assert [h.focus for h in state.handoffs] == [f"Open {DOCS}create in the address bar."]
+
+
+def closes_the_popover(state: dict, questions: dict) -> tuple:
+    """Jev opens a popover by mistake, tries Back, and reads in the history line that Back did nothing."""
+    texts = [it["text"] for it in state["screen_items_in_reading_order"]]
+    done = state["previous_actions"]
+    if "Hello from Ada" in texts:
+        return ("done", None)
+    if "Edit your status" in texts:
+        return ("press_escape", None) if "went back (nothing changed)" in done else ("go_back", None)
+    return ("click_item", "Ada") if "pressed Escape" in done else ("click_item", "You")
+
+
+def test_l81_back_that_leaves_an_in_page_popover_open_says_it_changed_nothing(monkeypatch, tmp_path):
+    """A click opens a popover over the list in the page itself, with no window of its own for the loop to see.
+    Back leaves it there and the page as it was; the history line says so, and Escape closes it."""
+    inbox = "https://chat.example.com/inbox"
+    world = World(
+        [
+            Page(
+                name="inbox", items=["Messages", "You", "Ada", "Grace"], url=inbox, on={"click:You": "card", "click:Ada": "ada"}
+            ),
+            Page(
+                name="card",
+                items=["Messages", "Edit your status", "Ada", "Grace"],
+                url=inbox,
+                repaints=False,
+                on={"escape": "inbox"},
+            ),
+            Page(name="ada", items=["Ada", "Hello from Ada"], url="https://chat.example.com/t/ada"),
+        ]
+    )
+
+    state = drive(world, closes_the_popover, goal="open the chat with Ada", monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert state.history == ["clicked 'You'", "went back (nothing changed)", "pressed Escape", "clicked 'Ada'"]
+    assert world.log == ["click:You", "back", "escape", "click:Ada"]
+    assert state.outcome == "done" and world.page.name == "ada"
+
+
+PLAN = "1. Open the first conversation in the list.\n2. Go back to the list.\n3. Do the same for the next one down."
+
+
+def chats() -> World:
+    return World(
+        [
+            Page(name="inbox", items=["Messages", "Ada", "Grace"], url="https://chat.example.com/inbox", on={"click:Ada": "ada"}),
+            Page(name="ada", items=["Ada", "Hello from Ada"], url="https://chat.example.com/t/ada", on={"back": "inbox"}),
+        ]
+    )
+
+
+def test_l82_a_goal_that_opens_several_things_gets_the_writers_plan_in_every_request(monkeypatch, tmp_path):
+    """On a goal that asked which of a user's conversations was the closest, the classifier scrolled the list
+    for sixteen steps and opened none. A goal like that gets a plan from the writer at the start, which every
+    request carries and no action spends."""
+    world = chats()
+    policy = scripted(("click_item", "Ada"), ("go_back", None), ("done", None))
+
+    state = drive(
+        world,
+        policy,
+        goal="who do I talk to most",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        plan=True,
+        writer=FakeWriter(plan=PLAN),
+    )
+
+    assert world.log == ["click:Ada", "back"]
+    assert [s.get("plan") for s in world.fake.states] == [PLAN] * 3
+    assert all("The plan is how a reviewer expects" in q["kind"].instructions for q in world.fake.asked)
+    run_json = json.loads((tmp_path / "run" / "run.json").read_text())
+    assert run_json["plan"] == PLAN and run_json["plan_by"] == "gate"
+    assert state.guidance.plan == PLAN
+
+
+@pytest.mark.parametrize(
+    "gate, writer", [(False, FakeWriter(plan=PLAN)), (True, FakeWriter())], ids=["gate closed", "writer declined"]
+)
+def test_l83_a_run_without_a_plan_asks_what_it_always_asked(monkeypatch, tmp_path, gate, writer):
+    """The gate closed, or the writer declining, leaves every classifier request as it was: no plan key, no plan rule."""
+    world = chats()
+
+    drive(
+        world,
+        scripted(("click_item", "Ada"), ("done", None)),
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        plan=gate,
+        writer=writer,
+    )
+
+    assert all("plan" not in s for s in world.fake.states)
+    assert not any("The plan is" in q["kind"].instructions for q in world.fake.asked)
+    asked_for_a_plan = any("plan" in r["output_config"]["format"]["schema"]["properties"] for r in writer.requests)
+    assert asked_for_a_plan == gate
+
+
+def test_l84_a_writer_that_fails_on_the_plan_leaves_the_run_going_without_one(monkeypatch, tmp_path):
+    from typesafe_computer_use import runner
+    from typesafe_computer_use.writer import WriterError
+
+    def fails(*a, **k):
+        raise WriterError("the request failed: 503")
+
+    monkeypatch.setattr(runner, "compose_plan", fails)
+    world = chats()
+
+    state = drive(world, scripted(("click_item", "Ada"), ("done", None)), monkeypatch=monkeypatch, tmp_path=tmp_path, plan=True)
+
+    assert state.outcome == "done" and state.guidance.plan is None
+    assert "plan: none (the request failed: 503)" in (tmp_path / "run" / "run.log").read_text()
+
+
+@pytest.mark.parametrize("value, asked, gate_asked", [("on", True, False), ("off", False, False), ("auto", True, True)])
+def test_l85_clicker_plan_settles_the_gate_without_asking(monkeypatch, tmp_path, value, asked, gate_asked):
+    monkeypatch.setenv("CLICKER_PLAN", value)
+    world = chats()
+    writer = FakeWriter(plan=PLAN)
+
+    state = drive(world, scripted(("done", None)), monkeypatch=monkeypatch, tmp_path=tmp_path, plan=True, writer=writer)
+
+    assert (state.guidance.plan == PLAN) == asked
+    assert state.plan_by == ("gate" if value == "auto" else "CLICKER_PLAN")
+    log = (tmp_path / "run" / "run.log").read_text()
+    assert ("plan: asked for (1.00)" in log) == gate_asked
+
+
+def test_l86_the_writer_reads_the_plan_when_the_classifier_stops(monkeypatch, tmp_path):
+    world = chats()
+    writer = FakeWriter(plan=PLAN)
+
+    drive(world, scripted(("none", None)), monkeypatch=monkeypatch, tmp_path=tmp_path, plan=True, writer=writer)
+
+    assert writer.packets and writer.packets[0]["plan"] == PLAN
+
+
+def next_unopened(state: dict, questions: dict) -> tuple:
+    """Goes through the conversations, by nothing but what the state says each click did."""
+    items = state["screen_items_in_reading_order"]
+    texts = [it["text"] for it in items]
+    if "Edit your status" in texts:
+        return ("press_escape", None)
+    if "Messages" not in texts:
+        return ("go_back", None)
+    fresh = [it["text"] for it in items if it["text"] in ("Your note", "Ada", "Grace") and "clicked_before" not in it]
+    return ("click_item", fresh[0]) if fresh else ("done", None)
+
+
+def test_l87_each_item_clicked_before_says_what_the_click_did(monkeypatch, tmp_path):
+    """An inbox's activity lines change by the minute, so no two captures are the same screen and the repeat
+    rule never sees a conversation opened twice. What each click did goes on the item instead."""
+    inbox = "https://chat.example.com/inbox"
+    tick = lambda world: ["Messages", "Your note", "Ada", "Grace", f"Active {world.ticks}m ago"]  # noqa: E731
+    world = World(
+        [
+            Page(name="inbox", items=tick, url=inbox, on={"click:Your note": "note", "click:Ada": "ada", "click:Grace": "grace"}),
+            Page(name="note", items=["Messages", "Edit your status", "Ada", "Grace"], url=inbox, on={"escape": "inbox"}),
+            Page(
+                name="ada", items=["Ada", "Hello from Ada"], url="https://chat.example.com/t/ada?ref=list", on={"back": "inbox"}
+            ),
+            Page(name="grace", items=["Grace", "Hello from Grace"], url="https://chat.example.com/t/grace", on={"back": "inbox"}),
+        ]
+    )
+
+    state = drive(world, next_unopened, goal="go through my conversations", monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    assert world.log == ["click:Your note", "escape", "click:Ada", "back", "click:Grace", "back"]
+    assert state.outcome == "done"
+    last = {it["text"]: it.get("clicked_before") for it in world.fake.states[-1]["screen_items_in_reading_order"]}
+    assert last["Your note"] == "changed this page without leaving it, such as opening a popover"
+    assert last["Ada"] == "opened https://chat.example.com/t/ada?ref=list"
+    assert last["Grace"] == "opened https://chat.example.com/t/grace"
+    assert "clicked_before" not in str(world.fake.states[0])
+    assert "marked clicked_before" not in world.fake.asked[0]["item"].instructions
+    assert "marked clicked_before" in world.fake.asked[-1]["item"].instructions
+
+
+def test_l88_a_click_that_changed_nothing_is_marked_so(monkeypatch, tmp_path):
+    world = World([Page(name="list", items=["Messages", "Ada", "Grace"], url="https://chat.example.com/inbox", repaints=False)])
+
+    drive(world, scripted(("click_item", "Ada"), ("done", None)), monkeypatch=monkeypatch, tmp_path=tmp_path)
+
+    (ada,) = [it for it in world.fake.states[-1]["screen_items_in_reading_order"] if it["text"] == "Ada"]
+    assert ada["clicked_before"] == "changed nothing"

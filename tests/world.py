@@ -120,6 +120,7 @@ class Page:
     covered_by: str | None = None  # an overlay eating every mouse click: the text of what is really hit
     popup: str | None = None  # a window in front of the page, by name; the row reading "Close" is its close button
     under_popup: tuple[str, ...] = ()  # the page's items under that window, which eats a mouse click on them
+    repaints: bool = True  # False: the page shows no band for the actions taken, so one it ignores leaves its pixels as they were
     on: dict[str, str | Callable[[World], str | None]] = dataclasses.field(default_factory=dict)
 
 
@@ -233,12 +234,14 @@ class World:
 
     def drawn(self) -> Image.Image:
         """The display as an image: one band whose shade moves with every action the world takes, so
-        a press it took shows on the next screenshot, as a page repaints (see `actions.press_showed`).
+        a press it took shows on the next screenshot, as a page repaints (see `actions.press_showed`); a page
+        that does not repaint shows no band, so an action it ignores changes no pixel (see `actions._go_back`).
         Each row is a box shaded by its text, so the rows look the same until the rows change, as a
         list scrolled past its end does (see `actions.scroll_showed`)."""
         image = Image.new("RGB", CAPTURE)
-        shade = len(self.log) * 40 % 256
-        image.paste((shade, shade, shade), (0, CAPTURE[1] // 2, CAPTURE[0], CAPTURE[1] // 2 + 200))
+        if self.page.repaints:
+            shade = len(self.log) * 40 % 256
+            image.paste((shade, shade, shade), (0, CAPTURE[1] // 2, CAPTURE[0], CAPTURE[1] // 2 + 200))
         for cell in self.cells():
             tone = 40 + zlib.crc32(cell.text.encode()) % 200
             image.paste((tone, tone, tone), tuple(round(v) for v in cell.box))
@@ -454,8 +457,13 @@ class FakeTypeSafe:
         read_only: bool = False,
         moves: bool = False,
         shortcuts: Callable[[dict], str] | None = None,
+        plan: bool = False,
+        changes: Callable[[dict], float] | None = None,
     ):
         self.policy = policy
+        self.changes = changes  # how the changes-something question is answered, from its state; nothing changes without one
+        self.change_states: list[dict] = []  # the state each changes-something question was sent
+        self.plan = plan  # how the goal-needs-a-plan question is answered: closed unless a scenario opens it
         self.shortcuts = shortcuts  # decides the shortcut from the follow-up's own state, when a scenario wants that
         self.noul = noul
         self.read_only = read_only  # how the goal question at the start of a run is answered
@@ -480,6 +488,11 @@ class FakeTypeSafe:
             return SimpleNamespace(answers={"read_only": SimpleNamespace(noul=1.0 if self.read_only else 0.0)})
         if "moves" in questions:
             return SimpleNamespace(answers={"moves": SimpleNamespace(noul=1.0 if self.moves else 0.0)})
+        if "plan" in questions:
+            return SimpleNamespace(answers={"plan": SimpleNamespace(noul=1.0 if self.plan else 0.0)})
+        if "changes" in questions:
+            self.change_states.append(state)
+            return SimpleNamespace(answers={"changes": SimpleNamespace(noul=self.changes(state) if self.changes else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
         if set(questions) == {"target"}:  # the follow-up to a drag_item: where it is dropped, named by text
@@ -574,8 +587,9 @@ class FakeWriter:
     it is with no script at all.
     """
 
-    def __init__(self, text: str = "", url: str = "", reviews: list | None = None, submit: bool = False):
+    def __init__(self, text: str = "", url: str = "", reviews: list | None = None, submit: bool = False, plan: str = ""):
         self.requests: list[dict] = []
+        self.plan = plan  # the plan a run's start asks for; empty declines it
         self.text = text
         self.submit = submit
         self.url = url
@@ -589,6 +603,8 @@ class FakeWriter:
         packet = json.loads(request["messages"][0]["content"][-1]["text"])
         if asked == {"fill", "text", "submit", "reason"}:
             reply = {"fill": bool(self.text), "text": self.text, "submit": self.submit, "reason": "the goal names what to type"}
+        elif asked == {"ok", "plan"}:
+            reply = {"ok": bool(self.plan), "plan": self.plan}
         elif asked == {"ok", "url", "reason"}:
             reply = {"ok": bool(self.url), "url": self.url, "reason": "the goal names the site"}
         elif asked == {"achieved", "answer", "focus", "question", "wait", "scroll", "scroll_over"}:
@@ -628,6 +644,9 @@ def drive(
     read_only: bool = False,
     moves: bool = False,
     shortcuts: Callable[[dict], str] | None = None,
+    plan: bool = False,
+    permissions: str = "full",
+    changes: Callable[[dict], float] | None = None,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
@@ -636,10 +655,10 @@ def drive(
     With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
-    fake = FakeTypeSafe(policy, noul, read_only, moves, shortcuts)
+    fake = FakeTypeSafe(policy, noul, read_only, moves, shortcuts, plan, changes)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
-    cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)
+    cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0, permissions=permissions)
     if handoffs is not None:
         cfg.handoffs = handoffs
     client = writer or FakeWriter()

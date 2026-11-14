@@ -10,6 +10,9 @@ among them. Each line on stdout is one object with an `event` key:
 - `would`: a dry run would have done `text`, and stops there
 - `focus`: the writer sent the classifier back to work on `focus`, having said `text`
 - `question`: the writer asks the user `text`; the run waits for one line on stdin
+- `permission`: under ask-first permissions, the action about to be put to the user: its `kind` (type,
+  click, key, drag, shortcut), a `title`, the `text` it would type, `where` it is, and the `question`.
+  The `question` event that asks it comes next; a reply of yes allows it
 - `answer`: the writer's answer, `text`, with whether the goal was `achieved`
 - `handoff`: the run stopped short of the goal; the rest is `handoff.json`, with its path as `file`,
   for an outer agent to go on from the screen it ended on (see docs/run-folder.md)
