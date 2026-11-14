@@ -183,12 +183,14 @@ def test_permissions_setting_reads_the_environment(monkeypatch):
         config.permissions()
 
 
-@pytest.mark.parametrize("reply", ["yes", "Yes please", "ok, go ahead", "go ahead", "y", "Sure."])
+@pytest.mark.parametrize("reply", ["yes", "Yes please", "ok, go ahead", "go ahead", "y", "Sure.", "go", "Go!"])
 def test_a_yes_as_people_type_it(reply):
     assert said_yes(reply)
 
 
-@pytest.mark.parametrize("reply", ["", "no", "nope, just read it", "not yet", "yesterday"])
+@pytest.mark.parametrize(
+    "reply", ["", "no", "nope, just read it", "not yet", "yesterday", "go back", "go to the reviews instead", "go away"]
+)
 def test_anything_else_is_a_no(reply):
     assert not said_yes(reply)
 
@@ -250,6 +252,32 @@ def test_ask_shows_the_words_before_typing_them_and_tells_the_app(monkeypatch, t
     assert world.typed["Message"] == "see you at 6"
     assert fills(writer) == 1  # written once, before asking, and those words typed
     assert state.held[0]["action"] == "type 'see you at 6' into Message"
+
+
+def test_ask_says_when_the_words_are_sent_with_a_return(monkeypatch, tmp_path):
+    world = chat()
+    writer = FakeWriter(text="see you at 6", submit=True)
+    out = io.StringIO()
+
+    state = drive(
+        world,
+        scripted(("type_text", None), ("done", None)),
+        goal="tell Ben I'll see him at 6",
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        permissions="ask",
+        changes=typing_changes,
+        writer=writer,
+        events=Events(out, io.StringIO("yes\n")),
+    )
+
+    events = [json.loads(line) for line in out.getvalue().splitlines()]
+    (card,) = [e for e in events if e["event"] == "permission"]
+    # Return sends the message, so the user is told it follows, and the model that judges the action reads it too.
+    assert card["title"] == "Type into Message and press Return"
+    assert card["question"].startswith("May I type 'see you at 6' into Message and press Return?")
+    assert state.held[0]["action"] == "type 'see you at 6' into Message and press Return"
+    assert world.log[-2:] == ["type:see you at 6", "enter"]
 
 
 def test_a_field_with_no_label_is_named_by_its_role_in_words():
