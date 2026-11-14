@@ -65,7 +65,9 @@ class EarlierTask:
 class Guidance:
     """What the run knows about its goal beyond the goal itself.
 
-    The goal is one sentence and never changes. `focus` is the sub-goal the writer sent the
+    The goal is one sentence and never changes. `plan` is the steps the writer expects the goal to take,
+    written once at the start of a run whose goal means opening several things in turn, and never spent:
+    a focus is one move, and a goal like that is many. `focus` is the sub-goal the writer sent the
     classifier back to work on the last time the classifier stopped, until it acts on it, and `exchanges` are the
     questions the user answered on the way. Every model call reads both, so the classifier
     steers by them and the writer types by them. `earlier` are the tasks the user gave before
@@ -74,6 +76,7 @@ class Guidance:
     """
 
     focus: str | None = None
+    plan: str | None = None
     exchanges: tuple[Exchange, ...] = ()
     earlier: tuple[EarlierTask, ...] = ()
 
@@ -91,6 +94,7 @@ class Guidance:
     def state(self) -> dict:
         """The keys a model packet carries, and only the ones that hold something."""
         return {
+            **({"plan": self.plan} if self.plan else {}),
             **({"current_focus": self.focus} if self.focus else {}),
             **({"user_said": [{"asked": e.question, "replied": e.reply} for e in self.exchanges]} if self.exchanges else {}),
         }
@@ -333,6 +337,7 @@ class Screen:
     ax_refs: dict[int, object] = field(default_factory=dict)  # item index -> accessibility element, when it has one
     offscreen: list[AxNode] = field(default_factory=list)  # labelled controls the app exposes but does not show
     covered: dict[int, Popup] = field(default_factory=dict)  # item index -> the popup a click on it would land on
+    clicked_before: dict[int, str] = field(default_factory=dict)  # item index -> what clicking it did earlier in the run
 
     @property
     def size_pt(self) -> tuple[float, float]:

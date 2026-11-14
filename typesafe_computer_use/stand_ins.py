@@ -45,8 +45,13 @@ class FakeTypeSafe:
         read_only: bool = False,
         moves: bool = False,
         shortcuts: Callable[[dict], str] | None = None,
+        plan: bool = False,
+        changes: Callable[[dict], float] | None = None,
     ):
         self.policy = policy
+        self.changes = changes  # how the changes-something question is answered, from its state; nothing changes without one
+        self.change_states: list[dict] = []  # the state each changes-something question was sent
+        self.plan = plan  # how the goal-needs-a-plan question is answered: closed unless a scenario opens it
         self.shortcuts = shortcuts  # decides the shortcut from the follow-up's own state, when a scenario wants that
         self.noul = noul
         self.read_only = read_only  # how the goal question at the start of a run is answered
@@ -71,6 +76,11 @@ class FakeTypeSafe:
             return SimpleNamespace(answers={"read_only": SimpleNamespace(noul=1.0 if self.read_only else 0.0)})
         if "moves" in questions:
             return SimpleNamespace(answers={"moves": SimpleNamespace(noul=1.0 if self.moves else 0.0)})
+        if "plan" in questions:
+            return SimpleNamespace(answers={"plan": SimpleNamespace(noul=1.0 if self.plan else 0.0)})
+        if "changes" in questions:
+            self.change_states.append(state)
+            return SimpleNamespace(answers={"changes": SimpleNamespace(noul=self.changes(state) if self.changes else 0.0)})
         if any(isinstance(q, Noul) for q in questions.values()):
             return SimpleNamespace(answers={name: SimpleNamespace(noul=self.noul) for name in questions})
         if set(questions) == {"target"}:  # the follow-up to a drag_item: where it is dropped, named by text
@@ -170,9 +180,16 @@ class FakeWriter:
     """
 
     def __init__(
-        self, text: str = "", url: str = "", reviews: list | None = None, submit: bool = False, texts: list[str] | None = None
+        self,
+        text: str = "",
+        url: str = "",
+        reviews: list | None = None,
+        submit: bool = False,
+        texts: list[str] | None = None,
+        plan: str = "",
     ):
         self.requests: list[dict] = []
+        self.plan = plan  # the plan a run's start asks for; empty declines it
         self.text = text
         self.texts = list(texts or [])
         self.submit = submit
@@ -188,6 +205,8 @@ class FakeWriter:
         if asked == {"fill", "text", "submit", "reason"}:
             text = self.texts.pop(0) if self.texts else self.text
             reply = {"fill": bool(text), "text": text, "submit": self.submit, "reason": "the goal names what to type"}
+        elif asked == {"ok", "plan"}:
+            reply = {"ok": bool(self.plan), "plan": self.plan}
         elif asked == {"ok", "url", "reason"}:
             reply = {"ok": bool(self.url), "url": self.url, "reason": "the goal names the site"}
         elif asked == {"achieved", "answer", "focus", "question", "wait", "scroll", "scroll_over"}:

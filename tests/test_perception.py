@@ -6,7 +6,7 @@ from conftest import busy_page
 from PIL import Image, ImageDraw
 
 from typesafe_computer_use import perception
-from typesafe_computer_use.models import AxNode, Field, Item, KeyboardFocus, Popup, Screen
+from typesafe_computer_use.models import AxNode, Field, Item, KeyboardFocus, Popup, Screen, same_screen, signature
 from typesafe_computer_use.perception import (
     drawn,
     goal_echoes,
@@ -217,6 +217,25 @@ def test_perceive_offers_a_hidden_control_off_the_list(monkeypatch):
     assert screen.offscreen == [hidden]
 
 
+def test_a_control_nested_in_one_of_the_same_name_is_one_item(monkeypatch):
+    """A page wraps a link around a second link and an image, all named alike: one control, kept as the
+    outer link. A different name inside, or the same name beside it, is a control of its own."""
+    outer = AxNode(role="AXLink", label="Profile", x=10, y=100, w=60, h=60, pressable=True)
+    inner = AxNode(role="AXLink", label="Profile", x=25, y=115, w=30, h=30, pressable=True)
+    image = AxNode(role="AXImage", label="Profile", x=25, y=115, w=30, h=30, pressable=False)
+    badge = AxNode(role="AXButton", label="Badge", x=50, y=105, w=15, h=15, pressable=True)
+    beside = AxNode(role="AXLink", label="Profile", x=200, y=100, w=60, h=60, pressable=True)
+    monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: ([outer, inner, image, badge, beside], [], False))
+    monkeypatch.setattr(perception, "ocr", lambda *args: [])
+    screen = Screen(image=busy_page((400, 300)), scale=1.0, app="Brave Browser", field=None, url=None, pid=7)
+    items = perception.perceive(screen, 255, "goal")
+    assert sorted((it.text, it.x1, it.role) for it in items) == [
+        ("Badge", 50, "button"),
+        ("Profile", 10, "link"),
+        ("Profile", 200, "link"),
+    ]
+
+
 def test_perceive_says_which_items_are_under_a_popup_by_their_final_index(monkeypatch):
     bubble = Popup("Restore pages?", 200.0, 0.0, 200.0, 100.0)
     shown = control(20, 20, 101, 31, "Title")
@@ -275,6 +294,62 @@ def test_text_inside_a_stand_in_field_stays_an_item(screen):
     block = Item(0, "10", 0.9, 1000.0, 600.0, 1040.0, 620.0)
     assert in_field(block, replace(screen, field=replace(box, role="AXTextField")))
     assert not in_field(block, replace(screen, field=replace(box, clicked=True)))
+
+
+# ----- the browser's preview of the link under the pointer ------------------------------------------
+
+# A Retina capture of a full-screen Chrome window: 2940x1912 pixels at 1.47 per point. A scroll parked
+# the pointer on a sidebar link, and Chrome previewed its address in the window's bottom-left corner.
+PREVIEW = "https://school.example.edu/courses/1/assignments"
+
+
+def hovered_page(
+    monkeypatch,
+    blocks: list[Item],
+    url: str | None = "https://school.example.edu/courses/1/grades",
+    window=(0.0, 0.0, 2000.0, 1300.0),
+) -> list[str]:
+    monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: ([], [], False))
+    monkeypatch.setattr(perception, "ocr", lambda *args: blocks)
+    screen = Screen(image=busy_page((2940, 1912)), scale=1.47, app="Google Chrome", field=None, url=url, pid=7, window=window)
+    return [it.text for it in perception.perceive(screen, 255, "check my grade")]
+
+
+def test_the_preview_of_a_hovered_link_is_no_item(monkeypatch):
+    blocks = [ocr_item(0, "Grades", 170, 735, 250, 760), ocr_item(1, PREVIEW, 0, 1879, 726, 1905)]
+    assert hovered_page(monkeypatch, blocks) == ["Grades"]
+    assert hovered_page(monkeypatch, blocks, window=None) == ["Grades"]  # a replay knows no window: the capture's edge
+    moved = ocr_item(1, PREVIEW, 2200, 1879, 2926, 1905)  # Chrome moves it right when the pointer is in its way
+    assert hovered_page(monkeypatch, [blocks[0], moved]) == ["Grades"]
+
+
+def test_an_address_anywhere_else_or_outside_a_browser_stays_an_item(monkeypatch):
+    middle = ocr_item(0, PREVIEW, 500, 900, 1226, 926)
+    words = ocr_item(1, "Calculation of totals has been disabled", 0, 1879, 726, 1905)
+    assert sorted(hovered_page(monkeypatch, [middle, words])) == sorted([PREVIEW, words.text])
+    corner = ocr_item(0, PREVIEW, 0, 1879, 726, 1905)
+    assert hovered_page(monkeypatch, [corner], url=None) == [PREVIEW]  # no page address: not a browser
+
+
+def test_a_preview_alone_leaves_the_screen_the_same(monkeypatch):
+    page_blocks = [ocr_item(i, f"Row {i}", 500, 600 + 60 * i, 900, 630 + 60 * i) for i in range(4)]
+    preview = ocr_item(9, PREVIEW, 0, 1879, 726, 1905)
+    screens = []
+    for blocks in (page_blocks, [*page_blocks, preview]):
+        monkeypatch.setattr(desktop, "actionable_elements", lambda pid, w, h: ([], [], False))
+        monkeypatch.setattr(perception, "ocr", lambda *args, blocks=blocks: blocks)
+        screen = Screen(
+            image=busy_page((2940, 1912)),
+            scale=1.47,
+            app="Google Chrome",
+            field=None,
+            url="https://school.example.edu/courses/1/grades",
+            pid=7,
+            window=(0.0, 0.0, 2000.0, 1300.0),
+        )
+        screens.append(signature(screen, perception.perceive(screen, 255, "check my grade")))
+    assert same_screen(*screens)
+    assert screens[0] == screens[1]
 
 
 # ----- the lines of a document, for a run that points at them --------------------------------------

@@ -125,13 +125,47 @@ def test_earlier_screens_are_the_distinct_ones_before_the_last_oldest_first():
     state = RunState(seen=[(home, "clicked 'Tickets'"), (tickets, "waited"), (tickets_later, "clicked 'Buy'")])
     assert earlier_screens(state, checkout) == [
         {"app": "Google Chrome", "url": "https://a/", "text": ["Home", "Tickets"]},
-        {"app": "Google Chrome", "url": "https://a/tickets", "text": ["Standard $45", *rows, "12:01"]},
+        {
+            "app": "Google Chrome",
+            "url": "https://a/tickets",
+            "reached_by": "clicked 'Tickets'",
+            "text": ["Standard $45", *rows, "12:01"],
+        },
     ]
     assert earlier_screens(state, checkout, budget=12) == [  # eleven lines fit; home's two more do not
-        {"app": "Google Chrome", "url": "https://a/tickets", "text": ["Standard $45", *rows, "12:01"]},
+        {
+            "app": "Google Chrome",
+            "url": "https://a/tickets",
+            "reached_by": "clicked 'Tickets'",
+            "text": ["Standard $45", *rows, "12:01"],
+        },
     ]
     assert earlier_screens(state, tickets) == [{"app": "Google Chrome", "url": "https://a/", "text": ["Home", "Tickets"]}]
     assert earlier_screens(RunState(), checkout) == []
+
+
+def test_an_earlier_screen_holds_only_what_the_last_screen_does_not_show_and_says_how_it_was_reached():
+    """Forty conversations opened from one inbox: each screen held the whole list beside one conversation,
+    so six filled the budget and every name was on every one. Each now holds its own lines, under the click
+    that opened it."""
+    names = [f"Friend {n}" for n in range(30)]
+    inbox = ("Brave Browser", "https://chat/inbox", None, texts("Messages", *names))
+    chats = [
+        ("Brave Browser", f"https://chat/t/{n}", None, texts("Messages", *names, f"Friend {n}", f"words of chat {n}"))
+        for n in range(30)
+    ]
+    seen = []
+    for n, chat in enumerate(chats):
+        seen += [(inbox, f"clicked 'Friend {n}'"), (chat, "went back")]
+    screens = earlier_screens(RunState(seen=seen), inbox, budget=60)
+
+    assert len(screens) == 30
+    assert screens[0] == {
+        "app": "Brave Browser",
+        "url": "https://chat/t/0",
+        "reached_by": "clicked 'Friend 0'",
+        "text": ["words of chat 0"],
+    }
 
 
 def test_a_wait_is_neither_a_repeat_nor_something_the_classifier_is_told_it_tried():

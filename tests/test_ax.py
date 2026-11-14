@@ -337,6 +337,17 @@ def test_a_wrapper_keyed_like_its_parent_is_walked_into_and_not_listed_twice():
     assert not cap_hit
 
 
+def test_a_page_inside_a_nameless_container_of_its_own_frame_is_walked():
+    """Brave holds the page in a nameless group with the page's frame, and the page's first container
+    is a nameless group of that frame too. Keyed alike, the second read as a copy of the first, and
+    the walk dropped the page: none of its links or icon buttons became an item."""
+    page = (0.0, 114.0, 1470.0, 842.0)
+    content = node("AXGroup", "", page, children=[node("AXLink", "Inbox", (10.0, 300.0, 40.0, 40.0), press=True)])
+    browser = node("AXGroup", "", page, children=[node("AXWebArea", "Example", page, children=[content])])
+    window = node("AXWindow", "Example", (0.0, 0.0, 1470.0, 956.0), children=[browser])
+    assert labels(app(window)) == (["Inbox"], False)
+
+
 def test_an_app_that_lists_itself_as_a_child_terminates():
     tree = {"app": ["app", "app", "bar"], "bar": ["file"], "file": []}
     frames = {"app": None, "bar": (0, 0, 800, 24), "file": (40, 0, 30, 24)}

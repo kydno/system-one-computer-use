@@ -14,12 +14,14 @@ from .decide import OFFSCREEN_PREFIX, Decision, beside, row_mates, verify_typed
 from .decisions import DecisionClient, DecisionError
 from .models import MENU_BAR_PT, Field, Guidance, Item, Missed, Popup, Screen
 from .platform_adapter import desktop
-from .writer import Writer, WriterError, compose_text, compose_url, looks_credential, url_named_in
+from .writer import Fill, Writer, WriterError, compose_text, compose_url, looks_credential, url_named_in
 
 VERIFY_THRESHOLD = 0.5
 WAIT_SECONDS = 3.0  # a wait is this and no settle after it; three of them cover a slow page
 CLOSE_SECONDS = 0.5  # for a closed popup to leave the screen before the click under it
 PRESS_SECONDS = 0.4  # for a page to paint what an accessibility press did; Chromium paints within a frame or two
+BACK_LOOKS = 2  # looks, PRESS_SECONDS apart, for a Back to show before it is said to have changed nothing
+PRESS_LOOKS = 3  # looks, PRESS_SECONDS apart, for an accessibility press to show before a pointer click follows it
 # A press shows when at least this many pixels of the half-size capture moved by more than PIXEL_STEP
 # grey levels. On Google Flights, presses that did nothing moved 0 to 40 and real clicks over 3000.
 PIXEL_STEP = 24
@@ -46,6 +48,7 @@ class Context:
     browsers: tuple[str, ...] = ()  # the installed browsers use_browser may work in besides `browser`
     apps: tuple[str, ...] = ()  # the installed apps open_app may open; none, and it is not offered
     earlier: list[dict] = field(default_factory=list)  # the screens before this one, for text that was read on the way
+    fill: Fill | None = None  # text already written for this step's type_text, so the user could be asked with it
 
 
 @dataclass(frozen=True)
@@ -122,7 +125,7 @@ def click_item(item: Item, screen: Screen) -> str:
     if ref is None:
         return f"{closed}clicked {item.text!r}"
     if unseen:
-        return f"{closed}clicked {item.text!r} (accessibility press changed nothing on screen)"
+        return f"{closed}clicked {item.text!r} (after an accessibility press that showed nothing)"
     return f"{closed}clicked {item.text!r} (accessibility press did not take)"
 
 
@@ -187,15 +190,23 @@ def press_showed(screen: Screen) -> bool:
     a browser has to show on screen, against the capture the step decided on. The menu bar is left
     out, since its clock moves, and so is the focused field, since its caret blinks. Outside a web
     page the press goes to the control's own action and is taken at its word.
+
+    One look was not enough. A page that fetches before it paints, or fades a dialog in, had not
+    changed 0.4 s after a press that took: a sidebar link that went on to open another page, a
+    button that went on to open a dialog. Each read as a press that did nothing, a pointer click
+    went to the same spot on a page that was already changing, and the history told the decision
+    model that a working button did nothing. So the press gets a few looks, and the first that
+    shows a change ends the wait.
     """
     if screen.url is None:
         return True
-    desktop.sleep_watching(PRESS_SECONDS)
-    after = desktop.screenshot()
-    if not moved(screen.image, after, screen.scale, screen.field):
-        return False  # a pointer click follows, and what it does has not been looked at
-    looked(after, changed=True)
-    return True
+    for _ in range(PRESS_LOOKS):
+        desktop.sleep_watching(PRESS_SECONDS)
+        after = desktop.screenshot()
+        if moved(screen.image, after, screen.scale, screen.field):
+            looked(after, changed=True)
+            return True
+    return False  # a pointer click follows, and what it does has not been looked at
 
 
 def moved(
@@ -483,7 +494,7 @@ def _type_text(decision, screen: Screen, items, ctx: Context) -> str:
     if ctx.writer is None:
         return "type_text refused: no writer available"
     try:
-        fill = compose_text(ctx.writer, ctx.goal, screen, items, ctx.history, ctx.guidance, ctx.earlier)
+        fill = ctx.fill or compose_text(ctx.writer, ctx.goal, screen, items, ctx.history, ctx.guidance, ctx.earlier)
     except WriterError as e:
         return f"type_text refused: the writer failed ({e})"
     text = fill.text
@@ -520,6 +531,27 @@ def _key(name: str, description: str, command: bool = False):
         return description
 
     return handler
+
+
+def _go_back(decision, screen: Screen, items, ctx) -> str:
+    """Go back a page, and say so when nothing on screen changed.
+
+    Back leaves an in-page popover where it is. In a supervised run, a click opened a popover over
+    the list the goal needed, Back left the page and the popover as they were, and every step after
+    it read "went back" as if it had landed. A navigation shows at once,
+    in the page and in the toolbar's address and reload button, so two looks a press apart are
+    enough to tell. The focused field is left out, since its caret blinks.
+    """
+    desktop.press("[", True)
+    after = screen.image
+    for _ in range(BACK_LOOKS):
+        desktop.sleep_watching(PRESS_SECONDS)
+        after = desktop.screenshot()
+        if moved(screen.image, after, screen.scale, screen.field):
+            looked(after, changed=True)
+            return "went back"
+    looked(after, changed=False)
+    return "went back (nothing changed)"
 
 
 def _scroll(lines: int, description: str):
@@ -666,7 +698,7 @@ _HANDLERS = {
     "type_text": _type_text,
     "press_enter": _key("return", "pressed Return"),
     "press_escape": _key("escape", "pressed Escape"),
-    "go_back": _key("[", "went back", command=True),
+    "go_back": _go_back,
     "scroll_down": _scroll(-SCROLL_LINES, "scrolled down"),
     "scroll_up": _scroll(SCROLL_LINES, "scrolled up"),
     "wait": _wait,

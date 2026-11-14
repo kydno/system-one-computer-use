@@ -1,12 +1,15 @@
-"""Command-line entry points: `clicker` and `clicker-inspect`."""
+"""Command-line entry points: `clicker`, `clicker-inspect`, and `clicker-takeover`."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
+
+import openai
 
 from . import config
 from .actions import Context
@@ -17,6 +20,7 @@ from .perception import capture, perceive
 from .platform_adapter import desktop
 from .report import annotate, ax_count, render_payload
 from .runner import RunConfig, run
+from .takeover import DEFAULT_TAKEOVER_DELAY, TakeoverError, take_over
 from .timing import format_timing
 from .writer import make_writer, provider
 
@@ -87,6 +91,12 @@ def main(argv: list[str] | None = None) -> None:
         default=config.DEFAULT_HANDOFFS,
         help="times the writer may send a stopped run back to the classifier with a new focus (0: every stop is final)",
     )
+    parser.add_argument(
+        "--permissions",
+        choices=config.PERMISSIONS,
+        help="full: take every action; ask: ask before an action that would change something; look: never take one "
+        "(default: CLICKER_PERMISSIONS, else full)",
+    )
     parser.add_argument("--out", type=Path, default=Path("runs") / time.strftime("%Y%m%d-%H%M%S"), help="run folder")
     parser.add_argument("--image", type=Path, help="replay a saved capture instead of the live screen (never acts)")
     parser.add_argument("--app", help="frontmost app to report during replay")
@@ -115,6 +125,7 @@ def main(argv: list[str] | None = None) -> None:
     try:
         writer = make_writer()
         config.writer_vision()  # a bad value stops the run here, not at its first stop
+        permissions = args.permissions or config.permissions()
     except ValueError as e:
         sys.exit(str(e))
     if writer is None:
@@ -126,6 +137,8 @@ def main(argv: list[str] | None = None) -> None:
         say(f"writer disabled: {why}; type_text, writer-proposed URLs and the final answer need one")
     else:
         say(f"writer: {provider(writer)}")
+    if permissions != "full":
+        say(f"permissions: {permissions}")
 
     cfg = RunConfig(
         goal=args.goal,
@@ -136,6 +149,7 @@ def main(argv: list[str] | None = None) -> None:
         read_only_confidence=args.read_only_confidence,
         delay=args.delay,
         handoffs=args.handoffs,
+        permissions=permissions,
         image=args.image,
         app=args.app,
         url=args.url,
@@ -206,3 +220,34 @@ def inspect(argv: list[str] | None = None) -> None:
     if not args.no_open:
         desktop.open_path(annotated)
         desktop.open_path(text, as_text=True)
+
+
+def takeover(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="clicker-takeover",
+        description=(
+            "Hand a run that stopped short of its goal to an LLM computer-use agent on OpenRouter, which drives "
+            "this computer from the screen it is on now, with the run's handoff.json as its story."
+        ),
+    )
+    parser.add_argument("folder", type=Path, help="the run folder that holds handoff.json")
+    parser.add_argument("--steps", type=int, default=config.DEFAULT_TAKEOVER_STEPS, help="most turns of the takeover model")
+    parser.add_argument(
+        "--delay", type=float, default=DEFAULT_TAKEOVER_DELAY, help="seconds after each turn's actions before the next screenshot"
+    )
+    args = parser.parse_args(argv)
+    config.load_dotenv(DOTENV)
+    if not config.openrouter_key():
+        sys.exit("clicker-takeover needs OPENROUTER_API_KEY: the takeover model runs on OpenRouter")
+    if not desktop.accessibility_trusted():
+        sys.exit(
+            "this terminal, or the app that started clicker-takeover, lacks Accessibility permission; "
+            "grant it in System Settings > Privacy & Security"
+        )
+    client = openai.OpenAI(base_url=config.OPENROUTER_CHAT_URL, api_key=os.environ["OPENROUTER_API_KEY"].strip())
+    try:
+        taken = take_over(args.folder, client, steps=args.steps, delay=args.delay)
+    except TakeoverError as e:
+        sys.exit(str(e))
+    if taken.outcome.startswith("aborted"):
+        sys.exit(130)

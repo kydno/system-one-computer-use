@@ -107,8 +107,13 @@ def node_identity(node) -> object:
 
 def subtree_key(role: str, label: str, frame: Frame | None) -> tuple | None:
     """Identity of a node for de-duplication: same role, label and frame is the same control, whatever
-    object the bridge wrapped it in. Frameless and zero-size nodes are containers and are never keyed."""
-    if frame is None or frame[2] <= 0 or frame[3] <= 0:
+    object the bridge wrapped it in. Frameless, zero-size and nameless nodes are containers and are
+    never keyed: a container is no control, and the labelled controls under it carry keys of their own.
+
+    A nameless key once dropped every web page in Brave and Chrome. The browser holds the page in a
+    nameless group with the page's own frame, and the page's first container is a nameless group of
+    that same frame, so it read as a copy and the walk skipped the page beneath it."""
+    if not label or frame is None or frame[2] <= 0 or frame[3] <= 0:
         return None
     return (role, label, round(frame[0]), round(frame[1]), round(frame[2]), round(frame[3]))
 

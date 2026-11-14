@@ -23,13 +23,20 @@ final class NonActivatingPanel: NSPanel {
     override var canBecomeKey: Bool { !isPassive }
 
     /// The run's status strip: never key, so the run's keystrokes reach the app
-    /// in front; clicks fall through to that app; and screen captures leave it
-    /// out, so the run never reads it as part of the screen.
+    /// in front; clicks fall through to that app, except on its Stop button
+    /// (see `takesClicks`); and screen captures leave it out, so the run never
+    /// reads it as part of the screen.
     var isPassive = false {
         didSet {
-            ignoresMouseEvents = isPassive
+            ignoresMouseEvents = isPassive && !takesClicks
             sharingType = isPassive ? .none : .readOnly
         }
+    }
+
+    /// While passive, whether clicks land on the strip rather than falling
+    /// through: true only while the pointer is over its Stop button.
+    var takesClicks = false {
+        didSet { ignoresMouseEvents = isPassive && !takesClicks }
     }
 
     /// Never main. Becoming main is what greys the previous app permanently.

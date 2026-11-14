@@ -129,7 +129,7 @@ def test_a_press_that_showed_nothing_then_a_click_gets_the_whole_limit(monkeypat
     """The press's check saw no change, but the pointer click after it is a new action nobody looked at:
     it may be waiting on the network."""
     seen = watch(monkeypatch, [frame()])
-    what = "clicked 'Return' (accessibility press changed nothing on screen)"
+    what = "clicked 'Return' (after an accessibility press that showed nothing)"
     runner.settle_action(BEFORE, FULL, "click_item", what, None)
     assert seen["now"] == FULL
 

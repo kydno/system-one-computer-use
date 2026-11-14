@@ -1,7 +1,8 @@
 import Foundation
 
 /// What each model does in a run, for what it cost. The first three match `calls.ROLES`; `evals` is
-/// what `clicker-eval` batches paid, which no run folder holds.
+/// what `clicker-eval` batches paid, which no run folder holds. One LLM does both the reviewing (reading
+/// the screen when the decision model stops) and the writing, so those two are titled as its two uses.
 enum UsageRole: String, CaseIterable, Identifiable, Sendable {
     case decision, reviewer, writer, evals
 
@@ -10,8 +11,8 @@ enum UsageRole: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .decision: return "Decision"
-        case .reviewer: return "Reviewer"
-        case .writer: return "Writer"
+        case .reviewer: return "LLM reading"
+        case .writer: return "LLM writing"
         case .evals: return "Evals"
         }
     }

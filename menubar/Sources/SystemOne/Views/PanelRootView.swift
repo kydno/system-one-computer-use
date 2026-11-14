@@ -26,6 +26,9 @@ struct PanelRootView: View {
                     if model.isShowingSettings {
                         SettingsView(model: model)
                             .transition(.opacity.combined(with: .scale(scale: K.Motion.secondBoxScale, anchor: .top)))
+                    } else if model.isShowingPermissions {
+                        SessionPermissionsView(model: model)
+                            .transition(.opacity.combined(with: .scale(scale: K.Motion.secondBoxScale, anchor: .top)))
                     } else if model.hasRunContent {
                         RunBoxView(model: model)
                             .transition(.opacity.combined(with: .scale(scale: K.Motion.secondBoxScale, anchor: .top)))
@@ -41,6 +44,7 @@ struct PanelRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.hasRunContent)
         .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.isShowingSettings)
+        .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.isShowingPermissions)
         .houseAnimation(K.Motion.answerAppear, reduceMotion: reduceMotion, value: model.showsRunStrip)
         .opacity(isPresented ? 1 : 0)
         .scaleEffect(isPresented ? 1 : restingScale, anchor: .top)

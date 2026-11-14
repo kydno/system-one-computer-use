@@ -2,9 +2,10 @@ import SwiftUI
 
 /// The settings box's usage section: what the runs in this checkout cost, or how many tokens they
 /// took, split by the role each model played, as `run.json` reports it, and the decision model
-/// those runs suggest. The cost pie also holds what `clicker-eval` batches paid, which no run folder
-/// records, and says how many runs saved no cost, which its total leaves out; over the whole
-/// lifetime it adds OpenRouter's own count for the key, which includes both. It follows the run
+/// those runs suggest. The cost list also holds what `clicker-eval` batches paid, which no run folder
+/// records, but the pie does not: it is the runs' split alone. It says how many runs saved no cost,
+/// which its total leaves out; over the whole lifetime it adds OpenRouter's own count for the key,
+/// which includes both. It follows the run
 /// folders while the panel is up, so a run from a terminal shows without reopening it. Folded to
 /// its title until the caret opens it; then the pie sweeps in, a third of the wheel's hues to each
 /// role and up to three tones of it, one per model, the smallest folded into "Other".
@@ -174,14 +175,15 @@ struct UsageBreakdownView: View {
 
     private func breakdown(_ shown: [RunUsage]) -> some View {
         var totals = UsageLedger.totals(shown, metric: metric)
-        // Eval batches have only a cost, so they are in the cost pie and not the token one.
+        // Eval batches have only a cost, so they are in the cost list and not the token one. The pie
+        // leaves them out: it is how the runs' own spend splits between the models.
         let evalCost = UsageLedger.evalCost(evals, window)
         if metric == .cost, evalCost > 0 { totals[.evals] = [K.Usage.evalsLabel: evalCost] }
         let slices = UsageLedger.slices(totals)
         let uncosted = metric == .cost ? UsageLedger.uncostedRuns(shown) : 0
         return VStack(alignment: .leading, spacing: K.RunBox.sectionGap) {
             HStack(alignment: .top, spacing: K.Usage.pieLegendGap) {
-                pie(slices)
+                pie(slices.filter { $0.role != .evals })
                 legend(slices)
             }
             // OpenRouter counts by key and by calendar, not by this window, so only the whole is shown.

@@ -1,23 +1,23 @@
 import AppKit
 
-/// The menu bar item, from Menu-Bar-Chat. A left click toggles the panel, or,
-/// while a run has the screen, shows its progress and a Stop; a right click (or
-/// control-click) shows the app's menu.
+/// The menu bar item, from Menu-Bar-Chat. A left click toggles the panel, unless
+/// `takeClick` handles it; a right click (or control-click) shows the app's menu.
 @MainActor
 final class StatusItemController: NSObject {
 
-    /// Left click, when `menuForClick` has no menu to show instead. Handed the
-    /// button so the panel can anchor itself under it.
+    /// Left click, when `takeClick` did not handle it. Handed the button so the
+    /// panel can anchor itself under it.
     var onToggle: ((NSStatusBarButton) -> Void)?
 
-    /// Asked on every left click: a menu to show in place of the panel. While a
-    /// run has the screen the panel must stay off it, so the click shows this.
-    var menuForClick: (() -> NSMenu?)?
+    /// Asked first on every left click; true when it handled the click, so the
+    /// panel does not toggle. While a run has the screen, the click shows its
+    /// status strip instead.
+    var takeClick: (() -> Bool)?
 
     /// The right-click menu, built fresh each time so it shows current state.
     var contextMenu: (() -> NSMenu)?
 
-    /// Fired just before either menu appears, so the panel can get out of the way.
+    /// Fired just before the menu appears, so the panel can get out of the way.
     var onWillShowMenu: (() -> Void)?
 
     private let statusItem: NSStatusItem
@@ -55,8 +55,8 @@ final class StatusItemController: NSObject {
 
         if isRightClick, let menu = contextMenu?() {
             show(menu, from: sender)
-        } else if let menu = menuForClick?() {
-            show(menu, from: sender)
+        } else if takeClick?() == true {
+            return
         } else {
             onToggle?(sender)
         }

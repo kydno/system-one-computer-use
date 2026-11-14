@@ -24,7 +24,8 @@ typesafe_computer_use/
   calls.py        requests counted per model, at the two clients
   report.py       logging, annotated screenshots, payload dump
   timing.py       phase stopwatches, the timing line, run summary
-  cli.py          `clicker` and `clicker-inspect`
+  takeover.py     `clicker-takeover`: an LLM on OpenRouter drives on from a run's `handoff.json`
+  cli.py          `clicker`, `clicker-inspect`, and `clicker-takeover`
   events.py       `clicker --events`: the run as JSON lines, replies on stdin
   osworld/        the agent in OSWorld (see [OSWorld](osworld.md))
     agent.py      `JevAgent`: OSWorld's reset() and predict(), the step loop on a worker thread

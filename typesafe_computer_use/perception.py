@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
 import time
 from collections.abc import Sequence
@@ -33,6 +34,8 @@ REOCR_FRACTION = 0.6  # above this share of changed tiles, reading the whole reg
 MAX_REOCR_RECTS = 4  # past this, the per-call overhead outweighs the pixels another rectangle saves
 BLANK_INSET_PX = 4  # how far in from a control's edge its inside is read, past a neighbour's border
 BLANK_RANGE = 12  # 8-bit gray spread at or below which a patch is one flat color
+LINK_PREVIEW_PT = 28.0  # how close to the window's bottom corner a browser's link preview sits
+LONE_URL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|(?:[\w-]+\.)+[a-z]{2,}(?:[/:?#]|$))\S*$", re.IGNORECASE)
 
 
 def capture(
@@ -119,6 +122,7 @@ def perceive(
         gray = screen.image.convert("L")
         blank = [node for node in nodes if not drawn(gray, node, screen.scale)]
         nodes = [node for node in nodes if node not in blank]
+        nodes = without_nested_twins(nodes)
         hidden = hidden + blank
         controls = to_ax_items(nodes, screen.scale)
     # A line a control of the app already covers (an editor that publishes its text through accessibility) takes
@@ -129,7 +133,9 @@ def perceive(
         if apart and in_text_area(screen, (block.x1, block.y1, block.x2, block.y2)) and not covered_by_a_control(block, controls)
     ]
     held = {id(block) for block in content}
-    rest = [block for block in blocks if id(block) not in held and not in_field(block, screen)]
+    rest = [
+        block for block in blocks if id(block) not in held and not in_field(block, screen) and not link_preview(block, screen)
+    ]
     merged = merge_with_origins(rest, controls, budget, content)
     screen.ax_refs.clear()
     screen.ax_refs.update({it.index: nodes[origin].ref for it, origin in merged if origin is not None and nodes[origin].ref})
@@ -594,6 +600,38 @@ def _ink(patch: Image.Image) -> bool:
     return high - low > BLANK_RANGE
 
 
+def without_nested_twins(nodes: list[AxNode]) -> list[AxNode]:
+    """The controls less any that sits inside another of the same name: one control, nested.
+
+    A web page wraps a link around a second link and an image, all three named alike, each with a
+    frame of its own, so the walk's check for the same frame keeps all three. They went out as three
+    items, and as three repeats of one name they made the history name a row for the click, a row
+    of whatever stood level with it: a sidebar icon read as part of a conversation beside it. The
+    outer one is kept, the one the page made to be pressed; of two with one frame, the first.
+    """
+    return [
+        node
+        for j, node in enumerate(nodes)
+        if not any(
+            i != j and other.label == node.label and _holds(other, node) and (i < j or _frame(other) != _frame(node))
+            for i, other in enumerate(nodes)
+        )
+    ]
+
+
+def _frame(node: AxNode) -> tuple[float, float, float, float]:
+    return node.x, node.y, node.w, node.h
+
+
+def _holds(outer: AxNode, inner: AxNode) -> bool:
+    return (
+        outer.x <= inner.x
+        and outer.y <= inner.y
+        and outer.x + outer.w >= inner.x + inner.w
+        and outer.y + outer.h >= inner.y + inner.h
+    )
+
+
 def offscreen_controls(nodes: list[AxNode], items: list[Item]) -> list[AxNode]:
     """The off-screen controls worth offering: one per role and label, minus anything already on screen.
 
@@ -627,6 +665,28 @@ def in_field(block: Item, screen: Screen) -> bool:
         return False
     x, y = screen.to_points(block)
     return field.x < x < field.x + field.w and field.y < y < field.y + field.h
+
+
+def link_preview(block: Item, screen: Screen) -> bool:
+    """Whether an OCR block is the browser's preview of the link under the pointer: one URL, alone,
+    in a bottom corner of the window.
+
+    It shows whenever the pointer rests on a link, and a scroll parks the pointer on its target. On
+    a page too short to scroll, a scroll over a sidebar link moved nothing, but the preview it
+    raised read as a new line, so the screen counted as changed: the failed scroll fell off the
+    list of what was tried there, the count of idle actions started over, and the run scrolled
+    there again, then clicked the preview itself as if it were a link on the page.
+    """
+    if screen.url is None or not LONE_URL.match(block.text.strip()):
+        return False
+    if screen.window is not None:
+        left, top, width, height = screen.window
+    else:
+        (width, height), left, top = screen.size_pt, 0.0, 0.0
+    x1, y2, x2 = block.x1 / screen.scale, block.y2 / screen.scale, block.x2 / screen.scale
+    at_bottom = y2 >= top + height - LINK_PREVIEW_PT
+    in_corner = x1 <= left + LINK_PREVIEW_PT or x2 >= left + width - LINK_PREVIEW_PT
+    return at_bottom and in_corner
 
 
 def in_text_area(screen: Screen, box: Box) -> bool:

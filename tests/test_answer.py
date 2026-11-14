@@ -55,7 +55,7 @@ def logged() -> tuple[list[str], runner.Log]:
 
 
 def test_the_answer_request_carries_the_capture_and_the_run(screen, make_item, monkeypatch):
-    monkeypatch.setenv("CLICKER_ANSWER_MODEL", "answer-model")
+    monkeypatch.setenv("CLICKER_WRITER_MODEL", "answer-model")
     fake = FakeWriter({"achieved": True, "answer": " Sep 19, 2026 in Miami. "})
 
     answer = compose_answer(fake, GOAL, screen, [make_item(0, "SEP 19, 2026")], ["clicked 'TOUR'"], "the goal is achieved")

@@ -279,6 +279,9 @@ def rebuild(case: Case) -> Rebuilt:
     items = [Item(**item) for item in case.items]
     state = case.state
     covered = {i["i"]: _popup(i["under"]) for i in state.get("screen_items_in_reading_order", []) if i.get("under")}
+    clicked_before = {
+        i["i"]: i["clicked_before"] for i in state.get("screen_items_in_reading_order", []) if i.get("clicked_before")
+    }
     screen = Screen(
         image=Image.new("1", (case.capture[0], case.capture[1])),  # only its size is read
         scale=case.scale,
@@ -290,9 +293,11 @@ def rebuild(case: Case) -> Rebuilt:
             for o in case.offscreen
         ],
         covered=covered,
+        clicked_before=clicked_before,
     )
     guidance = Guidance(
         focus=state.get("current_focus"),
+        plan=state.get("plan"),
         exchanges=tuple(Exchange(e["asked"], e["replied"]) for e in state.get("user_said", [])),
     )
     browser, browsers, apps, email, moves = _environment(case)

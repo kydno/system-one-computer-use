@@ -16,7 +16,7 @@ accessibility ─► focused field (role, label, placeholder, value, frame)
 AppleScript   ─► frontmost app and pid, active tab URL
 clock         ─► local date and time
 dates.py      ─► "dated 2026-10-13 (in 27 days)" on any block containing a date,
-                 "near a line dated ..." on its neighbours, none from the menu bar's clock
+                 "near a line dated ..." on its neighbours, none from the menu bar's clock or a tab's title
 layout        ─► "beside" (the row's other labels) on any label that appears more than once
 runner.py     ─► the actions already tried on this same screen, each of which led back here
                      │
@@ -115,6 +115,9 @@ Frames lie, so the walk prunes hard:
 - skip any node under 4 pt wide or tall (Chromium clamps scrolled-out web nodes to slivers)
 - skip `AXMenu` subtrees, which are thousands of zero-sized items behind a closed menu
 - skip nameless `AXGroup` layout boxes, even pressable ones
+- keep a labelled control once when the app hands it over again with the same role, label and
+  frame; a nameless container is never taken for a copy, since Brave and Chrome hold each page
+  in a nameless group of the page's own frame, and the page's first container matches it
 - stop at 4000 nodes or 0.6 s and say so
 
 Walks measured here: Finder 152 controls in 0.08 s, Chrome 172 in 0.59 s. The assistive
@@ -171,7 +174,7 @@ on the app, and the node and time caps bind first on a big tree: Notes and Chrom
 | `type_email` | fills in `$CLICKER_EMAIL` the same way; refused unless a text field is focused |
 | `press_shortcut` | (offered only to a run whose goal needs the moves beyond clicking and typing; see below) press the shortcut the `shortcut` answer names, from the catalog `SHORTCUTS` in `config.py` (copy, cut, paste, select all, undo, redo, save, save as, find, new tab, reopen the closed tab, close tab, next and previous tab, address bar, bookmark, new window, open a file, print, reload, zoom in and out, bold, italic, underline, and the plain navigation keys: Tab and Shift-Tab between fields or cells, the four arrows, Page Up and Down; nothing that quits, logs out, or types), each written for a Mac and turned by the adapter into the keys of its platform (Command is Control on Windows and in the OSWorld VM). The `shortcut` question is a request of its own, sent only once `kind` is `press_shortcut`, and lists the catalog plus `none`; `none` is refused in the history line. The follow-up is sent the goal, the guidance, the frontmost app, the focused field (with its `selected_text` when the element says what is selected) and the last eight history lines, so a goal that takes select all, then copy, then paste is asked what is still to press. Unlike an app, a wrong shortcut is not always undone (cut, close tab), so a split on the shortcut answer lowers the step's confidence as a split on an item does, and a read-only goal's lower floor does not apply to it: a shortcut needs `min_confidence` whatever the goal. Code refuses, with the reason in the history line, a browser shortcut (new tab, reopen the closed tab, close tab, next and previous tab, address bar, bookmark, reload) when the frontmost app is not a browser (`BROWSER_APPS`, or the configured one), since the same keys close a document or reply to a mail elsewhere, and paste or cut when the focused field is a secure field or its label or placeholder names a password, code or card. What the keys did shows on the next capture; a copy changes nothing on screen, and the idle count bounds a run that only copies |
 | `press_enter`, `press_escape` | keyboard |
-| `go_back` | Cmd-[, the browser's Back, when the last click led somewhere unhelpful |
+| `go_back` | Cmd-[, the browser's Back, when the last click led somewhere unhelpful; read "went back (nothing changed)" when two looks 0.4 s apart show the screen as it was, as Back leaves an in-page popover open |
 | `scroll_down`, `scroll_up` | 10 lines, after parking the cursor over the item the `item` answer names, since a wheel scrolls whatever is under it: on Google Maps the window's center is the map, which zoomed out while the results list beside it stayed put. With no item, or one in the menu bar or outside the frontmost window, the cursor goes to the window's center. 0.4 s later the screen around the cursor is compared with the capture, and a scroll that changed nothing there says so in the history (`scrolled down over 'X' (nothing there moved)`) |
 | `wait` | screen still loading: 3 s and no settle after it, so three waits cover a slow page |
 | `done`, `none` | stop |
@@ -199,6 +202,22 @@ above. The setting exists for a benchmark that must run the same tasks with the 
 the kind question, without the gate's one-call guess deciding for it; a value other than these three
 stops the run rather than quietly asking. `run.json` says who settled it, `moves_by`: `gate` or
 `CLICKER_MOVES`.
+
+### A plan for a goal that opens several things
+
+The classifier picks one action at a time and remembers nothing, so a goal that means opening several
+things in turn and putting together what they hold ("which of my conversations is the closest") names no
+next move: on one such goal it scrolled a conversation list for sixteen steps and opened none. A third
+question at the start of a run asks the decision model, of the goal alone, whether it is such a goal
+(`decide.needs_plan`, at 0.5 or more, not yet calibrated on a probe). When it is, and there is a writer,
+one writer call writes a plan from the goal and the earlier tasks: at most six short numbered steps, each
+a move the classifier has, such as "Open the first conversation in the list", with repeats said in words.
+Every request then carries it as `plan`, and the kind question says to take the step the previous actions
+show comes next. Unlike a focus, a plan is never spent. The reading and comparing stays with the answer
+model, which reads the screens the run passed through. A run whose gate is closed, whose writer declines,
+or whose writer fails sends every request as before. `CLICKER_PLAN=on` or `off` settles it without asking,
+as `CLICKER_MOVES` does; `run.json` and `handoff.json` record `plan`, and `run.json` `plan_by`. Whether
+the classifier follows a plan is not measured yet.
 
 A selection leaves nothing on the screen the request reads, so a run offered the moves is told what is
 selected: the focused field's `selected_text` (the accessibility value of the selection, up to 200
@@ -263,7 +282,7 @@ the user said, once there are any:
   catalog, a right click, a double click, a triple click on an item, or a drag of one item onto another, and only when the run was offered them (typing replaces what a field holds), and a website only by its https address. It
   never asks for a credential, and when the run ends short of the goal it says what the agent
   could not do. When an action ran after the last capture, the screen is captured again first.
-  This one call uses `CLICKER_ANSWER_MODEL`, a stronger reader than the per-step writer.
+  It is the same model as the writer's other calls (`CLICKER_WRITER_MODEL`), at its own effort.
 
 Passwords are never typed. Rely on the browser's password manager or an SSO button
 the OCR can read.

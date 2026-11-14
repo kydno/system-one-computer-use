@@ -52,6 +52,9 @@ enum K {
     enum RunStrip {
         static let fontSize: CGFloat = 12.5
         static let textOpacity: Double = 0.80
+        static let stopSymbol = "stop.circle"
+        /// The strip's right end that takes clicks, for its Stop button.
+        static let stopHitWidth: CGFloat = 40
     }
 
     // MARK: - The run box, under the input bar
@@ -110,12 +113,51 @@ enum K {
         static let segmentIdleTextOpacity: Double = 0.75
         static let segmentFontSize: CGFloat = 12
         static let segmentVerticalPadding: CGFloat = 4
+
+        /// The permissions radio group, on the segment picker's track.
+        static let radioGap: CGFloat = 7
+        static let radioPaddingH: CGFloat = 8
+        static let radioPaddingV: CGFloat = 5
+    }
+
+    // MARK: - The Ask first card, in place of the run's question
+
+    enum PermissionCard {
+        static let innerGap: CGFloat = 7
+        static let glyphGap: CGFloat = 9
+        static let glyphSize: CGFloat = 26
+        static let glyphRadius: CGFloat = 7
+        static let glyphFontSize: CGFloat = 12
+        static let glyphFillOpacity: Double = 0.10
+        static let cardPaddingH: CGFloat = 10
+        static let cardPaddingV: CGFloat = 9
+        static let cardRadius: CGFloat = 9
+        static let cardFillOpacity: Double = 0.06
+        static let quoteFontSize: CGFloat = 12.5
+        static let quotePaddingH: CGFloat = 9
+        static let quotePaddingV: CGFloat = 7
+        static let quoteRadius: CGFloat = 7
+        static let quoteFillOpacity: Double = 0.06
+        static let buttonGap: CGFloat = 8
+        static let buttonFontSize: CGFloat = 12
+        static let buttonPaddingV: CGFloat = 6
+        static let buttonRadius: CGFloat = 7
+        static let primaryOpacity: Double = 0.85
+        static let primaryHoverOpacity: Double = 0.95
+        static let secondaryOpacity: Double = 0.06
+        static let secondaryHoverOpacity: Double = 0.10
+    }
+
+    // MARK: - The abort key, in settings
+
+    enum AbortKey {
+        static let defaultsKey = "abortKey"
     }
 
     // MARK: - The reviewer model search, in settings
 
     enum Reviewer {
-        /// `config.DEFAULT_OPENROUTER_ANSWER_MODEL`, what runs while `.env` names none.
+        /// `config.DEFAULT_OPENROUTER_WRITER_MODEL`, what runs while `.env` names none.
         static let defaultModel = "openai/gpt-6.1-terra"
         static let modelsURL = URL(string: "https://openrouter.ai/api/v1/models")!
         static let searchPlaceholder = "Search OpenRouter models"
@@ -162,7 +204,7 @@ enum K {
         /// Where `clicker-eval` keeps what its batches paid for, in the checkout: one line per request.
         /// The batch has no run folder, so this is the only place that spend is written down.
         static let evalLedger = ".private/evals/ledger.jsonl"
-        /// The eval spend's one slice in the pie.
+        /// The eval spend's one row in the list.
         static let evalsLabel = "clicker-eval"
         /// OpenRouter's own count of what the decision key has spent in all, which no file here adds up:
         /// runs from before costs were saved, benchmarks, anything else the key was used for.
@@ -185,7 +227,7 @@ enum K {
         static let decisionHue: Double = 0.58
         static let reviewerHue: Double = 0.91
         static let writerHue: Double = 0.25
-        /// Orange for the evals, a fourth hue between the green and the blue's far side.
+        /// Orange for the evals' dot in the list, a fourth hue between the green and the blue's far side.
         static let evalsHue: Double = 0.08
         /// Each tone of a role, its biggest model first: (saturation, brightness).
         static let tones: [(Double, Double)] = [(0.72, 0.95), (0.85, 0.72), (0.95, 0.50)]

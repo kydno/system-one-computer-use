@@ -118,6 +118,7 @@ class Page:
     covered_by: str | None = None  # an overlay eating every mouse click: the text of what is really hit
     popup: str | None = None  # a window in front of the page, by name; the row reading "Close" is its close button
     under_popup: tuple[str, ...] = ()  # the page's items under that window, which eats a mouse click on them
+    repaints: bool = True  # False: the page shows no band for the actions taken, so one it ignores leaves its pixels as they were
     on: dict[str, str | Callable[[World], str | None]] = dataclasses.field(default_factory=dict)
 
 
@@ -231,12 +232,14 @@ class World:
 
     def drawn(self) -> Image.Image:
         """The display as an image: one band whose shade moves with every action the world takes, so
-        a press it took shows on the next screenshot, as a page repaints (see `actions.press_showed`).
+        a press it took shows on the next screenshot, as a page repaints (see `actions.press_showed`); a page
+        that does not repaint shows no band, so an action it ignores changes no pixel (see `actions._go_back`).
         Each row is a box shaded by its text, so the rows look the same until the rows change, as a
         list scrolled past its end does (see `actions.scroll_showed`)."""
         image = Image.new("RGB", CAPTURE)
-        shade = len(self.log) * 40 % 256
-        image.paste((shade, shade, shade), (0, CAPTURE[1] // 2, CAPTURE[0], CAPTURE[1] // 2 + 200))
+        if self.page.repaints:
+            shade = len(self.log) * 40 % 256
+            image.paste((shade, shade, shade), (0, CAPTURE[1] // 2, CAPTURE[0], CAPTURE[1] // 2 + 200))
         for cell in self.cells():
             tone = 40 + zlib.crc32(cell.text.encode()) % 200
             image.paste((tone, tone, tone), tuple(round(v) for v in cell.box))
@@ -444,6 +447,9 @@ def drive(
     read_only: bool = False,
     moves: bool = False,
     shortcuts: Callable[[dict], str] | None = None,
+    plan: bool = False,
+    permissions: str = "full",
+    changes: Callable[[dict], float] | None = None,
 ) -> RunState:
     """Run the real loop against the world until it stops itself. `world.fake` holds the classifier.
 
@@ -452,10 +458,10 @@ def drive(
     With `events`, the run reports there, as `clicker --events` does, and the replies come from it.
     """
     world.install(monkeypatch)
-    fake = FakeTypeSafe(policy, noul, read_only, moves, shortcuts)
+    fake = FakeTypeSafe(policy, noul, read_only, moves, shortcuts, plan, changes)
     world.fake = fake
     monkeypatch.setattr(runner, "DecisionClient", lambda: fake)
-    cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0)
+    cfg = RunConfig(goal=goal, out=tmp_path / "run", act=act, steps=steps, delay=0, permissions=permissions)
     if handoffs is not None:
         cfg.handoffs = handoffs
     client = writer or FakeWriter()

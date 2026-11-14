@@ -26,7 +26,13 @@ enum SystemOneApp {
         // Window → model.
         appDelegate.onPanelOpen = { model.panelDidOpen() }
         appDelegate.onPanelClose = { model.panelWillClose() }
-        appDelegate.menuForClick = { model.isRunning ? runMenu(model) : nil }
+        // A click while the run has the screen locks the panel, which shows the
+        // run's status strip, with its Stop, in place of the panel.
+        appDelegate.takeClick = {
+            guard model.isRunning else { return false }
+            model.isPinned = true
+            return true
+        }
         appDelegate.contextMenu = { appMenu(model) }
         // Quitting mid-run stops the run, as Ctrl-C would, rather than orphaning it.
         appDelegate.onTerminate = { model.stop() }
@@ -56,6 +62,20 @@ enum SystemOneApp {
             }
             .store(in: &cancellables)
 
+        // The abort key stops the run from any app while one is live.
+        let abortHotKey = AbortHotKey()
+        model.$phase
+            .map { $0 != .idle && $0 != .finished }
+            .removeDuplicates()
+            .sink { live in
+                if live {
+                    abortHotKey.register(AbortKey.current) { model.stop() }
+                } else {
+                    abortHotKey.unregister()
+                }
+            }
+            .store(in: &cancellables)
+
         // The status item shows that a run has the screen, and its step.
         model.$phase
             .combineLatest(model.$step)
@@ -67,28 +87,9 @@ enum SystemOneApp {
         let application = NSApplication.shared
         application.delegate = appDelegate
         // Never returns, so everything above lives as long as the process.
-        withExtendedLifetime((appDelegate, model, cancellables)) {
+        withExtendedLifetime((appDelegate, model, cancellables, abortHotKey)) {
             application.run()
         }
-    }
-
-    /// A left click while the run has the screen: where it is, and a way to stop it.
-    @MainActor
-    private static func runMenu(_ model: RunModel) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        if let goal = model.goal {
-            let item = menu.addItem(withTitle: goal, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-        }
-        let progress = menu.addItem(withTitle: model.progressLine, action: nil, keyEquivalent: "")
-        progress.isEnabled = false
-        menu.addItem(.separator())
-        menu.addItem(ClosureMenuItem("Stop") { model.stop() })
-        if model.runFolder != nil {
-            menu.addItem(ClosureMenuItem("Open Run Folder") { model.openRunFolder() })
-        }
-        return menu
     }
 
     /// A right click: the lock, the last run's folder, settings, and Quit.

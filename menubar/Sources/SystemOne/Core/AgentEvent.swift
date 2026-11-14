@@ -12,8 +12,22 @@ enum AgentEvent: Equatable, Sendable {
     case would(String)
     case focus(text: String, focus: String)
     case question(String)
+    /// Under ask-first permissions, the action the next question asks about.
+    case permission(PermissionRequest)
     case answer(text: String, achieved: Bool)
     case end(RunEnd)
+
+    /// What the panel's card shows of an action held for the user's OK.
+    struct PermissionRequest: Equatable, Sendable {
+        /// type, click, key, drag or shortcut: what the card's icon is drawn from.
+        var kind: String
+        /// "Type into Message", "Click 'Add to Bag'".
+        var title: String
+        /// The words that would be typed; nil for any other action.
+        var text: String?
+        /// The app, and the page without its query.
+        var place: String?
+    }
 
     /// The parts of `run.json` the panel shows.
     struct RunEnd: Equatable, Sendable {
@@ -62,6 +76,12 @@ enum AgentEvent: Equatable, Sendable {
             return .focus(text: text ?? "", focus: focus)
         case "question":
             return text.map { .question($0) }
+        case "permission":
+            guard let title = o["title"] as? String else { return nil }
+            let words = (o["text"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            return .permission(PermissionRequest(
+                kind: o["kind"] as? String ?? "click", title: title, text: words, place: o["where"] as? String
+            ))
         case "answer":
             guard let text else { return nil }
             return .answer(text: text, achieved: o["achieved"] as? Bool ?? false)

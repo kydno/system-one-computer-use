@@ -82,6 +82,7 @@ enum EnvFile {
 struct EnvSetting: Identifiable {
     let key: String
     let title: String
+    /// Shown under the row; empty shows none.
     let caption: String
     /// Keys are masked as you type and shown only by their last characters.
     let isSecret: Bool
@@ -96,14 +97,8 @@ struct EnvSetting: Identifiable {
         EnvSetting(
             key: "OPENROUTER_API_KEY",
             title: "OpenRouter",
-            caption: "Runs all inference",
+            caption: "",
             isSecret: true
-        ),
-        EnvSetting(
-            key: "CLICKER_EMAIL",
-            title: "Email",
-            caption: "Lets it type the address into fields",
-            isSecret: false
         ),
     ]
 }

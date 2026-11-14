@@ -1,8 +1,8 @@
 import Foundation
 
 /// OpenRouter's public model catalog, which the settings box searches for the
-/// reviewer: the answer model `clicker` hands the screen to whenever the
-/// classifier stops (`CLICKER_ANSWER_MODEL`). Neither request needs a key.
+/// run's one LLM: it writes text and reads the screen whenever the classifier
+/// stops (`CLICKER_WRITER_MODEL`). Neither request needs a key.
 enum OpenRouter {
 
     struct Model: Identifiable, Equatable, Sendable {
@@ -150,7 +150,11 @@ struct ReviewerRouting: Identifiable, Equatable {
     let id: String
     let title: String
 
-    static let modelKey = "CLICKER_ANSWER_MODEL"
+    /// The run's one LLM, which writes and reads the screen.
+    static let modelKey = "CLICKER_WRITER_MODEL"
+    /// What named the reading model while it was a second model. Still read when
+    /// `modelKey` is unset, and cleared whenever the LLM is chosen.
+    static let legacyModelKey = "CLICKER_ANSWER_MODEL"
     static let key = "CLICKER_ANSWER_SORT"
 
     static let auto = ReviewerRouting(id: "", title: "Auto")
@@ -163,8 +167,9 @@ struct ReviewerRouting: Identifiable, Equatable {
     }
 }
 
-/// How hard the reviewer thinks (`CLICKER_ANSWER_REASONING`). Unset leaves it to
-/// the model, except on the default reviewer, which `clicker` asks for low.
+/// How hard the LLM thinks (`CLICKER_ANSWER_REASONING`, written to
+/// `CLICKER_WRITER_REASONING` too). Unset leaves it to the model, except on the
+/// default model, which `clicker` asks for low.
 enum ReviewerEffort: String, CaseIterable {
     case unset = ""
     case low
@@ -172,6 +177,7 @@ enum ReviewerEffort: String, CaseIterable {
     case high
 
     static let key = "CLICKER_ANSWER_REASONING"
+    static let writerKey = "CLICKER_WRITER_REASONING"
 
     static func named(_ value: String?) -> ReviewerEffort {
         ReviewerEffort(rawValue: (value ?? "").lowercased()) ?? .unset

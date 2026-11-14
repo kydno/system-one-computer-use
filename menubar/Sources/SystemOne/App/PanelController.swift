@@ -40,6 +40,8 @@ final class PanelController<Content: View> {
     private var escapeMonitor: Any?
     private var resignKeyObserver: NSObjectProtocol?
     private var resignActiveObserver: NSObjectProtocol?
+    private var stopGlobalMonitor: Any?
+    private var stopLocalMonitor: Any?
 
     private var pendingOrderOut: DispatchWorkItem?
     private var ignoreDismissUntil: Date?
@@ -110,9 +112,46 @@ final class PanelController<Content: View> {
         let panel = ensurePanel()
         guard panel.isPassive != passive else { return }
         panel.isPassive = passive
+        passive ? installStopTracking() : removeStopTracking()
         guard passive, panel.isKeyWindow else { return }
         panel.orderOut(nil)
         panel.orderFrontRegardless()
+    }
+
+    /// The strip lets clicks through everywhere but its Stop button, at its
+    /// right end. A window takes clicks or not as a whole, so the pointer is
+    /// followed and the strip takes them only while it is over the button. The
+    /// run moves the pointer before each click, so its clicks fall through.
+    private func installStopTracking() {
+        removeStopTracking()
+        let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        stopGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: events) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateStopHit() }
+        }
+        stopLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
+            MainActor.assumeIsolated { self?.updateStopHit() }
+            return event
+        }
+        panel?.acceptsMouseMovedEvents = true
+        updateStopHit()
+    }
+
+    private func removeStopTracking() {
+        if let stopGlobalMonitor { NSEvent.removeMonitor(stopGlobalMonitor) }
+        if let stopLocalMonitor { NSEvent.removeMonitor(stopLocalMonitor) }
+        stopGlobalMonitor = nil
+        stopLocalMonitor = nil
+        panel?.takesClicks = false
+    }
+
+    private func updateStopHit() {
+        guard let panel, panel.isPassive else { return }
+        let pad = K.Panel.windowPadding
+        let content = panel.frame.insetBy(dx: pad, dy: pad)
+        let width = K.RunStrip.stopHitWidth
+        let stop = NSRect(x: content.maxX - width, y: content.minY, width: width, height: content.height)
+        let over = panel.isVisible && stop.contains(NSEvent.mouseLocation)
+        if panel.takesClicks != over { panel.takesClicks = over }
     }
 
     /// An open panel takes key again, as on open: the run asks, or has ended,
@@ -149,7 +188,7 @@ final class PanelController<Content: View> {
         let size = NSSize(width: K.Panel.width + pad * 2, height: contentHeight + pad * 2)
         let panel = NonActivatingPanel(contentRect: NSRect(origin: .zero, size: size))
 
-        let hosting = NSHostingView(rootView: makeContent())
+        let hosting = FirstClickHostingView(rootView: makeContent())
         hosting.autoresizingMask = [.width, .height]
         hosting.frame = NSRect(origin: .zero, size: size)
         panel.contentView = hosting
@@ -268,4 +307,10 @@ final class PanelController<Content: View> {
         if let ignoreDismissUntil, Date() < ignoreDismissUntil { return }
         close()
     }
+}
+
+/// The strip is never key, so its Stop button must act on the first click
+/// rather than spend it bringing the window forward.
+private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

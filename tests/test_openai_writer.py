@@ -224,24 +224,32 @@ def test_an_openrouter_key_alone_sends_the_writer_to_openrouter(openrouter_env, 
     assert request["path"] == "/api/v1/chat/completions"
     assert request["headers"]["authorization"] == "Bearer sk-or-test"
     assert not any("real" in v for v in request["headers"].values())
-    assert request["body"]["model"] == "inception/mercury-3"
-    assert request["body"]["reasoning_effort"] == "medium"
-    assert request["body"]["max_tokens"] == 200 + 2048  # the thinking gets room of its own
+    assert request["body"]["model"] == "openai/gpt-6.1-terra"
+    assert request["body"]["reasoning_effort"] == "low"
+    assert request["body"]["max_tokens"] == 200 + 1024  # the thinking gets room of its own
     assert "provider" not in request["body"]  # OpenRouter routes it unless CLICKER_WRITER_PROVIDER says
     assert config.answer_model() == "openai/gpt-6.1-terra"
     assert config.answer_reasoning() == "low"
 
 
-def test_any_openrouter_chat_model_can_write_and_answer(openrouter_env, endpoint):
+def test_one_openrouter_model_writes_and_answers(openrouter_env, endpoint):
     openrouter_env.setenv("CLICKER_WRITER_MODEL", "typesafe/jev-router")
-    openrouter_env.setenv("CLICKER_ANSWER_MODEL", "openai/gpt-6-luna")
 
     compose_url(writer(), "open example", [])
 
     assert endpoint.seen[0]["body"]["model"] == "typesafe/jev-router"
     assert "reasoning_effort" not in endpoint.seen[0]["body"]  # the effort is for the default model only
     assert endpoint.seen[0]["body"]["max_tokens"] == 200
-    assert config.answer_model() == "openai/gpt-6-luna"
+    assert config.answer_model() == "typesafe/jev-router"
+
+
+def test_the_writer_model_wins_over_an_older_answer_model(openrouter_env):
+    """Two models were made one: CLICKER_WRITER_MODEL names it, and an older `.env`'s CLICKER_ANSWER_MODEL
+    names it only when nothing else does."""
+    openrouter_env.setenv("CLICKER_ANSWER_MODEL", "openai/gpt-6-luna")
+    assert config.writer_model() == config.answer_model() == "openai/gpt-6-luna"
+    openrouter_env.setenv("CLICKER_WRITER_MODEL", "typesafe/jev-router")
+    assert config.writer_model() == config.answer_model() == "typesafe/jev-router"
 
 
 def test_the_writer_can_be_pinned_to_another_openrouter_provider(openrouter_env, endpoint):
