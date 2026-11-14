@@ -57,6 +57,13 @@ DEFAULT_OPENROUTER_REASONING = "low"
 # How OpenRouter may order the answer model's providers: cheapest first, or fastest first.
 ANSWER_SORTS = ("price", "throughput")
 
+# The model that takes the wheel from a run that wrote `handoff.json` (`clicker-takeover`), on
+# OpenRouter's Responses API, with the computer's actions as plain function tools. Any vision model
+# there that calls tools can stand in for it through CLICKER_TAKEOVER_MODEL.
+DEFAULT_TAKEOVER_MODEL = "openai/gpt-6-luna"
+DEFAULT_TAKEOVER_REASONING = "medium"  # for the default model only; a named model keeps its own
+DEFAULT_TAKEOVER_STEPS = 30  # requests to the takeover model, each one a turn of one or more actions
+
 # Sites the classifier can pick by name. Anything else goes through the writer.
 SITES: dict[str, str] = {
     "github": "https://github.com/",
@@ -311,6 +318,18 @@ def answer_sort() -> str | None:
     if raw and raw not in ANSWER_SORTS:
         raise ValueError(f"CLICKER_ANSWER_SORT must be one of {', '.join(ANSWER_SORTS)}, not {raw!r}")
     return raw or None
+
+
+def takeover_model() -> str:
+    return os.environ.get("CLICKER_TAKEOVER_MODEL", "").strip() or DEFAULT_TAKEOVER_MODEL
+
+
+def takeover_reasoning() -> str | None:
+    """The reasoning effort the takeover model is asked for; None leaves it to the model.
+
+    The default model reasons at medium unless CLICKER_TAKEOVER_REASONING says otherwise."""
+    default = DEFAULT_TAKEOVER_REASONING if takeover_model() == DEFAULT_TAKEOVER_MODEL else None
+    return os.environ.get("CLICKER_TAKEOVER_REASONING", "").strip() or default
 
 
 def _openrouter_default(model: str, default: str) -> bool:

@@ -2,7 +2,7 @@
 
 `windows.py` provides the same adapter over UI Automation, Win32 `SendInput`, and
 Windows.Media.Ocr, and `uv sync` installs its packages in place of the macOS ones. It is
-untested on Windows: CI runs only its pure rules, on macOS and Linux. Expect it to break, and
+untested on Windows: only its pure rules are tested, on macOS and Linux. Expect it to break, and
 please report what you see. Install the English OCR language once, from an elevated PowerShell:
 
 ```powershell
