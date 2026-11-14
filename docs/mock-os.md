@@ -29,7 +29,7 @@ takes its default seeds, and an app alone (`settings`) takes all of its template
 
 `check`, `run` and `open` start a Chromium on a throwaway profile. **On the maintainer's Mac that
 needs their yes for each command**, headless or headed, as any browser does ([AGENTS.md](../AGENTS.md)).
-In `scripts/sandbox`, in CI, or in a cloud session it does not.
+In `scripts/sandbox` or in a cloud session it does not.
 
 ## The desktop
 

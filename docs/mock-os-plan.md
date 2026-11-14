@@ -806,7 +806,7 @@ From `AGENTS.md` and `CONTRIBUTING.md`, as they apply here:
 1. **The two-line change to `perception.ocr_crop`**, or the adapter-only fallback?
 2. **Vendoring**: one UI library file and one font file, each with its license, in the repository?
 3. **A CI job that launches Chromium** to run `clicker-mock check` on every push? It asks no model,
-   and it runs on GitHub's machine, not the Mac.
+   and it runs on GitHub's machine, not the Mac. (Moot for now: the repository has no CI since #38.)
 4. **Which models a pass runs on.** `benchmarks/replay/config.json` fixes them for `clicker-eval`:
    Jev for decisions, and a free model for answers. A mock pass scores the writer and the
    hand-offs, so here the answer model is most of the bill and much of the result. For speed and

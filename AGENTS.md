@@ -60,7 +60,7 @@ each command.
 it starts itself. The rules above apply unchanged:
 
 - On this machine, `clicker-mock check`, `run` and `open` launch a browser, headless or headed, so
-  each needs a yes first. In `scripts/sandbox`, in CI, or in a cloud session they do not.
+  each needs a yes first. In `scripts/sandbox` or in a cloud session they do not.
 - `run` asks the real models for what its cache lacks, so it runs only inside an open batch, as
   `clicker-eval decisions` does. `check`, `run --cached-only`, `list`, `compare`, `show`, `replay`
   and `profile runs` ask no model.
